@@ -1,0 +1,1882 @@
+"""
+自动标注与清洗平台 - v3
+支持多用户登录、组织级项目共享、Label Studio 集成
+
+主要特性:
+1. 同一组织内的用户共享项目池
+2. Label Studio 链接按钮随时可见
+3. 详细的处理进度日志
+"""
+import streamlit as st
+import os
+import json
+import zipfile
+import shutil
+from pathlib import Path
+from PIL import Image, ImageDraw, ImageFont
+import pandas as pd
+from datetime import datetime
+import logging
+import sys
+import tempfile
+import uuid
+import subprocess
+from urllib.parse import quote
+from training_manager import TrainingManager
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler()],
+)
+logging.getLogger('streamlit').setLevel(logging.WARNING)
+logger = logging.getLogger(__name__)
+
+# 导入用户管理模块
+from user_auth import UserManager, LabelStudioUserManager
+from org_project_manager import OrganizationProjectManager
+from login_page import check_authentication, render_login_page, render_user_menu
+
+# 导入配置
+try:
+    from config import ALLOWED_IMAGE_EXTENSIONS
+except ImportError:
+    ALLOWED_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.webp'}
+
+# ==================== 配置 ====================
+# Label Studio 配置
+LABEL_STUDIO_URL = os.getenv('LABEL_STUDIO_URL', 'http://localhost:5001')
+# 登录代理服务配置
+LOGIN_PROXY_URL = os.getenv('LOGIN_PROXY_URL', 'http://localhost:5000')
+
+# ==================== 初始化 ====================
+# 初始化用户管理器（全局单例）
+if 'user_manager' not in st.session_state:
+    st.session_state.user_manager = UserManager()
+
+if 'ls_user_manager' not in st.session_state:
+    st.session_state.ls_user_manager = LabelStudioUserManager()
+
+user_manager = st.session_state.user_manager
+ls_user_manager = st.session_state.ls_user_manager
+
+# ==================== 认证检查 ====================
+username = check_authentication(user_manager)
+
+if not username:
+    # 未登录，显示登录页面
+    render_login_page(user_manager)
+    st.stop()
+
+# ==================== 已登录，显示主界面 ====================
+# 页面配置
+st.set_page_config(
+    page_title="自动标注与清洗平台",
+    page_icon="🎯",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# 获取用户信息
+user_info = user_manager.get_user(username)
+organization_name = user_info.get('organization_name', f"{username}_workspace") if user_info else f"{username}_workspace"
+
+# 初始化组织项目管理器（基于组织而非用户）
+if 'project_manager' not in st.session_state or st.session_state.get('pm_org') != organization_name:
+    st.session_state.project_manager = OrganizationProjectManager(organization_name)
+    st.session_state.pm_org = organization_name
+
+pm = st.session_state.project_manager
+
+# 初始化其他 session state
+if 'current_project' not in st.session_state:
+    st.session_state.current_project = None
+
+if 'page_size' not in st.session_state:
+    st.session_state.page_size = 50
+
+if 'current_page' not in st.session_state:
+    st.session_state.current_page = 0
+
+# ==================== 工具函数 ====================
+def generate_label_studio_login_url(user_info: dict, project_id: int = None) -> str:
+    """生成自动登录 Label Studio 的 URL"""
+    email = user_info.get('email', f"{user_info.get('username')}@auto-annotation.local")
+    password = f"AutoAnnotation_{user_info.get('username')}_2024!"
+    
+    if project_id:
+        next_path = f"/projects/{project_id}/"
+    else:
+        next_path = "/"
+    
+    login_url = (
+        f"{LOGIN_PROXY_URL}/direct-login"
+        f"?email={quote(email)}"
+        f"&password={quote(password)}"
+        f"&next={quote(next_path)}"
+    )
+    
+    return login_url
+
+
+def render_label_studio_button(user_info: dict, project_id: int = None, context: str = "default", show_title: bool = True):
+    """
+    渲染 Label Studio 访问按钮（简化版，可在任何地方显示）
+    
+    Args:
+        user_info: 用户信息
+        project_id: 项目 ID（可选，如果没有则跳转到首页）
+        context: 上下文标识
+        show_title: 是否显示标题
+    """
+    if show_title:
+        st.markdown("### 🎯 Label Studio")
+    
+    # 生成自动登录链接
+    auto_login_url = generate_label_studio_login_url(user_info, project_id)
+    
+    button_text = "🚀 打开项目" if project_id else "🚀 打开 Label Studio"
+    
+    st.markdown(f"""
+    <a href="{auto_login_url}" target="_blank" style="
+        display: inline-block;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 10px 20px;
+        border-radius: 6px;
+        text-decoration: none;
+        font-weight: bold;
+        font-size: 14px;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+    ">
+        {button_text}
+    </a>
+    """, unsafe_allow_html=True)
+    
+    if project_id:
+        st.caption(f"项目 ID: {project_id}")
+
+
+def render_label_studio_link_full(user_info: dict, project_id: int, project_url: str, context: str = "default"):
+    """渲染完整的 Label Studio 项目链接（带登录信息）"""
+    st.markdown("### 🎯 Label Studio 项目链接")
+    st.markdown(f"**项目ID:** `{project_id}`")
+    
+    auto_login_url = generate_label_studio_login_url(user_info, project_id)
+    
+    st.markdown(f"""
+    <a href="{auto_login_url}" target="_blank" style="
+        display: inline-block;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 12px 24px;
+        border-radius: 8px;
+        text-decoration: none;
+        font-weight: bold;
+        margin: 10px 0;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+    ">
+        🚀 打开项目（自动登录）
+    </a>
+    """, unsafe_allow_html=True)
+    
+    with st.expander("📋 登录信息（如自动登录失败）"):
+        email = user_info.get('email', f"{user_info.get('username')}@auto-annotation.local")
+        password = f"AutoAnnotation_{user_info.get('username')}_2024!"
+        org_name = user_info.get('organization_name', 'N/A')
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.text_input("邮箱", value=email, disabled=True, key=f"ls_email_{project_id}_{context}")
+        with col2:
+            st.text_input("密码", value=password, disabled=True, key=f"ls_pwd_{project_id}_{context}")
+        
+        st.info(f"🏢 工作区: **{org_name}**")
+        st.markdown(f"[📎 直接链接（需手动登录）]({project_url})")
+
+
+def ensure_label_studio_account(username: str, user_manager, ls_user_manager):
+    """确保用户有对应的 Label Studio 账号"""
+    user = user_manager.get_user(username)
+    if not user:
+        return None, None, None
+    
+    if (user.get('label_studio_user_id') and 
+        user.get('label_studio_token') and 
+        user.get('label_studio_org_id')):
+        return (
+            user['label_studio_user_id'], 
+            user['label_studio_token'],
+            user['label_studio_org_id']
+        )
+    
+    organization_name = user.get('organization_name', f"{username}_workspace")
+    email = user.get('email', f"{username}@auto-annotation.local")
+    password = f"AutoAnnotation_{username}_2024!"
+    
+    ls_user_id, ls_token, ls_org_id = ls_user_manager.get_or_create_user_with_token(
+        username=username,
+        email=email,
+        password=password,
+        organization_name=organization_name
+    )
+    
+    if ls_user_id and ls_token:
+        user_manager.update_user(username, {
+            'label_studio_user_id': ls_user_id,
+            'label_studio_token': ls_token,
+            'label_studio_org_id': ls_org_id,
+        })
+        logger.info(f"✅ 为用户 {username} 创建 Label Studio 账号成功")
+        return ls_user_id, ls_token, ls_org_id
+    
+    return None, None, None
+
+
+# ==================== 数据管理类 ====================
+class DataManager:
+    """数据管理器"""
+    
+    @staticmethod
+    def scan_images(directory):
+        dir_path = Path(directory)
+        if not dir_path.exists():
+            return []
+        
+        image_paths = []
+        for ext in ALLOWED_IMAGE_EXTENSIONS:
+            image_paths.extend(dir_path.glob(f'*{ext}'))
+            image_paths.extend(dir_path.glob(f'*{ext.upper()}'))
+        
+        return sorted([str(p) for p in image_paths])
+    
+    @staticmethod
+    def extract_zip(zip_path, extract_dir, check_duplicates=True):
+        extract_dir = Path(extract_dir).resolve()
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        
+        existing_files = set()
+        if check_duplicates:
+            try:
+                for item in list(extract_dir.iterdir()):
+                    if item.is_file():
+                        existing_files.add(item.name)
+            except (OSError, PermissionError):
+                existing_files = set()
+        
+        success_count = 0
+        skip_count = 0
+        errors = []
+        
+        try:
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                for file_info in zip_ref.filelist:
+                    if file_info.is_dir() or file_info.filename.startswith('.'):
+                        continue
+                    
+                    filename = Path(file_info.filename).name
+                    
+                    if check_duplicates and filename in existing_files:
+                        skip_count += 1
+                        continue
+                    
+                    try:
+                        content = zip_ref.read(file_info.filename)
+                        target_path = extract_dir / filename
+                        with open(target_path, 'wb') as f:
+                            f.write(content)
+                        success_count += 1
+                    except Exception as e:
+                        errors.append(f"{filename}: {str(e)}")
+        except Exception as e:
+            errors.append(f"解压失败: {str(e)}")
+        
+        return success_count, skip_count, errors
+    
+    @staticmethod
+    def get_unprocessed_images(all_images, processed_images):
+        processed_set = set(processed_images)
+        return [img for img in all_images if img not in processed_set]
+
+
+# ==================== 侧边栏 ====================
+with st.sidebar:
+    st.title("🎯 项目管理")
+    
+    # 用户菜单
+    render_user_menu(user_manager, username)
+    
+    st.divider()
+    
+    # 显示组织信息
+    st.markdown(f"🏢 **工作区:** {organization_name}")
+    
+    # Label Studio 快捷入口（始终显示）
+    st.divider()
+    if user_info:
+        # 确保用户有 Label Studio 账号
+        ensure_label_studio_account(username, user_manager, ls_user_manager)
+        
+        # 显示按钮
+        current_ls_project = None
+        if st.session_state.current_project:
+            ls_id, _ = pm.get_label_studio_project(st.session_state.current_project)
+            current_ls_project = ls_id
+        
+        render_label_studio_button(user_info, current_ls_project, context="sidebar", show_title=True)
+    
+    st.divider()
+    
+    # 项目列表
+    all_projects = pm.list_projects()
+    
+    if all_projects:
+        st.subheader(f"📋 组织项目 ({len(all_projects)})")
+        
+        project_names = [p['name'] for p in all_projects]
+        
+        current_idx = 0
+        if st.session_state.current_project in project_names:
+            current_idx = project_names.index(st.session_state.current_project)
+        
+        selected_project = st.selectbox(
+            "选择项目",
+            project_names,
+            index=current_idx,
+            key="project_selector"
+        )
+        
+        if selected_project != st.session_state.current_project:
+            if st.button("📂 切换到此项目", type="primary"):
+                st.session_state.current_project = selected_project
+                st.rerun()
+        
+        if st.session_state.current_project:
+            project_info = pm.get_project(st.session_state.current_project)
+            if project_info:
+                st.success(f"✅ 当前: {st.session_state.current_project}")
+                
+                created_by = project_info.get('created_by', 'N/A')
+                st.info(f"""
+**创建者:** {created_by}  
+**创建时间:** {project_info.get('created_at', 'N/A')[:10]}  
+**类别数:** {len(project_info.get('labels', {}))}  
+**已处理:** {len(project_info.get('processed_images', []))}张
+                """)
+                
+                with st.expander("⚠️ 删除项目"):
+                    st.warning("删除项目将清空配置")
+                    if st.button("🗑️ 确认删除"):
+                        if pm.delete_project(st.session_state.current_project, deleted_by=username):
+                            st.session_state.current_project = None
+                            st.success("✅ 已删除")
+                            st.rerun()
+    else:
+        st.info("暂无项目，请创建")
+    
+    st.divider()
+    
+    with st.expander("➕ 创建新项目"):
+        new_project_name = st.text_input("项目名称", key="new_proj_name")
+        
+        if st.button("✅ 创建"):
+            if new_project_name:
+                default_labels = {"object": "目标物体"}
+                success, msg = pm.create_project(new_project_name, default_labels, created_by=username)
+                if success:
+                    st.session_state.current_project = new_project_name
+                    st.success(f"✅ {msg}")
+                    st.rerun()
+                else:
+                    st.error(f"❌ {msg}")
+            else:
+                st.warning("请输入项目名称")
+
+# ==================== 主界面 ====================
+if not st.session_state.current_project:
+    st.title("🎯 自动标注与清洗平台")
+    
+    st.info(f"👋 欢迎，**{username}**！")
+    st.info(f"🏢 当前工作区：**{organization_name}**")
+    st.markdown("请在左侧选择或创建项目")
+    
+    # 即使没有选择项目，也显示 Label Studio 入口
+    if user_info:
+        st.divider()
+        st.subheader("🔗 快速访问")
+        render_label_studio_button(user_info, None, context="main_no_project", show_title=False)
+        st.caption("点击上方按钮访问 Label Studio 工作区")
+    
+    st.stop()
+
+# 获取当前项目信息
+current_project = st.session_state.current_project
+project_info = pm.get_project(current_project)
+
+if not project_info:
+    st.error(f"❌ 项目 '{current_project}' 不存在")
+    st.session_state.current_project = None
+    st.rerun()
+
+# 数据目录
+upload_dir = pm.get_upload_dir(current_project)
+processed_dir = pm.get_processed_dir(current_project)
+all_images = DataManager.scan_images(upload_dir)
+
+# 标签页
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "🏷️ 类别定义",
+    "📤 数据管理",
+    "🚀 批量处理",
+    "📊 结果查看",
+    "💾 导出结果",
+    "🤖 模型训练",
+])
+
+# ==================== Tab 1: 类别定义 ====================
+with tab1:
+    st.header(f"🏷️ {current_project} - 类别定义")
+    
+    # 显示 Label Studio 入口
+    ls_id, ls_url = pm.get_label_studio_project(current_project)
+    if ls_id and user_info:
+        col1, col2 = st.columns([3, 1])
+        with col2:
+            render_label_studio_button(user_info, ls_id, context="tab1", show_title=False)
+    
+    st.divider()
+    
+    current_labels = project_info.get('labels', {})
+    
+    num_labels = st.number_input(
+        "类别数量", 
+        min_value=1, 
+        max_value=20, 
+        value=max(len(current_labels), 1)
+    )
+    
+    new_labels = {}
+    
+    for i in range(num_labels):
+        st.markdown(f"### 类别 {i+1}")
+        col1, col2 = st.columns([1, 2])
+        
+        label_names = list(current_labels.keys())
+        default_name = label_names[i] if i < len(label_names) else f"class_{i+1}"
+        default_def = current_labels.get(default_name, "")
+        
+        with col1:
+            label_name = st.text_input("类别名称", value=default_name, key=f"ln_{i}")
+        with col2:
+            label_def = st.text_area("类别定义", value=default_def, key=f"ld_{i}", height=100)
+        
+        if label_name:
+            new_labels[label_name] = label_def
+    
+    if st.button("💾 保存类别定义", type="primary"):
+        if pm.update_project_labels(current_project, new_labels, updated_by=username):
+            project_info['labels'] = new_labels
+            st.success(f"✅ 已保存！(by {username})")
+
+
+
+# ==================== Tab 2: 数据管理 ====================
+with tab2:
+    st.header(f"📤 {current_project} - 数据管理")
+    
+    # 显示 Label Studio 入口
+    ls_id, ls_url = pm.get_label_studio_project(current_project)
+    if ls_id and user_info:
+        col1, col2 = st.columns([3, 1])
+        with col2:
+            render_label_studio_button(user_info, ls_id, context="tab2", show_title=False)
+    
+    st.divider()
+    
+    # 初始化 session state（放在最前面，避免重复初始化）
+    if 'video_extract_result' not in st.session_state:
+        st.session_state.video_extract_result = None
+    if 'video_extracting' not in st.session_state:
+        st.session_state.video_extracting = False
+    
+    tab2_images = DataManager.scan_images(upload_dir)
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("总图片数", len(tab2_images))
+    with col2:
+        processed_count = len(pm.get_processed_images(current_project))
+        st.metric("已处理", processed_count)
+    with col3:
+        st.metric("未处理", len(tab2_images) - processed_count)
+    
+    st.divider()
+    
+    # ==================== 上传方式选择 ====================
+    st.subheader("📥 上传新数据")
+    
+    upload_type = st.radio(
+        "选择上传方式",
+        ["🖼️ 图片压缩包 (ZIP)", "🎬 视频文件"],
+        horizontal=True,
+        key=f"upload_type_{current_project}"
+    )
+    
+    if upload_type == "🖼️ 图片压缩包 (ZIP)":
+        # ==================== 原有的 ZIP 上传功能 ====================
+        uploaded_file = st.file_uploader(
+            "选择ZIP压缩包", 
+            type=['zip'], 
+            key=f"upload_zip_{current_project}"
+        )
+        check_dup = st.checkbox("检查重复文件", value=True)
+        
+        if uploaded_file and st.button("🚀 开始上传", type="primary"):
+            temp_zip = upload_dir.parent / "temp_upload.zip"
+            with open(temp_zip, 'wb') as f:
+                f.write(uploaded_file.getvalue())
+            
+            with st.spinner("正在解压..."):
+                success, skip, errors = DataManager.extract_zip(temp_zip, upload_dir, check_dup)
+            
+            temp_zip.unlink()
+            
+            if success > 0:
+                st.success(f"✅ 成功: {success}张")
+            if skip > 0:
+                st.info(f"⏭️ 跳过: {skip}张")
+            if errors:
+                st.error(f"❌ 错误: {len(errors)}个")
+    
+    else:
+        # ==================== 新增：视频上传和帧提取功能 ====================
+        st.info("📹 支持上传视频文件，系统将按照指定帧率提取图片帧。支持多次上传，不会覆盖已有图片。")
+        
+        uploaded_video = st.file_uploader(
+            "选择视频文件",
+            type=['mp4', 'avi', 'mov', 'mkv', 'wmv', 'flv', 'webm'],
+            key=f"upload_video_{current_project}"
+        )
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            fps_option = st.selectbox(
+                "提取帧率",
+                options=[0.5, 1, 2, 5, 10],
+                index=1,
+                format_func=lambda x: f"每秒 {x} 帧" if x >= 1 else f"每 {int(1/x)} 秒 1 帧",
+                help="选择每秒提取多少帧图片，数值越大提取的图片越多"
+            )
+        with col2:
+            output_format = st.selectbox(
+                "输出格式",
+                options=['jpg', 'png'],
+                index=0,
+                help="选择提取图片的格式"
+            )
+        
+        # 高级选项
+        with st.expander("⚙️ 高级选项"):
+            col1, col2 = st.columns(2)
+            with col1:
+                max_frames = st.number_input(
+                    "最大帧数限制",
+                    min_value=0,
+                    max_value=10000,
+                    value=0,
+                    help="设置为 0 表示不限制"
+                )
+            with col2:
+                image_quality = st.slider(
+                    "图片质量 (仅JPG)",
+                    min_value=50,
+                    max_value=100,
+                    value=95,
+                    help="JPG 格式的压缩质量"
+                )
+            
+            col3, col4 = st.columns(2)
+            with col3:
+                start_time = st.number_input(
+                    "开始时间 (秒)",
+                    min_value=0.0,
+                    value=0.0,
+                    step=0.5,
+                    help="从视频的第几秒开始提取"
+                )
+            with col4:
+                end_time = st.number_input(
+                    "结束时间 (秒)",
+                    min_value=0.0,
+                    value=0.0,
+                    step=0.5,
+                    help="设置为 0 表示提取到视频结尾"
+                )
+            
+            # 文件名前缀选项
+            st.markdown("**文件命名方式**")
+            naming_mode = st.radio(
+                "选择命名方式",
+                ["🔄 自动（视频名+时间戳）", "✏️ 自定义前缀"],
+                horizontal=True,
+                help="自动模式会生成唯一前缀，避免覆盖已有文件"
+            )
+            
+            if naming_mode == "✏️ 自定义前缀":
+                custom_prefix = st.text_input(
+                    "自定义前缀",
+                    value="frame",
+                    help="注意：如果前缀相同，可能会覆盖已有文件"
+                )
+                st.warning("⚠️ 使用自定义前缀时，请确保前缀唯一，否则可能覆盖已有文件")
+            else:
+                custom_prefix = None
+        
+        # 显示上次提取结果（如果有）
+        if st.session_state.video_extract_result:
+            result = st.session_state.video_extract_result
+            st.success(f"✅ 上次提取完成: 成功提取 {result['count']} 帧图片")
+            st.caption(f"文件前缀: `{result.get('prefix', 'N/A')}`，来源: {result['video_name']}")
+            if st.button("🔄 清除提示", key="clear_result"):
+                st.session_state.video_extract_result = None
+                st.rerun()
+        
+        if uploaded_video and not st.session_state.video_extracting:
+            # 显示视频信息
+            st.markdown("---")
+            st.markdown("**📊 视频信息**")
+            
+            try:
+                import cv2
+                import re
+                
+                # 使用唯一的临时文件名
+                video_hash = hash(uploaded_video.name + str(uploaded_video.size))
+                temp_video_path = upload_dir.parent / f"temp_video_{video_hash}.tmp"
+                
+                # 只在文件不存在时写入
+                if not temp_video_path.exists():
+                    with open(temp_video_path, 'wb') as f:
+                        f.write(uploaded_video.getvalue())
+                
+                cap = cv2.VideoCapture(str(temp_video_path))
+                
+                if cap.isOpened():
+                    video_fps = cap.get(cv2.CAP_PROP_FPS)
+                    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                    duration = total_frames / video_fps if video_fps > 0 else 0
+                    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    cap.release()
+                    
+                    # 计算预计提取帧数
+                    effective_start = start_time
+                    effective_end = end_time if end_time > 0 else duration
+                    effective_duration = max(0, effective_end - effective_start)
+                    
+                    time_interval = 1.0 / fps_option
+                    estimated_frames = int(effective_duration / time_interval) + 1
+                    
+                    if max_frames > 0:
+                        estimated_frames = min(estimated_frames, max_frames)
+                    
+                    # 生成文件前缀预览
+                    if custom_prefix:
+                        preview_prefix = custom_prefix
+                    else:
+                        # 清理视频文件名，只保留字母数字和下划线
+                        video_name_clean = Path(uploaded_video.name).stem
+                        video_name_clean = re.sub(r'[^\w\-]', '_', video_name_clean)
+                        video_name_clean = video_name_clean[:20]  # 限制长度
+                        timestamp = datetime.now().strftime("%m%d_%H%M%S")
+                        preview_prefix = f"{video_name_clean}_{timestamp}"
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("时长", f"{duration:.1f} 秒")
+                    with col2:
+                        st.metric("原始帧率", f"{video_fps:.1f} FPS")
+                    with col3:
+                        st.metric("分辨率", f"{width}x{height}")
+                    with col4:
+                        st.metric("预计提取", f"{estimated_frames} 帧")
+                    
+                    # 显示文件命名预览
+                    st.markdown("**📁 文件命名预览**")
+                    st.code(f"{preview_prefix}_000001.{output_format}\n{preview_prefix}_000002.{output_format}\n...\n{preview_prefix}_{estimated_frames:06d}.{output_format}")
+                    
+                    # 存储视频信息
+                    video_info = {
+                        'fps': video_fps,
+                        'total_frames': total_frames,
+                        'duration': duration,
+                        'width': width,
+                        'height': height,
+                        'temp_path': str(temp_video_path),
+                        'estimated_frames': estimated_frames
+                    }
+                    
+                    # 提取按钮
+                    if st.button("🎬 开始提取帧", type="primary", key="extract_frames_btn"):
+                        st.session_state.video_extracting = True
+                        
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+                        
+                        try:
+                            cap = cv2.VideoCapture(video_info['temp_path'])
+                            
+                            if not cap.isOpened():
+                                st.error("❌ 无法打开视频文件")
+                                st.session_state.video_extracting = False
+                            else:
+                                # 生成最终的文件前缀
+                                if custom_prefix:
+                                    final_prefix = custom_prefix
+                                else:
+                                    video_name_clean = Path(uploaded_video.name).stem
+                                    video_name_clean = re.sub(r'[^\w\-]', '_', video_name_clean)
+                                    video_name_clean = video_name_clean[:20]
+                                    timestamp = datetime.now().strftime("%m%d_%H%M%S")
+                                    final_prefix = f"{video_name_clean}_{timestamp}"
+                                
+                                # 计算时间间隔
+                                time_interval = 1.0 / fps_option
+                                
+                                effective_start = start_time
+                                effective_end = end_time if end_time > 0 else duration
+                                
+                                extracted_count = 0
+                                errors = []
+                                
+                                # 生成提取时间点
+                                extract_times = []
+                                t = effective_start
+                                while t < effective_end:
+                                    extract_times.append(t)
+                                    t += time_interval
+                                
+                                if max_frames > 0:
+                                    extract_times = extract_times[:max_frames]
+                                
+                                total_to_extract = len(extract_times)
+                                status_text.text(f"⏳ 正在提取帧... (0/{total_to_extract})")
+                                
+                                for i, t in enumerate(extract_times):
+                                    cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+                                    
+                                    ret, frame = cap.read()
+                                    if not ret:
+                                        errors.append(f"时间 {t:.2f}s: 无法读取帧")
+                                        continue
+                                    
+                                    # 生成文件名（使用唯一前缀）
+                                    frame_filename = f"{final_prefix}_{extracted_count + 1:06d}.{output_format}"
+                                    frame_path = upload_dir / frame_filename
+                                    
+                                    try:
+                                        if output_format == 'jpg':
+                                            cv2.imwrite(
+                                                str(frame_path), 
+                                                frame, 
+                                                [cv2.IMWRITE_JPEG_QUALITY, image_quality]
+                                            )
+                                        else:
+                                            cv2.imwrite(str(frame_path), frame)
+                                        
+                                        extracted_count += 1
+                                        
+                                    except Exception as e:
+                                        errors.append(f"时间 {t:.2f}s: {str(e)}")
+                                    
+                                    progress = (i + 1) / total_to_extract
+                                    progress_bar.progress(progress)
+                                    
+                                    if (i + 1) % 5 == 0 or i == total_to_extract - 1:
+                                        status_text.text(f"⏳ 正在提取帧... ({i + 1}/{total_to_extract})")
+                                
+                                cap.release()
+                                progress_bar.progress(1.0)
+                                status_text.text(f"✅ 提取完成！共提取 {extracted_count} 帧")
+                                
+                                # 保存结果
+                                st.session_state.video_extract_result = {
+                                    'count': extracted_count,
+                                    'video_name': uploaded_video.name,
+                                    'duration': duration,
+                                    'fps': fps_option,
+                                    'format': output_format,
+                                    'prefix': final_prefix,
+                                    'errors': errors
+                                }
+                                
+                                # 显示详细日志
+                                st.markdown("**📋 提取日志**")
+                                st.success(f"""
+✅ **提取成功！**
+
+- **视频文件:** {uploaded_video.name}
+- **视频时长:** {duration:.1f} 秒
+- **提取帧率:** 每 {time_interval:.2f} 秒 1 帧
+- **提取范围:** {effective_start}s - {effective_end:.1f}s
+- **成功提取:** {extracted_count} 帧
+- **文件前缀:** `{final_prefix}`
+- **输出格式:** {output_format.upper()}
+- **保存位置:** {upload_dir}
+
+📁 文件示例: `{final_prefix}_000001.{output_format}`
+                                """)
+                                
+                                if errors:
+                                    with st.expander(f"⚠️ 错误详情 ({len(errors)}个)"):
+                                        for err in errors[:10]:
+                                            st.text(err)
+                                        if len(errors) > 10:
+                                            st.text(f"... 还有 {len(errors) - 10} 个错误")
+                                
+                                # 清理临时文件
+                                try:
+                                    temp_video_path.unlink(missing_ok=True)
+                                except:
+                                    pass
+                                
+                                st.session_state.video_extracting = False
+                        
+                        except Exception as e:
+                            st.error(f"❌ 提取失败: {str(e)}")
+                            logger.exception("视频帧提取失败")
+                            st.session_state.video_extracting = False
+                            try:
+                                temp_video_path.unlink(missing_ok=True)
+                            except:
+                                pass
+                
+                else:
+                    st.error("❌ 无法读取视频文件")
+                    cap.release()
+                    temp_video_path.unlink(missing_ok=True)
+                    
+            except ImportError:
+                st.warning("⚠️ 需要安装 opencv-python 才能处理视频")
+                st.code("pip install opencv-python", language="bash")
+            except Exception as e:
+                st.error(f"❌ 读取视频信息失败: {str(e)}")
+        
+        elif st.session_state.video_extracting:
+            st.warning("⏳ 正在提取中，请稍候...")
+    
+    st.divider()
+    
+    # ==================== 图片预览部分 ====================
+    st.subheader("🖼️ 已上传的图片")
+    
+    # 重新扫描图片
+    tab2_images = DataManager.scan_images(upload_dir)
+    
+    if tab2_images:
+        col_refresh, col_pagesize, col_empty = st.columns([1, 1, 3])
+        with col_refresh:
+            st.button("🔄 刷新", key="refresh_image_list_btn", on_click=lambda: None)
+        with col_pagesize:
+            page_size = st.selectbox("每页", [50, 100, 200], index=0, key="page_size_select", label_visibility="collapsed")
+        
+        total_pages = max(1, (len(tab2_images) - 1) // page_size + 1)
+        
+        if st.session_state.current_page >= total_pages:
+            st.session_state.current_page = 0
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col1:
+            if st.button("◀️ 上一页", key="prev_page", disabled=(st.session_state.current_page <= 0)):
+                st.session_state.current_page -= 1
+                st.rerun()
+        with col2:
+            st.markdown(f"<center>第 {st.session_state.current_page + 1} / {total_pages} 页 (共 {len(tab2_images)} 张)</center>", unsafe_allow_html=True)
+        with col3:
+            if st.button("下一页 ▶️", key="next_page", disabled=(st.session_state.current_page >= total_pages - 1)):
+                st.session_state.current_page += 1
+                st.rerun()
+        
+        start_idx = st.session_state.current_page * page_size
+        end_idx = min(start_idx + page_size, len(tab2_images))
+        current_page_images = tab2_images[start_idx:end_idx]
+        
+        processed_images = set(pm.get_processed_images(current_project))
+        
+        cols_per_row = 5
+        for i in range(0, len(current_page_images), cols_per_row):
+            cols = st.columns(cols_per_row)
+            for j, col in enumerate(cols):
+                idx = i + j
+                if idx < len(current_page_images):
+                    img_path = current_page_images[idx]
+                    with col:
+                        try:
+                            img = Image.open(img_path)
+                            img.thumbnail((200, 200))
+                            st.image(img, use_column_width=True)
+                            filename = Path(img_path).name
+                            status = "✅" if img_path in processed_images else "⏳"
+                            st.caption(f"{status} {filename[:15]}...")
+                        except:
+                            st.error("无法加载")
+    else:
+        st.info("📭 暂无图片，请上传图片或视频")
+
+
+
+        
+        
+# ==================== Tab 3: 批量处理 ====================
+with tab3:
+    st.header(f"🚀 {current_project} - 批量处理")
+    
+    # 始终显示 Label Studio 入口
+    ls_id, ls_url = pm.get_label_studio_project(current_project)
+    
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        if ls_id:
+            st.success(f"✅ 已关联 Label Studio 项目 (ID: {ls_id})")
+        else:
+            st.info("📋 尚未关联 Label Studio 项目，处理完成后将自动创建")
+    with col2:
+        if user_info:
+            render_label_studio_button(user_info, ls_id, context="tab3_top", show_title=False)
+    
+    st.divider()
+    
+    tab3_images = DataManager.scan_images(upload_dir)
+    labels_def = project_info.get('labels', {})
+    
+    if not tab3_images:
+        st.warning("⚠️ 请先上传图片")
+    elif not labels_def:
+        st.warning("⚠️ 请先定义类别")
+    else:
+        processed_images = pm.get_processed_images(current_project)
+        unprocessed_images = DataManager.get_unprocessed_images(tab3_images, processed_images)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("未处理", len(unprocessed_images))
+        with col2:
+            st.metric("已处理", len(processed_images))
+        
+        process_mode = st.radio(
+            "处理模式",
+            ["仅处理未处理的图片", "重新处理所有图片"]
+        )
+        
+        images_to_process = unprocessed_images if "未处理" in process_mode else tab3_images
+        
+        if not images_to_process:
+            st.info("✅ 所有图片已处理完成")
+        else:
+            st.info(f"📊 将处理 {len(images_to_process)} 张图片")
+            
+            st.divider()
+            
+            enable_vlm = True
+            enable_label_studio = True
+            st.success("✅ 已启用：VLM 清洗 + Label Studio 自动化导入")
+            
+            ls_user_id, ls_token, ls_org_id = ensure_label_studio_account(
+                username, user_manager, ls_user_manager
+            )
+            
+            if ls_token:
+                st.info(f"🔗 Label Studio: {LABEL_STUDIO_URL}")
+                st.success(f"🔑 已配置用户 Token")
+                st.success(f"🏢 工作区: **{organization_name}**")
+            else:
+                st.warning("⚠️ 无法配置 Label Studio 账号")
+            
+            if st.button("🚀 开始批量处理", type="primary"):
+                try:
+                    from backend.pipeline.inference_pipeline import InferencePipeline
+                    
+                    pipeline = InferencePipeline()
+                    output_dir = str(processed_dir)
+                    
+                    Path(output_dir).mkdir(parents=True, exist_ok=True)
+                    with open(Path(output_dir) / "definitions.json", "w", encoding="utf-8") as f:
+                        json.dump(labels_def, f, ensure_ascii=False, indent=2)
+                    
+                    run_image_dir = str(upload_dir)
+                    subset_tmp_dir = None
+                    
+                    if "未处理" in process_mode:
+                        subset_tmp_dir = Path(tempfile.gettempdir()) / "web_annotation_subset" / organization_name / current_project / str(uuid.uuid4())
+                        subset_tmp_dir.mkdir(parents=True, exist_ok=True)
+                        for src in images_to_process:
+                            try:
+                                src_p = Path(src)
+                                link_p = subset_tmp_dir / src_p.name
+                                if not link_p.exists():
+                                    os.symlink(str(src_p), str(link_p))
+                            except Exception as e:
+                                logger.warning(f"创建软链接失败: {e}")
+                        run_image_dir = str(subset_tmp_dir)
+                    
+                    with st.spinner("正在处理..."):
+                        result = pipeline.process_images(
+                            image_dir=run_image_dir,
+                            target_labels=list(labels_def.keys()),
+                            label_definitions=labels_def,
+                            output_dir=output_dir,
+                            enable_vlm_clean=enable_vlm
+                        )
+                    
+                    if subset_tmp_dir and subset_tmp_dir.exists():
+                        shutil.rmtree(subset_tmp_dir, ignore_errors=True)
+                    
+                    if result['success']:
+                        st.success("✅ 处理完成!")
+                        
+                        for img in images_to_process:
+                            pm.mark_image_processed(current_project, img)
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("总检测数", result.get('total_detections', 0))
+                        with col2:
+                            st.metric("最终保留", result.get('final_kept', 0))
+                        
+                        if enable_label_studio and ls_token:
+                            vlm_output_file = result.get('output_file')
+                            if vlm_output_file and Path(vlm_output_file).exists():
+                                st.divider()
+                                st.subheader("🔗 Label Studio 自动化设置")
+                                
+                                # 创建进度显示区域
+                                progress_container = st.container()
+                                
+                                try:
+                                    # 使用增强版集成模块
+                                    from label_studio_integration_enhanced import LabelStudioIntegration
+                                    
+                                    vlm_file_for_ls = vlm_output_file
+                                    if subset_tmp_dir:
+                                        try:
+                                            with open(vlm_output_file, 'r', encoding='utf-8') as f:
+                                                vlm_data = json.load(f)
+                                            
+                                            tmp_dir_str = str(subset_tmp_dir) if subset_tmp_dir else ""
+                                            for item in vlm_data:
+                                                if 'image_path' in item and tmp_dir_str and tmp_dir_str in item['image_path']:
+                                                    filename = Path(item['image_path']).name
+                                                    original_path = upload_dir / filename
+                                                    if original_path.exists():
+                                                        item['image_path'] = str(original_path)
+                                            
+                                            fixed_file = Path(output_dir) / "vlm_cleaned_fixed.json"
+                                            with open(fixed_file, 'w', encoding='utf-8') as f:
+                                                json.dump(vlm_data, f, ensure_ascii=False, indent=2)
+                                            vlm_file_for_ls = str(fixed_file)
+                                        except Exception as e:
+                                            logger.warning(f"修复路径失败: {e}")
+                                    
+                                    # 使用组织名称作为项目前缀
+                                    ls_project_title = f"{organization_name}_{current_project}_标注"
+                                    
+                                    ls_integration = LabelStudioIntegration(
+                                        url=LABEL_STUDIO_URL,
+                                        api_key=ls_token
+                                    )
+                                    
+                                    with st.spinner("正在设置 Label Studio 项目（详细日志见终端）..."):
+                                        setup_result = ls_integration.setup_project_complete(
+                                            project_title=ls_project_title,
+                                            labels=labels_def,
+                                            upload_dir=str(upload_dir),
+                                            vlm_cleaned_path=vlm_file_for_ls
+                                        )
+
+                                    print(f"Setup result: {setup_result}")
+                                    st.write(f"Debug: setup_result = {setup_result}")
+                                    
+                                    if setup_result['success']:
+                                        st.success("✅ Label Studio 项目设置完成！")
+                                        
+                                        project_url = setup_result.get('project_url')
+                                        project_id = setup_result.get('project_id')
+                                        
+                                        # 显示统计信息
+                                        stats = setup_result.get('stats', {})
+                                        col1, col2, col3 = st.columns(3)
+                                        with col1:
+                                            st.metric("总任务数", stats.get('total_tasks', 0))
+                                        with col2:
+                                            st.metric("成功添加预测", stats.get('success', 0))
+                                        with col3:
+                                            st.metric("跳过（无匹配）", stats.get('skipped', 0))
+                                        
+                                        if project_url:
+                                            pm.set_label_studio_project(current_project, project_id, project_url)
+                                            
+                                            st.divider()
+                                            render_label_studio_link_full(user_info, project_id, project_url, context="process_result")
+                                    else:
+                                        st.error(f"❌ Label Studio 设置失败: {setup_result.get('error')}")
+                                        
+                                except ImportError:
+                                    # 如果增强版不存在，使用原版
+                                    st.warning("使用标准版 Label Studio 集成...")
+                                    from backend.label_studio_integration import LabelStudioIntegration
+                                    
+                                    ls_integration = LabelStudioIntegration(
+                                        url=LABEL_STUDIO_URL,
+                                        api_key=ls_token
+                                    )
+                                    
+                                    with st.spinner("正在设置 Label Studio 项目..."):
+                                        setup_result = ls_integration.setup_project_complete(
+                                            project_title=f"{organization_name}_{current_project}_标注",
+                                            labels=labels_def,
+                                            upload_dir=str(upload_dir),
+                                            vlm_cleaned_path=vlm_file_for_ls
+                                        )
+                                    
+                                    if setup_result['success']:
+                                        st.success("✅ Label Studio 项目设置完成！")
+                                        project_url = setup_result.get('project_url')
+                                        project_id = setup_result.get('project_id')
+                                        
+                                        if project_url:
+                                            pm.set_label_studio_project(current_project, project_id, project_url)
+                                            render_label_studio_link_full(user_info, project_id, project_url, context="process_result")
+                                    else:
+                                        st.error(f"❌ Label Studio 设置失败: {setup_result.get('error')}")
+                                        
+                                except Exception as e:
+                                    st.error(f"❌ Label Studio 自动化失败: {e}")
+                                    import traceback
+                                    st.code(traceback.format_exc())
+                                    traceback.print_exc()
+                    else:
+                        st.error(f"❌ 处理失败: {result.get('error')}")
+                        
+                except ImportError:
+                    st.error("❌ 无法导入后端处理模块")
+    
+    # 显示已关联的 Label Studio 项目（始终显示）
+    if ls_url:
+        st.divider()
+        st.subheader("🎯 已关联的 Label Studio 项目")
+        
+        if user_info and ls_id:
+            render_label_studio_link_full(user_info, ls_id, ls_url, context="existing_project")
+        else:
+            st.markdown(f"**项目ID:** `{ls_id}`")
+            st.markdown(f"**链接:** [{ls_url}]({ls_url})")
+
+# ==================== Tab 4: 结果查看 ====================
+with tab4:
+    st.header(f"📊 {current_project} - 结果查看")
+    
+    # 显示 Label Studio 入口
+    ls_id, ls_url = pm.get_label_studio_project(current_project)
+    if ls_id and user_info:
+        col1, col2 = st.columns([3, 1])
+        with col2:
+            render_label_studio_button(user_info, ls_id, context="tab4", show_title=False)
+    
+    st.divider()
+    
+    if not processed_dir.exists():
+        st.warning("⚠️ 暂无处理结果")
+    else:
+        json_files = list(processed_dir.glob("*.json"))
+        
+        if not json_files:
+            st.warning("⚠️ 暂无结果文件")
+        else:
+            json_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+            
+            selected_file = st.selectbox(
+                "选择结果文件",
+                [f.name for f in json_files],
+                index=0
+            )
+            
+            result_file = processed_dir / selected_file
+            
+            try:
+                with open(result_file, 'r', encoding='utf-8') as f:
+                    results = json.load(f)
+                
+                if isinstance(results, list) and results:
+                    total = len(results)
+                    kept = sum(1 for r in results if r.get('vlm_decision') == 'keep')
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("总检测数", total)
+                    with col2:
+                        st.metric("保留数", kept)
+                    with col3:
+                        st.metric("保留率", f"{kept/total*100:.1f}%" if total > 0 else "0%")
+                    
+                    st.subheader("📋 检测详情")
+                    df_data = []
+                    for r in results:
+                        df_data.append({
+                            '图片': r.get('image_name', 'N/A'),
+                            '类别': r.get('label', 'N/A'),
+                            '分数': f"{r.get('score', 0):.3f}",
+                            'VLM决策': r.get('vlm_decision', 'N/A'),
+                            '理由': r.get('reason', r.get('vlm_reasoning', ''))[:50]
+                        })
+                    
+                    if df_data:
+                        st.dataframe(pd.DataFrame(df_data), use_container_width=True)
+                else:
+                    st.info("文件为空或格式不正确")
+                    
+            except Exception as e:
+                st.error(f"❌ 加载失败: {e}")
+
+# ==================== Tab 5: 导出结果 ====================
+with tab5:
+
+    st.header(f"💾 {current_project} - 导出结果")
+    
+    # 显示 Label Studio 入口
+    ls_id, ls_url = pm.get_label_studio_project(current_project)
+    if ls_id and user_info:
+        col1, col2 = st.columns([3, 1])
+        with col2:
+            render_label_studio_button(user_info, ls_id, context="tab5", show_title=False)
+    
+    st.divider()
+    
+    if not processed_dir.exists():
+        st.warning("⚠️ 暂无可导出的结果")
+    else:
+        json_files = list(processed_dir.glob("*.json"))
+        
+        if not json_files:
+            st.warning("⚠️ 暂无可导出的文件")
+        else:
+            st.subheader("📋 可导出的文件")
+            
+            for json_file in json_files:
+                with st.expander(f"📄 {json_file.name}"):
+                    try:
+                        with open(json_file, 'r', encoding='utf-8') as f:
+                            data = json.load(f)
+                        
+                        if isinstance(data, list):
+                            st.metric("记录数", len(data))
+                        
+                        json_str = json.dumps(data, ensure_ascii=False, indent=2)
+                        st.download_button(
+                            label="📥 下载",
+                            data=json_str,
+                            file_name=json_file.name,
+                            mime="application/json",
+                            key=f"dl_{json_file.name}"
+                        )
+                    except Exception as e:
+                        st.error(f"无法读取: {e}")
+
+
+
+
+
+# ==================== Tab 6: 模型训练 ====================
+with tab6:
+    st.header(f"🎓 {current_project} - 模型训练")
+    
+    # 显示 Label Studio 入口
+    ls_id, ls_url = pm.get_label_studio_project(current_project)
+    if user_info:
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            if ls_id:
+                st.success(f"✅ 已关联 Label Studio 项目 (ID: {ls_id})")
+            else:
+                st.warning("⚠️ 尚未关联 Label Studio 项目，请先完成批量处理")
+        with col2:
+            if ls_id:
+                render_label_studio_button(user_info, ls_id, context="tab6", show_title=False)
+    
+    st.divider()
+    
+    if not ls_id:
+        st.warning("⚠️ 请先在「批量处理」标签页中完成自动标注流程，创建 Label Studio 项目")
+        st.info("💡 流程: 上传数据 → 定义类别 → 批量处理 → 在 Label Studio 标注 → 返回训练")
+        st.stop()
+    
+    # 获取 Label Studio Token
+    ls_user_id, ls_token, ls_org_id = ensure_label_studio_account(
+        username, user_manager, ls_user_manager
+    )
+    
+    if not ls_token:
+        st.error("❌ 无法获取 Label Studio Token")
+        st.stop()
+    
+    # ==================== 子标签页 ====================
+    train_tab1, train_tab2, train_tab3 = st.tabs([
+        "🚀 开始训练",
+        "📜 训练历史", 
+        "🧪 模型测试"
+    ])
+    
+    # ==================== 子Tab 1: 开始训练 ====================
+    with train_tab1:
+        st.subheader("⚙️ 训练配置")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            train_epochs = st.number_input(
+                "训练轮数 (Epochs)",
+                min_value=10,
+                max_value=500,
+                value=100,
+                step=10,
+                help="建议首次训练使用 100 轮"
+            )
+            
+            train_batch = st.selectbox(
+                "批次大小 (Batch Size)",
+                options=[8, 16, 32, 64],
+                index=1,
+                help="根据 GPU 显存选择，显存小选 8 或 16"
+            )
+        
+        with col2:
+            train_imgsz = st.selectbox(
+                "图片尺寸 (Image Size)",
+                options=[416, 512, 640, 800, 1024],
+                index=2,
+                help="640 是标准尺寸，更大尺寸需要更多显存"
+            )
+            
+            train_model = st.selectbox(
+                "预训练模型",
+                options=["yolov8n.pt", "yolov8s.pt", "yolov8m.pt", "yolov8l.pt", "yolov8x.pt"],
+                index=0,
+                help="n=nano(最快), s=small, m=medium, l=large, x=extra large(最强)"
+            )
+        
+        st.divider()
+        
+        # 标注统计
+        st.subheader("📊 标注统计")
+        
+        # 使用缓存避免重复请求
+        cache_key = f"annotations_{current_project}_{ls_id}"
+        labels_cache_key = f"labels_count_{current_project}_{ls_id}"
+        
+        # 初始化训练管理器
+        train_manager = TrainingManager(
+            label_studio_url=LABEL_STUDIO_URL,
+            api_key=ls_token
+        )
+        
+        col1, col2 = st.columns([3, 1])
+        with col2:
+            if st.button("🔄 刷新统计", key="refresh_stats"):
+                # 删除所有相关缓存
+                for key in [cache_key, labels_cache_key]:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                st.rerun()
+        
+        # 获取数据
+        if cache_key not in st.session_state:
+            with st.spinner("正在获取标注统计..."):
+                st.session_state[cache_key] = train_manager.get_project_annotations(ls_id)
+        
+        annotated_tasks = st.session_state.get(cache_key)
+        
+        if annotated_tasks:
+            # 统计信息
+            total_annotations = sum(
+                len(t['annotation'].get('result', []))
+                for t in annotated_tasks
+            )
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("已标注图片", len(annotated_tasks))
+            with col2:
+                st.metric("标注框总数", total_annotations)
+            with col3:
+                avg_per_image = total_annotations / len(annotated_tasks) if annotated_tasks else 0
+                st.metric("平均每图", f"{avg_per_image:.1f}")
+            
+            # 类别统计 - 缓存计算结果
+            if labels_cache_key not in st.session_state:
+                labels_count = {}
+                for task_data in annotated_tasks:
+                    for result in task_data['annotation'].get('result', []):
+                        if result.get('type') == 'rectanglelabels':
+                            labels = result.get('value', {}).get('rectanglelabels', [])
+                            for label in labels:
+                                labels_count[label] = labels_count.get(label, 0) + 1
+                st.session_state[labels_cache_key] = labels_count
+            
+            labels_count = st.session_state[labels_cache_key]
+            
+            if labels_count:
+                st.markdown("**各类别标注数量:**")
+                label_df = pd.DataFrame([
+                    {"类别": k, "数量": v}
+                    for k, v in sorted(labels_count.items(), key=lambda x: -x[1])
+                ])
+                # 方案1: 使用 st.table（静态，无滚动条）
+                # st.table(label_df)
+                
+                # 方案2: 使用 st.dataframe 但固定高度，禁用动态调整
+                st.dataframe(
+                    label_df, 
+                    use_container_width=True, 
+                    hide_index=True,
+                    height=(len(label_df) + 1) * 35 + 3  # 根据行数计算固定高度
+                )
+            
+            st.divider()
+            
+            # 训练按钮
+            st.subheader("🚀 开始训练")
+            
+            min_images = 5
+            if len(annotated_tasks) < min_images:
+                st.warning(f"⚠️ 建议至少标注 {min_images} 张图片再开始训练（当前: {len(annotated_tasks)}）")
+            
+            image_source_dir = str(pm.get_upload_dir(current_project))
+            labels_def = project_info.get('labels', {})
+            train_button_key = f"train_btn_{current_project}"
+            
+            if st.button("🎯 开始训练", type="primary", disabled=len(annotated_tasks) < 3):
+                if f"training_started_{current_project}" not in st.session_state:
+                    st.session_state[f"training_started_{current_project}"] = True
+                    
+                    log_container = st.empty()
+                    logs = []
+                    
+                    def progress_callback(message: str, status: str):
+                        logs.append(f"[{status.upper()}] {message}")
+                        log_container.code("\n".join(logs[-20:]))
+                    
+                    st.info("🔄 正在准备训练数据...")
+                
+                try:
+                    train_manager_with_callback = TrainingManager(
+                        label_studio_url=LABEL_STUDIO_URL,
+                        api_key=ls_token,
+                        progress_callback=progress_callback
+                    )
+                    
+                    result = train_manager_with_callback.full_training_pipeline(
+                        project_id=ls_id,
+                        project_name=current_project,
+                        labels_def=labels_def,
+                        image_source_dir=image_source_dir,
+                        epochs=train_epochs,
+                        batch_size=train_batch
+                    )
+                    
+                    if result['success']:
+                        st.success("🎉 训练已成功启动！")
+                        st.info(f"📁 运行目录: `{result.get('run_dir')}`")
+                        st.warning("⚠️ 训练正在后台运行，请在「训练历史」标签页查看进度")
+                        
+                        pm.update_project(current_project, {
+                            'last_training_run': result.get('run_dir'),
+                            'last_training_time': datetime.now().isoformat()
+                        }, updated_by=username)
+                    else:
+                        st.error("❌ 训练启动失败")
+                        for err in result.get('errors', []):
+                            st.error(f"   - {err}")
+                
+                except Exception as e:
+                    st.error(f"❌ 训练异常: {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
+        else:
+            st.warning("⚠️ 暂无已标注的数据。请先在 Label Studio 中完成标注。")
+            st.info("💡 提示: 在 Label Studio 中选择检测框，调整后点击「Submit」提交标注")
+
+
+
+    # ==================== 子Tab 2: 训练历史 ====================
+    with train_tab2:
+        st.subheader("📜 训练历史")
+        
+        if st.button("🔄 刷新列表", key="refresh_history"):
+            pass  # 点击后页面会重新加载
+        
+        # 获取训练历史
+        train_manager_history = TrainingManager(
+            label_studio_url=LABEL_STUDIO_URL,
+            api_key=ls_token
+        )
+        
+        training_runs = train_manager_history.list_training_runs()
+        
+        if training_runs:
+            for idx, run in enumerate(training_runs[:10]):
+                run_name = run.get('run_name', 'Unknown')
+                status = run.get('status', 'unknown')
+                run_dir = run.get('run_dir', '')
+                
+                # 状态映射
+                status_display = {
+                    'running': ('🏃', '运行中', 'orange'),
+                    'completed': ('✅', '已完成', 'green'),
+                    'failed': ('❌', '失败', 'red'),
+                    'interrupted': ('⏸️', '已中断', 'gray')
+                }.get(status, ('❓', '未知', 'gray'))
+                
+                status_emoji, status_text, status_color = status_display
+                
+                with st.expander(f"{status_emoji} {run_name} - {status_text}", expanded=(idx == 0)):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown(f"**状态:** {status_emoji} {status_text}")
+                        st.markdown(f"**开始时间:** {run.get('started_at', 'N/A')[:19] if run.get('started_at') else 'N/A'}")
+                        if run.get('completed_at'):
+                            st.markdown(f"**完成时间:** {run.get('completed_at', 'N/A')[:19]}")
+                    
+                    with col2:
+                        if 'test_results' in run:
+                            results = run['test_results']
+                            st.metric("mAP50", f"{results.get('mAP50', 0):.4f}")
+                            st.metric("mAP50-95", f"{results.get('mAP50_95', 0):.4f}")
+                    
+                    # 显示最近日志
+                    if 'last_log_lines' in run and run['last_log_lines']:
+                        st.markdown("**📄 最近日志:**")
+                        st.code("".join(run['last_log_lines'][-15:]), language="text")
+                    
+                    # 模型下载（仅完成的训练）
+                    if status == 'completed':
+                        st.divider()
+                        st.markdown("**📦 模型下载:**")
+                        
+                        # 查找 best.pt 路径
+                        best_model_path = run.get('best_model')
+                        if not best_model_path:
+                            possible_paths = [
+                                Path(run_dir) / run_name / 'weights' / 'best.pt',
+                                Path(run_dir) / 'weights' / 'best.pt',
+                            ]
+                            for p in possible_paths:
+                                if p.exists():
+                                    best_model_path = str(p)
+                                    break
+                        
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            if best_model_path and Path(best_model_path).exists():
+                                with open(best_model_path, 'rb') as f:
+                                    st.download_button(
+                                        label="📥 下载 best.pt",
+                                        data=f.read(),
+                                        file_name=f"{run_name}_best.pt",
+                                        mime="application/octet-stream",
+                                        key=f"dl_best_{idx}"
+                                    )
+                            else:
+                                st.warning("best.pt 不存在")
+                        
+                        with col2:
+                            last_model_path = best_model_path.replace('best.pt', 'last.pt') if best_model_path else None
+                            if last_model_path and Path(last_model_path).exists():
+                                with open(last_model_path, 'rb') as f:
+                                    st.download_button(
+                                        label="📥 下载 last.pt",
+                                        data=f.read(),
+                                        file_name=f"{run_name}_last.pt",
+                                        mime="application/octet-stream",
+                                        key=f"dl_last_{idx}"
+                                    )
+                        
+                        with col3:
+                            if best_model_path and Path(best_model_path).exists():
+                                if st.button(f"🧪 测试此模型", key=f"use_model_{idx}"):
+                                    st.session_state['selected_test_model'] = {
+                                        'path': best_model_path,
+                                        'name': run_name
+                                    }
+                                    st.success(f"✅ 已选择，请切换到「模型测试」标签页")
+                    
+                    elif status == 'failed':
+                        if run.get('error'):
+                            st.error(f"错误信息: {run.get('error')}")
+        else:
+            st.info("暂无训练记录")
+            st.markdown("请在「开始训练」标签页启动训练任务")
+    
+# ==================== 子Tab 3: 模型测试 ====================
+    with train_tab3:
+        st.subheader("🧪 模型测试")
+        
+        # 获取可用模型列表
+        available_models = []
+        train_manager_test = TrainingManager(
+            label_studio_url=LABEL_STUDIO_URL,
+            api_key=ls_token
+        )
+        
+        for run in train_manager_test.list_training_runs():
+            if run.get('status') == 'completed':
+                best_model = run.get('best_model')
+                run_dir = run.get('run_dir', '')
+                run_name = run.get('run_name', '')
+                
+                if not best_model:
+                    possible_paths = [
+                        Path(run_dir) / run_name / 'weights' / 'best.pt',
+                        Path(run_dir) / 'weights' / 'best.pt',
+                    ]
+                    for p in possible_paths:
+                        if p.exists():
+                            best_model = str(p)
+                            break
+                
+                if best_model and Path(best_model).exists():
+                    available_models.append({
+                        'name': run_name,
+                        'path': best_model,
+                        'mAP50': run.get('test_results', {}).get('mAP50', 0)
+                    })
+        
+        if not available_models:
+            st.warning("⚠️ 暂无可用的训练模型")
+            st.info("请先完成至少一次训练")
+        else:
+            # 模型选择
+            st.markdown("**选择模型:**")
+            
+            # 如果从训练历史选择了模型，设为默认
+            default_idx = 0
+            if 'selected_test_model' in st.session_state:
+                for i, m in enumerate(available_models):
+                    if m['path'] == st.session_state.get('selected_test_model', {}).get('path'):
+                        default_idx = i
+                        break
+            
+            model_options = [f"{m['name']} (mAP50: {m['mAP50']:.4f})" for m in available_models]
+            selected_model_idx = st.selectbox(
+                "选择要测试的模型",
+                range(len(model_options)),
+                index=default_idx,
+                format_func=lambda x: model_options[x],
+                key="model_selector"
+            )
+            
+            selected_model = available_models[selected_model_idx]
+            st.success(f"✅ 已选择: {selected_model['name']}")
+            st.caption(f"模型路径: {selected_model['path']}")
+            
+            st.divider()
+            
+            # 上传测试图片
+            st.markdown("**上传测试图片:**")
+            
+            uploaded_image = st.file_uploader(
+                "选择图片",
+                type=['jpg', 'jpeg', 'png', 'bmp', 'webp'],
+                key="test_image_uploader"
+            )
+            
+            # 置信度阈值
+            conf_threshold = st.slider(
+                "置信度阈值",
+                min_value=0.1,
+                max_value=1.0,
+                value=0.25,
+                step=0.05,
+                help="只显示置信度高于此阈值的检测结果"
+            )
+            
+            if uploaded_image:
+                original_image = Image.open(uploaded_image)
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("**原始图片:**")
+                    st.image(original_image, use_column_width=True)
+                
+                # 检测按钮
+                detect_clicked = st.button("🔍 开始检测", type="primary", key="detect_btn")
+                
+                if detect_clicked:
+                    with st.spinner("正在检测..."):
+                        try:
+                            import subprocess
+                            
+                            # 生成唯一 ID
+                            detect_id = str(uuid.uuid4())[:8]
+                            
+                            # 保存临时图片
+                            temp_dir = Path("/tmp/yolo_detect")
+                            temp_dir.mkdir(parents=True, exist_ok=True)
+                            
+                            temp_image_path = temp_dir / f"input_{detect_id}.jpg"
+                            result_json_path = temp_dir / f"result_{detect_id}.json"
+                            
+                            # 保存上传的图片
+                            original_image.save(str(temp_image_path))
+                            
+                            # 检测脚本路径
+                            detect_script = "/root/autodl-fs/web_biaozhupingtai/scripts/detect_yolo.py"
+                            
+                            # 构建命令
+                            cmd = f"""
+source /root/miniconda3/etc/profile.d/conda.sh && \
+conda activate xingmu_yolo && \
+python {detect_script} \
+    --model "{selected_model['path']}" \
+    --image "{temp_image_path}" \
+    --output "{result_json_path}" \
+    --conf {conf_threshold}
+"""
+                            
+                            # 执行检测
+                            process = subprocess.run(
+                                ["bash", "-c", cmd],
+                                capture_output=True,
+                                text=True,
+                                timeout=120
+                            )
+                            
+                            # 检查结果文件
+                            if result_json_path.exists():
+                                with open(result_json_path, 'r', encoding='utf-8') as f:
+                                    result_data = json.load(f)
+                                
+                                if result_data.get('success'):
+                                    detections = result_data.get('detections', [])
+                                    
+                                    # 绘制检测框
+                                    from PIL import ImageDraw, ImageFont
+                                    
+                                    result_image = original_image.copy()
+                                    draw = ImageDraw.Draw(result_image)
+                                    
+                                    colors = ["#FF0000", "#00FF00", "#0000FF", "#FFFF00", "#FF00FF", "#00FFFF", "#FFA500", "#800080"]
+                                    class_colors = {}
+                                    
+                                    for det in detections:
+                                        x1, y1, x2, y2 = det['bbox']
+                                        conf = det['confidence']
+                                        cls_name = det['class_name']
+                                        
+                                        if cls_name not in class_colors:
+                                            class_colors[cls_name] = colors[len(class_colors) % len(colors)]
+                                        color = class_colors[cls_name]
+                                        
+                                        # 绘制边框
+                                        draw.rectangle([x1, y1, x2, y2], outline=color, width=3)
+                                        
+                                        # 绘制标签
+                                        label = f"{cls_name}: {conf:.2f}"
+                                        try:
+                                            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
+                                        except:
+                                            font = ImageFont.load_default()
+                                        
+                                        # 计算文本大小
+                                        text_bbox = draw.textbbox((x1, y1), label, font=font)
+                                        text_w = text_bbox[2] - text_bbox[0]
+                                        text_h = text_bbox[3] - text_bbox[1]
+                                        
+                                        # 绘制标签背景
+                                        draw.rectangle([x1, y1 - text_h - 6, x1 + text_w + 6, y1], fill=color)
+                                        draw.text((x1 + 3, y1 - text_h - 3), label, fill="white", font=font)
+                                    
+                                    # 显示结果图片
+                                    with col2:
+                                        st.markdown("**检测结果:**")
+                                        st.image(result_image, use_column_width=True)
+                                    
+                                    # 保存结果到 session_state 以便后续显示
+                                    st.session_state['detection_result'] = {
+                                        'detections': detections,
+                                        'result_image': result_image,
+                                        'success': True
+                                    }
+                                    
+                                else:
+                                    st.error(f"检测失败: {result_data.get('error', '未知错误')}")
+                                    st.session_state['detection_result'] = {'success': False}
+                            else:
+                                st.error(f"检测失败，结果文件不存在")
+                                if process.stderr:
+                                    st.code(process.stderr, language="text")
+                                st.session_state['detection_result'] = {'success': False}
+                            
+                            # 清理临时文件
+                            try:
+                                if temp_image_path.exists():
+                                    temp_image_path.unlink()
+                                if result_json_path.exists():
+                                    result_json_path.unlink()
+                            except:
+                                pass
+                                
+                        except subprocess.TimeoutExpired:
+                            st.error("❌ 检测超时，请稍后重试")
+                        except Exception as e:
+                            st.error(f"❌ 检测失败: {e}")
+                            import traceback
+                            st.code(traceback.format_exc())
+                
+                # 显示之前的检测结果（如果有）
+                elif 'detection_result' in st.session_state and st.session_state['detection_result'].get('success'):
+                    result_data = st.session_state['detection_result']
+                    detections = result_data.get('detections', [])
+                    
+                    with col2:
+                        st.markdown("**检测结果:**")
+                        if 'result_image' in result_data:
+                            st.image(result_data['result_image'], use_column_width=True)
+                
+                # 显示检测统计
+                if 'detection_result' in st.session_state and st.session_state['detection_result'].get('success'):
+                    detections = st.session_state['detection_result'].get('detections', [])
+                    
+                    st.divider()
+                    st.markdown("**📊 检测统计:**")
+                    
+                    if detections:
+                        class_counts = {}
+                        for det in detections:
+                            cls_name = det['class_name']
+                            class_counts[cls_name] = class_counts.get(cls_name, 0) + 1
+                        
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("检测目标数", len(detections))
+                        with col2:
+                            st.metric("类别数", len(class_counts))
+                        with col3:
+                            avg_conf = sum(d['confidence'] for d in detections) / len(detections)
+                            st.metric("平均置信度", f"{avg_conf:.2f}")
+                        
+                        # 详细结果表格
+                        st.markdown("**检测详情:**")
+                        det_df = pd.DataFrame([
+                            {
+                                "类别": d['class_name'],
+                                "置信度": f"{d['confidence']:.3f}",
+                                "位置": f"({int(d['bbox'][0])}, {int(d['bbox'][1])}) - ({int(d['bbox'][2])}, {int(d['bbox'][3])})"
+                            }
+                            for d in detections
+                        ])
+                        st.dataframe(det_df, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("未检测到任何目标，请尝试降低置信度阈值")

@@ -1,0 +1,9 @@
+[server]
+maxUploadSize = 1000
+maxMessageSize = 1000
+enableXsrfProtection = false
+enableCORS = false
+enableWebsocketCompression = false
+
+[browser]
+gatherUsageStats = false

@@ -1,0 +1,22 @@
+# 忽略 Python 缓存
+__pycache__/
+*.py[cod]
+
+# 忽略大型权重文件
+*.pt
+*.pth
+*.weights
+*.onnx
+
+# 忽略数据集和运行日志
+datasets/
+runs/
+logs/
+data/
+training_runs/
+
+
+# 忽略系统和 IDE 文件
+.DS_Store
+.ipynb_checkpoints/
+.vscode/

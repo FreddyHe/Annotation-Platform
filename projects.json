@@ -1,0 +1,528 @@
+{
+  "animal4": {
+    "name": "animal4",
+    "created_at": "2026-01-19T20:14:06.156456",
+    "labels": {
+      "cat": "猫咪",
+      "horse": "马"
+    },
+    "total_images": 0,
+    "processed_images": [],
+    "status": "active",
+    "updated_at": "2026-01-19T20:15:35.815308"
+  },
+  "animal5": {
+    "name": "animal5",
+    "created_at": "2026-01-19T20:20:14.598616",
+    "labels": {
+      "cat": "猫咪",
+      "horse": "马"
+    },
+    "total_images": 0,
+    "processed_images": [],
+    "status": "active",
+    "updated_at": "2026-01-19T20:20:29.488454"
+  },
+  "anima5": {
+    "name": "anima5",
+    "created_at": "2026-01-19T20:23:05.826666",
+    "labels": {
+      "cat": "猫咪",
+      "horse": "马"
+    },
+    "total_images": 0,
+    "processed_images": [],
+    "status": "active",
+    "updated_at": "2026-01-19T20:23:25.724597"
+  },
+  "animal6": {
+    "name": "animal6",
+    "created_at": "2026-01-19T20:28:04.457988",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [],
+    "status": "active"
+  },
+  "animal7": {
+    "name": "animal7",
+    "created_at": "2026-01-19T20:31:06.211250",
+    "labels": {
+      "cat": "猫咪",
+      "horse": "马"
+    },
+    "total_images": 0,
+    "processed_images": [],
+    "status": "active",
+    "updated_at": "2026-01-19T20:31:16.571791"
+  },
+  "animal8": {
+    "name": "animal8",
+    "created_at": "2026-01-19T20:36:52.765336",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [],
+    "status": "active"
+  },
+  "animal9": {
+    "name": "animal9",
+    "created_at": "2026-01-19T20:39:41.865326",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal9/extracted/03e9d20d668db8dff584bf735a52c95d_jpg.rf.b94b680726e8d1350373e737158f23d2.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal9/extracted/0e0a2acdfba5a90323fb8301214cbbee_jpg.rf.363fdde6eabf57027d1ba5c0df70c80f.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal9/extracted/0f1c15c001c3afc9b338e4fe50bb9acf_jpg.rf.2bc8b641cca4882fa18cdb15e9acbcc7.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal9/extracted/5ae083e3c218d53b05900dc5172ac6c4_jpg.rf.3757665eea38d2ebaa3a3efa310381b5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal9/extracted/8ffca536b0137ba13d56a644c4685fe5_jpg.rf.6da098dd5d00572afca559ef391b9e05.jpg"
+    ],
+    "status": "active"
+  },
+  "animal10": {
+    "name": "animal10",
+    "created_at": "2026-01-19T20:56:22.348121",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal10/extracted/03e9d20d668db8dff584bf735a52c95d_jpg.rf.b94b680726e8d1350373e737158f23d2.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal10/extracted/0e0a2acdfba5a90323fb8301214cbbee_jpg.rf.363fdde6eabf57027d1ba5c0df70c80f.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal10/extracted/0f1c15c001c3afc9b338e4fe50bb9acf_jpg.rf.2bc8b641cca4882fa18cdb15e9acbcc7.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal10/extracted/5ae083e3c218d53b05900dc5172ac6c4_jpg.rf.3757665eea38d2ebaa3a3efa310381b5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal10/extracted/8ffca536b0137ba13d56a644c4685fe5_jpg.rf.6da098dd5d00572afca559ef391b9e05.jpg"
+    ],
+    "status": "active"
+  },
+  "animal11": {
+    "name": "animal11",
+    "created_at": "2026-01-20T13:12:51.985831",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal11/extracted/03e9d20d668db8dff584bf735a52c95d_jpg.rf.b94b680726e8d1350373e737158f23d2.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal11/extracted/0e0a2acdfba5a90323fb8301214cbbee_jpg.rf.363fdde6eabf57027d1ba5c0df70c80f.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal11/extracted/0f1c15c001c3afc9b338e4fe50bb9acf_jpg.rf.2bc8b641cca4882fa18cdb15e9acbcc7.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal11/extracted/5ae083e3c218d53b05900dc5172ac6c4_jpg.rf.3757665eea38d2ebaa3a3efa310381b5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal11/extracted/8ffca536b0137ba13d56a644c4685fe5_jpg.rf.6da098dd5d00572afca559ef391b9e05.jpg"
+    ],
+    "status": "active"
+  },
+  "animal12": {
+    "name": "animal12",
+    "created_at": "2026-01-20T13:24:33.208496",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal12/extracted/03e9d20d668db8dff584bf735a52c95d_jpg.rf.b94b680726e8d1350373e737158f23d2.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal12/extracted/0e0a2acdfba5a90323fb8301214cbbee_jpg.rf.363fdde6eabf57027d1ba5c0df70c80f.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal12/extracted/0f1c15c001c3afc9b338e4fe50bb9acf_jpg.rf.2bc8b641cca4882fa18cdb15e9acbcc7.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal12/extracted/5ae083e3c218d53b05900dc5172ac6c4_jpg.rf.3757665eea38d2ebaa3a3efa310381b5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal12/extracted/8ffca536b0137ba13d56a644c4685fe5_jpg.rf.6da098dd5d00572afca559ef391b9e05.jpg"
+    ],
+    "status": "active"
+  },
+  "animal13": {
+    "name": "animal13",
+    "created_at": "2026-01-20T13:38:34.489746",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal13/extracted/03e9d20d668db8dff584bf735a52c95d_jpg.rf.b94b680726e8d1350373e737158f23d2.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal13/extracted/0e0a2acdfba5a90323fb8301214cbbee_jpg.rf.363fdde6eabf57027d1ba5c0df70c80f.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal13/extracted/0f1c15c001c3afc9b338e4fe50bb9acf_jpg.rf.2bc8b641cca4882fa18cdb15e9acbcc7.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal13/extracted/5ae083e3c218d53b05900dc5172ac6c4_jpg.rf.3757665eea38d2ebaa3a3efa310381b5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal13/extracted/8ffca536b0137ba13d56a644c4685fe5_jpg.rf.6da098dd5d00572afca559ef391b9e05.jpg"
+    ],
+    "status": "active"
+  },
+  "animal14": {
+    "name": "animal14",
+    "created_at": "2026-01-20T13:43:22.181829",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [],
+    "status": "active"
+  },
+  "animal15": {
+    "name": "animal15",
+    "created_at": "2026-01-20T13:48:28.252725",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [],
+    "status": "active"
+  },
+  "animal17": {
+    "name": "animal17",
+    "created_at": "2026-01-20T13:53:40.660843",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [],
+    "status": "active"
+  },
+  "animal19": {
+    "name": "animal19",
+    "created_at": "2026-01-20T13:59:25.441822",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal19/extracted/03e9d20d668db8dff584bf735a52c95d_jpg.rf.b94b680726e8d1350373e737158f23d2.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal19/extracted/0e0a2acdfba5a90323fb8301214cbbee_jpg.rf.363fdde6eabf57027d1ba5c0df70c80f.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal19/extracted/0f1c15c001c3afc9b338e4fe50bb9acf_jpg.rf.2bc8b641cca4882fa18cdb15e9acbcc7.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal19/extracted/5ae083e3c218d53b05900dc5172ac6c4_jpg.rf.3757665eea38d2ebaa3a3efa310381b5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal19/extracted/8ffca536b0137ba13d56a644c4685fe5_jpg.rf.6da098dd5d00572afca559ef391b9e05.jpg"
+    ],
+    "status": "active"
+  },
+  "animal20": {
+    "name": "animal20",
+    "created_at": "2026-01-20T14:12:31.376860",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal20/extracted/03e9d20d668db8dff584bf735a52c95d_jpg.rf.b94b680726e8d1350373e737158f23d2.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal20/extracted/0e0a2acdfba5a90323fb8301214cbbee_jpg.rf.363fdde6eabf57027d1ba5c0df70c80f.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal20/extracted/0f1c15c001c3afc9b338e4fe50bb9acf_jpg.rf.2bc8b641cca4882fa18cdb15e9acbcc7.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal20/extracted/5ae083e3c218d53b05900dc5172ac6c4_jpg.rf.3757665eea38d2ebaa3a3efa310381b5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal20/extracted/8ffca536b0137ba13d56a644c4685fe5_jpg.rf.6da098dd5d00572afca559ef391b9e05.jpg"
+    ],
+    "status": "active"
+  },
+  "animal21": {
+    "name": "animal21",
+    "created_at": "2026-01-20T14:21:49.353246",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal21/extracted/03e9d20d668db8dff584bf735a52c95d_jpg.rf.b94b680726e8d1350373e737158f23d2.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal21/extracted/0e0a2acdfba5a90323fb8301214cbbee_jpg.rf.363fdde6eabf57027d1ba5c0df70c80f.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal21/extracted/0f1c15c001c3afc9b338e4fe50bb9acf_jpg.rf.2bc8b641cca4882fa18cdb15e9acbcc7.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal21/extracted/5ae083e3c218d53b05900dc5172ac6c4_jpg.rf.3757665eea38d2ebaa3a3efa310381b5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal21/extracted/8ffca536b0137ba13d56a644c4685fe5_jpg.rf.6da098dd5d00572afca559ef391b9e05.jpg"
+    ],
+    "status": "active"
+  },
+  "animal22": {
+    "name": "animal22",
+    "created_at": "2026-01-20T14:26:38.750128",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal22/extracted/03e9d20d668db8dff584bf735a52c95d_jpg.rf.b94b680726e8d1350373e737158f23d2.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal22/extracted/0e0a2acdfba5a90323fb8301214cbbee_jpg.rf.363fdde6eabf57027d1ba5c0df70c80f.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal22/extracted/0f1c15c001c3afc9b338e4fe50bb9acf_jpg.rf.2bc8b641cca4882fa18cdb15e9acbcc7.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal22/extracted/5ae083e3c218d53b05900dc5172ac6c4_jpg.rf.3757665eea38d2ebaa3a3efa310381b5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal22/extracted/8ffca536b0137ba13d56a644c4685fe5_jpg.rf.6da098dd5d00572afca559ef391b9e05.jpg"
+    ],
+    "status": "active"
+  },
+  "animal23": {
+    "name": "animal23",
+    "created_at": "2026-01-20T14:30:55.999686",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal23/extracted/03e9d20d668db8dff584bf735a52c95d_jpg.rf.b94b680726e8d1350373e737158f23d2.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal23/extracted/0e0a2acdfba5a90323fb8301214cbbee_jpg.rf.363fdde6eabf57027d1ba5c0df70c80f.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal23/extracted/0f1c15c001c3afc9b338e4fe50bb9acf_jpg.rf.2bc8b641cca4882fa18cdb15e9acbcc7.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal23/extracted/5ae083e3c218d53b05900dc5172ac6c4_jpg.rf.3757665eea38d2ebaa3a3efa310381b5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal23/extracted/8ffca536b0137ba13d56a644c4685fe5_jpg.rf.6da098dd5d00572afca559ef391b9e05.jpg"
+    ],
+    "status": "active"
+  },
+  "animal24": {
+    "name": "animal24",
+    "created_at": "2026-01-20T14:57:46.784972",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal24/extracted/03e9d20d668db8dff584bf735a52c95d_jpg.rf.b94b680726e8d1350373e737158f23d2.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal24/extracted/0e0a2acdfba5a90323fb8301214cbbee_jpg.rf.363fdde6eabf57027d1ba5c0df70c80f.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal24/extracted/0f1c15c001c3afc9b338e4fe50bb9acf_jpg.rf.2bc8b641cca4882fa18cdb15e9acbcc7.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal24/extracted/5ae083e3c218d53b05900dc5172ac6c4_jpg.rf.3757665eea38d2ebaa3a3efa310381b5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal24/extracted/8ffca536b0137ba13d56a644c4685fe5_jpg.rf.6da098dd5d00572afca559ef391b9e05.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal24/extracted/4b1b0d629d944d57949905902bbd75a3_jpg.rf.1e1bec5c26fd2be790aa78bff5733f62.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal24/extracted/4ca36ffe802d2c2689e1de920b55647e_jpg.rf.f7ff4502996c3159e276edfa165a6fb5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal24/extracted/4cae0e48a585f1b64c75db984a9b02fc_jpg.rf.04b57f12fccf491848dec068d7840844.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal24/extracted/4cbfa8088bf23563dc23b3de40e34769_jpg.rf.d2c29626059601b38f268bad6c2a3f25.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal24/extracted/5e74889299471be2c1632aeaf0beff59_jpg.rf.24f3c18f916f54f663296b2e07efe6e9.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal24/extracted/6e186a331b394261943902ab984f36c2_jpg.rf.fcf982c83b26a3885c8aa5955d86b563.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal24/extracted/08f83e5950550a1cc050452f36344535_jpg.rf.406ae57a9c830a43c638777393fc417e.jpg"
+    ],
+    "status": "active"
+  },
+  "animal25": {
+    "name": "animal25",
+    "created_at": "2026-01-20T21:21:53.439269",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal25/extracted/03e9d20d668db8dff584bf735a52c95d_jpg.rf.b94b680726e8d1350373e737158f23d2.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal25/extracted/0e0a2acdfba5a90323fb8301214cbbee_jpg.rf.363fdde6eabf57027d1ba5c0df70c80f.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal25/extracted/0f1c15c001c3afc9b338e4fe50bb9acf_jpg.rf.2bc8b641cca4882fa18cdb15e9acbcc7.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal25/extracted/5ae083e3c218d53b05900dc5172ac6c4_jpg.rf.3757665eea38d2ebaa3a3efa310381b5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal25/extracted/8ffca536b0137ba13d56a644c4685fe5_jpg.rf.6da098dd5d00572afca559ef391b9e05.jpg"
+    ],
+    "status": "active"
+  },
+  "animal26": {
+    "name": "animal26",
+    "created_at": "2026-01-20T21:27:10.645310",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [],
+    "status": "active"
+  },
+  "animal27": {
+    "name": "animal27",
+    "created_at": "2026-01-20T21:27:17.498165",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal27/extracted/03e9d20d668db8dff584bf735a52c95d_jpg.rf.b94b680726e8d1350373e737158f23d2.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal27/extracted/0e0a2acdfba5a90323fb8301214cbbee_jpg.rf.363fdde6eabf57027d1ba5c0df70c80f.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal27/extracted/0f1c15c001c3afc9b338e4fe50bb9acf_jpg.rf.2bc8b641cca4882fa18cdb15e9acbcc7.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal27/extracted/5ae083e3c218d53b05900dc5172ac6c4_jpg.rf.3757665eea38d2ebaa3a3efa310381b5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal27/extracted/8ffca536b0137ba13d56a644c4685fe5_jpg.rf.6da098dd5d00572afca559ef391b9e05.jpg"
+    ],
+    "status": "active"
+  },
+  "animal28": {
+    "name": "animal28",
+    "created_at": "2026-01-20T21:35:41.253634",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal28/extracted/03e9d20d668db8dff584bf735a52c95d_jpg.rf.b94b680726e8d1350373e737158f23d2.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal28/extracted/0e0a2acdfba5a90323fb8301214cbbee_jpg.rf.363fdde6eabf57027d1ba5c0df70c80f.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal28/extracted/0f1c15c001c3afc9b338e4fe50bb9acf_jpg.rf.2bc8b641cca4882fa18cdb15e9acbcc7.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal28/extracted/5ae083e3c218d53b05900dc5172ac6c4_jpg.rf.3757665eea38d2ebaa3a3efa310381b5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal28/extracted/8ffca536b0137ba13d56a644c4685fe5_jpg.rf.6da098dd5d00572afca559ef391b9e05.jpg"
+    ],
+    "status": "active"
+  },
+  "animal29": {
+    "name": "animal29",
+    "created_at": "2026-01-20T21:46:44.906203",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal29/extracted/03e9d20d668db8dff584bf735a52c95d_jpg.rf.b94b680726e8d1350373e737158f23d2.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal29/extracted/0e0a2acdfba5a90323fb8301214cbbee_jpg.rf.363fdde6eabf57027d1ba5c0df70c80f.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal29/extracted/0f1c15c001c3afc9b338e4fe50bb9acf_jpg.rf.2bc8b641cca4882fa18cdb15e9acbcc7.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal29/extracted/5ae083e3c218d53b05900dc5172ac6c4_jpg.rf.3757665eea38d2ebaa3a3efa310381b5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal29/extracted/8ffca536b0137ba13d56a644c4685fe5_jpg.rf.6da098dd5d00572afca559ef391b9e05.jpg"
+    ],
+    "status": "active"
+  },
+  "animal30": {
+    "name": "animal30",
+    "created_at": "2026-01-20T22:04:39.472069",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal30/extracted/03e9d20d668db8dff584bf735a52c95d_jpg.rf.b94b680726e8d1350373e737158f23d2.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal30/extracted/0e0a2acdfba5a90323fb8301214cbbee_jpg.rf.363fdde6eabf57027d1ba5c0df70c80f.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal30/extracted/0f1c15c001c3afc9b338e4fe50bb9acf_jpg.rf.2bc8b641cca4882fa18cdb15e9acbcc7.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal30/extracted/5ae083e3c218d53b05900dc5172ac6c4_jpg.rf.3757665eea38d2ebaa3a3efa310381b5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal30/extracted/8ffca536b0137ba13d56a644c4685fe5_jpg.rf.6da098dd5d00572afca559ef391b9e05.jpg"
+    ],
+    "status": "active"
+  },
+  "animal1": {
+    "name": "animal1",
+    "created_at": "2026-01-20T22:08:02.393832",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal1/extracted/03e9d20d668db8dff584bf735a52c95d_jpg.rf.b94b680726e8d1350373e737158f23d2.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal1/extracted/0e0a2acdfba5a90323fb8301214cbbee_jpg.rf.363fdde6eabf57027d1ba5c0df70c80f.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal1/extracted/0f1c15c001c3afc9b338e4fe50bb9acf_jpg.rf.2bc8b641cca4882fa18cdb15e9acbcc7.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal1/extracted/5ae083e3c218d53b05900dc5172ac6c4_jpg.rf.3757665eea38d2ebaa3a3efa310381b5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal1/extracted/8ffca536b0137ba13d56a644c4685fe5_jpg.rf.6da098dd5d00572afca559ef391b9e05.jpg"
+    ],
+    "status": "active"
+  },
+  "animal31": {
+    "name": "animal31",
+    "created_at": "2026-01-20T22:10:58.258465",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal31/extracted/03e9d20d668db8dff584bf735a52c95d_jpg.rf.b94b680726e8d1350373e737158f23d2.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal31/extracted/0e0a2acdfba5a90323fb8301214cbbee_jpg.rf.363fdde6eabf57027d1ba5c0df70c80f.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal31/extracted/0f1c15c001c3afc9b338e4fe50bb9acf_jpg.rf.2bc8b641cca4882fa18cdb15e9acbcc7.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal31/extracted/5ae083e3c218d53b05900dc5172ac6c4_jpg.rf.3757665eea38d2ebaa3a3efa310381b5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal31/extracted/8ffca536b0137ba13d56a644c4685fe5_jpg.rf.6da098dd5d00572afca559ef391b9e05.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal31/extracted/4b1b0d629d944d57949905902bbd75a3_jpg.rf.1e1bec5c26fd2be790aa78bff5733f62.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal31/extracted/4ca36ffe802d2c2689e1de920b55647e_jpg.rf.f7ff4502996c3159e276edfa165a6fb5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal31/extracted/4cae0e48a585f1b64c75db984a9b02fc_jpg.rf.04b57f12fccf491848dec068d7840844.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal31/extracted/4cbfa8088bf23563dc23b3de40e34769_jpg.rf.d2c29626059601b38f268bad6c2a3f25.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal31/extracted/5e74889299471be2c1632aeaf0beff59_jpg.rf.24f3c18f916f54f663296b2e07efe6e9.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal31/extracted/6e186a331b394261943902ab984f36c2_jpg.rf.fcf982c83b26a3885c8aa5955d86b563.jpg"
+    ],
+    "status": "active"
+  },
+  "animal32": {
+    "name": "animal32",
+    "created_at": "2026-01-20T22:31:20.183371",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal32/extracted/03e9d20d668db8dff584bf735a52c95d_jpg.rf.b94b680726e8d1350373e737158f23d2.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal32/extracted/0e0a2acdfba5a90323fb8301214cbbee_jpg.rf.363fdde6eabf57027d1ba5c0df70c80f.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal32/extracted/0f1c15c001c3afc9b338e4fe50bb9acf_jpg.rf.2bc8b641cca4882fa18cdb15e9acbcc7.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal32/extracted/4b1b0d629d944d57949905902bbd75a3_jpg.rf.1e1bec5c26fd2be790aa78bff5733f62.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal32/extracted/4ca36ffe802d2c2689e1de920b55647e_jpg.rf.f7ff4502996c3159e276edfa165a6fb5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal32/extracted/4cae0e48a585f1b64c75db984a9b02fc_jpg.rf.04b57f12fccf491848dec068d7840844.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal32/extracted/4cbfa8088bf23563dc23b3de40e34769_jpg.rf.d2c29626059601b38f268bad6c2a3f25.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal32/extracted/5ae083e3c218d53b05900dc5172ac6c4_jpg.rf.3757665eea38d2ebaa3a3efa310381b5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal32/extracted/5e74889299471be2c1632aeaf0beff59_jpg.rf.24f3c18f916f54f663296b2e07efe6e9.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal32/extracted/6e186a331b394261943902ab984f36c2_jpg.rf.fcf982c83b26a3885c8aa5955d86b563.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal32/extracted/8ffca536b0137ba13d56a644c4685fe5_jpg.rf.6da098dd5d00572afca559ef391b9e05.jpg"
+    ],
+    "status": "active"
+  },
+  "animal33": {
+    "name": "animal33",
+    "created_at": "2026-01-20T22:37:08.471949",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal33/extracted/03e9d20d668db8dff584bf735a52c95d_jpg.rf.b94b680726e8d1350373e737158f23d2.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal33/extracted/0e0a2acdfba5a90323fb8301214cbbee_jpg.rf.363fdde6eabf57027d1ba5c0df70c80f.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal33/extracted/0f1c15c001c3afc9b338e4fe50bb9acf_jpg.rf.2bc8b641cca4882fa18cdb15e9acbcc7.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal33/extracted/4b1b0d629d944d57949905902bbd75a3_jpg.rf.1e1bec5c26fd2be790aa78bff5733f62.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal33/extracted/4ca36ffe802d2c2689e1de920b55647e_jpg.rf.f7ff4502996c3159e276edfa165a6fb5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal33/extracted/4cae0e48a585f1b64c75db984a9b02fc_jpg.rf.04b57f12fccf491848dec068d7840844.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal33/extracted/4cbfa8088bf23563dc23b3de40e34769_jpg.rf.d2c29626059601b38f268bad6c2a3f25.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal33/extracted/5ae083e3c218d53b05900dc5172ac6c4_jpg.rf.3757665eea38d2ebaa3a3efa310381b5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal33/extracted/5e74889299471be2c1632aeaf0beff59_jpg.rf.24f3c18f916f54f663296b2e07efe6e9.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal33/extracted/6e186a331b394261943902ab984f36c2_jpg.rf.fcf982c83b26a3885c8aa5955d86b563.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal33/extracted/8ffca536b0137ba13d56a644c4685fe5_jpg.rf.6da098dd5d00572afca559ef391b9e05.jpg"
+    ],
+    "status": "active"
+  },
+  "animal34": {
+    "name": "animal34",
+    "created_at": "2026-01-20T22:44:54.774722",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal34/extracted/03e9d20d668db8dff584bf735a52c95d_jpg.rf.b94b680726e8d1350373e737158f23d2.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal34/extracted/0e0a2acdfba5a90323fb8301214cbbee_jpg.rf.363fdde6eabf57027d1ba5c0df70c80f.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal34/extracted/0f1c15c001c3afc9b338e4fe50bb9acf_jpg.rf.2bc8b641cca4882fa18cdb15e9acbcc7.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal34/extracted/5ae083e3c218d53b05900dc5172ac6c4_jpg.rf.3757665eea38d2ebaa3a3efa310381b5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal34/extracted/8ffca536b0137ba13d56a644c4685fe5_jpg.rf.6da098dd5d00572afca559ef391b9e05.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal34/extracted/4b1b0d629d944d57949905902bbd75a3_jpg.rf.1e1bec5c26fd2be790aa78bff5733f62.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal34/extracted/4ca36ffe802d2c2689e1de920b55647e_jpg.rf.f7ff4502996c3159e276edfa165a6fb5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal34/extracted/4cae0e48a585f1b64c75db984a9b02fc_jpg.rf.04b57f12fccf491848dec068d7840844.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal34/extracted/4cbfa8088bf23563dc23b3de40e34769_jpg.rf.d2c29626059601b38f268bad6c2a3f25.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal34/extracted/5e74889299471be2c1632aeaf0beff59_jpg.rf.24f3c18f916f54f663296b2e07efe6e9.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal34/extracted/6e186a331b394261943902ab984f36c2_jpg.rf.fcf982c83b26a3885c8aa5955d86b563.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal34/extracted/08f83e5950550a1cc050452f36344535_jpg.rf.406ae57a9c830a43c638777393fc417e.jpg"
+    ],
+    "status": "active"
+  },
+  "animal35": {
+    "name": "animal35",
+    "created_at": "2026-01-21T14:41:15.728175",
+    "labels": {
+      "cat": "猫咪",
+      "dog": "狗狗"
+    },
+    "total_images": 0,
+    "processed_images": [
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal35/extracted/03e9d20d668db8dff584bf735a52c95d_jpg.rf.b94b680726e8d1350373e737158f23d2.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal35/extracted/0e0a2acdfba5a90323fb8301214cbbee_jpg.rf.363fdde6eabf57027d1ba5c0df70c80f.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal35/extracted/0f1c15c001c3afc9b338e4fe50bb9acf_jpg.rf.2bc8b641cca4882fa18cdb15e9acbcc7.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal35/extracted/5ae083e3c218d53b05900dc5172ac6c4_jpg.rf.3757665eea38d2ebaa3a3efa310381b5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal35/extracted/8ffca536b0137ba13d56a644c4685fe5_jpg.rf.6da098dd5d00572afca559ef391b9e05.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal35/extracted/4b1b0d629d944d57949905902bbd75a3_jpg.rf.1e1bec5c26fd2be790aa78bff5733f62.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal35/extracted/4ca36ffe802d2c2689e1de920b55647e_jpg.rf.f7ff4502996c3159e276edfa165a6fb5.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal35/extracted/4cae0e48a585f1b64c75db984a9b02fc_jpg.rf.04b57f12fccf491848dec068d7840844.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal35/extracted/4cbfa8088bf23563dc23b3de40e34769_jpg.rf.d2c29626059601b38f268bad6c2a3f25.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal35/extracted/5e74889299471be2c1632aeaf0beff59_jpg.rf.24f3c18f916f54f663296b2e07efe6e9.jpg",
+      "/root/autodl-fs/web_biaozhupingtai/data/uploads/animal35/extracted/6e186a331b394261943902ab984f36c2_jpg.rf.fcf982c83b26a3885c8aa5955d86b563.jpg"
+    ],
+    "status": "active"
+  }
+}

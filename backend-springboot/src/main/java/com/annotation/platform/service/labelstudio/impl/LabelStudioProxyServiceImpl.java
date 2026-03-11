@@ -550,11 +550,16 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
             );
 
             if (response.getStatusCode() == HttpStatus.OK) {
-                JSONObject data = JSON.parseObject(response.getBody());
-                Object resultsObj = data.get("results");
+                String responseBody = response.getBody();
+                log.info("获取存储列表响应: lsProjectId={}, statusCode={}, body={}", lsProjectId, response.getStatusCode(), responseBody);
                 
-                if (resultsObj instanceof com.alibaba.fastjson2.JSONArray) {
-                    com.alibaba.fastjson2.JSONArray results = (com.alibaba.fastjson2.JSONArray) resultsObj;
+                if (responseBody == null || responseBody.trim().isEmpty()) {
+                    log.warn("存储列表响应为空: lsProjectId={}", lsProjectId);
+                    return null;
+                }
+                
+                if (responseBody.startsWith("[")) {
+                    com.alibaba.fastjson2.JSONArray results = JSON.parseArray(responseBody);
                     for (int i = 0; i < results.size(); i++) {
                         JSONObject storage = results.getJSONObject(i);
                         String storagePath = storage.getString("path");
@@ -562,11 +567,25 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
                             return storage.getLong("id");
                         }
                     }
+                } else {
+                    JSONObject data = JSON.parseObject(responseBody);
+                    Object resultsObj = data.get("results");
+                    
+                    if (resultsObj instanceof com.alibaba.fastjson2.JSONArray) {
+                        com.alibaba.fastjson2.JSONArray results = (com.alibaba.fastjson2.JSONArray) resultsObj;
+                        for (int i = 0; i < results.size(); i++) {
+                            JSONObject storage = results.getJSONObject(i);
+                            String storagePath = storage.getString("path");
+                            if (storagePath != null && new File(storagePath).getAbsolutePath().equals(normalizedPath)) {
+                                return storage.getLong("id");
+                            }
+                        }
+                    }
                 }
             }
             return null;
         } catch (Exception e) {
-            log.error("获取已存在的存储失败: lsProjectId={}, error={}", lsProjectId, e.getMessage());
+            log.error("获取已存在的存储失败: lsProjectId={}, error={}", lsProjectId, e.getMessage(), e);
             return null;
         }
     }
@@ -580,7 +599,7 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
                 return 0;
             }
 
-            String url = String.format("%s/api/projects/%d/tasks?page=1&page_size=1", labelStudioUrl, lsProjectId);
+            String url = String.format("%s/api/tasks?project=%d&page=1&page_size=1", labelStudioUrl, lsProjectId);
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("Authorization", "Token " + lsToken);
@@ -594,8 +613,26 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
             );
 
             if (response.getStatusCode() == HttpStatus.OK) {
-                JSONObject data = JSON.parseObject(response.getBody());
-                return data.getInteger("total_count");
+                String responseBody = response.getBody();
+                log.info("获取项目 task 列表响应: lsProjectId={}, statusCode={}, body={}", lsProjectId, response.getStatusCode(), responseBody);
+                
+                if (responseBody == null || responseBody.trim().isEmpty()) {
+                    log.warn("task 列表响应为空: lsProjectId={}", lsProjectId);
+                    return 0;
+                }
+                
+                JSONObject data = JSON.parseObject(responseBody);
+                Integer totalCount = data.getInteger("total_count");
+                if (totalCount == null) {
+                    log.warn("total_count 字段为空，尝试从 tasks 数组获取: lsProjectId={}", lsProjectId);
+                    Object tasksObj = data.get("tasks");
+                    if (tasksObj instanceof com.alibaba.fastjson2.JSONArray) {
+                        com.alibaba.fastjson2.JSONArray tasks = (com.alibaba.fastjson2.JSONArray) tasksObj;
+                        return tasks.size();
+                    }
+                    return 0;
+                }
+                return totalCount;
             }
             return 0;
         } catch (Exception e) {

@@ -1,0 +1,123 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /api/v1
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
+
+spring:
+  application:
+    name: annotation-platform-backend
+
+  datasource:
+    driver-class-name: org.h2.Driver
+    url: jdbc:h2:file:/root/autodl-fs/Annotation-Platform/backend-springboot/data/testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    username: sa
+    password: 
+    hikari:
+      minimum-idle: 2
+      maximum-pool-size: 10
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      connection-timeout: 30000
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+        format_sql: false
+        use_sql_comments: false
+        jdbc:
+          batch_size: 20
+          order_inserts: true
+          order_updates: true
+    open-in-view: false
+
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 500MB
+      max-request-size: 500MB
+      file-size-threshold: 10MB
+
+  jackson:
+    time-zone: GMT+8
+    date-format: yyyy-MM-dd HH:mm:ss
+    serialization:
+      write-dates-as-timestamps: false
+      write-null-map-values: false
+      write-enums-using-to-string: true
+    deserialization:
+      fail-on-unknown-properties: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: always
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+    tags-sorter: alpha
+    operations-sorter: alpha
+
+app:
+  security:
+    jwt:
+      secret: annotation-platform-secret-key-2024-must-be-at-least-256-bits-long-for-hs256-algorithm
+      expiration: 604800000
+      header: Authorization
+      prefix: Bearer
+
+  file:
+    upload:
+      base-path: /root/autodl-fs/uploads
+      chunk-path: /tmp/upload_chunks
+      max-file-size: 5368709120
+      chunk-size: 5242880
+
+  label-studio:
+    url: http://localhost:5001
+    internal-url: http://localhost:5001
+    public-url: http://122.51.47.91:28450
+    timeout: 30000
+    admin-token: 3dd84879dff6fd5949dc1dd76edbecccac3f8524
+    db-path: /root/.local/share/label-studio/label_studio.sqlite3
+
+  algorithm:
+    url: http://localhost:8001
+    timeout: 600000
+
+  training:
+    output-base-path: /root/autodl-fs/Annotation-Platform/training_runs
+    conda-env: xingmu_yolo
+    script-path: /root/autodl-fs/web_biaozhupingtai/scripts/train_yolo.py
+
+logging:
+  level:
+    root: WARN
+    com.annotation.platform: INFO
+    org.springframework.security: INFO
+    org.hibernate: ERROR
+    org.hibernate.SQL: OFF
+    org.hibernate.type.descriptor.sql.BasicBinder: OFF
+  pattern:
+    console: '%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n'
+    file: '%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n'
+  file:
+    name: logs/annotation-platform.log
+    max-size: 100MB
+    max-history: 30

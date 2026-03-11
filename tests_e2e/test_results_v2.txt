@@ -1,0 +1,254 @@
+============================= test session starts ==============================
+platform linux -- Python 3.10.19, pytest-9.0.2, pluggy-1.6.0 -- /root/miniconda3/envs/e2e_test/bin/python3.10
+cachedir: .pytest_cache
+rootdir: /root/autodl-fs/Annotation-Platform
+configfile: pytest.ini
+collecting ... collected 52 items
+
+test_auth_and_project.py::test_user_registration_and_project_creation FAILED [  1%]
+test_dino_detection.py::test_dino_detection_workflow PASSED              [  3%]
+test_dino_detection.py::test_dino_task_cancellation PASSED               [  5%]
+test_edge_cases.py::test_invalid_token FAILED                            [  7%]
+test_edge_cases.py::test_update_nonexistent_project PASSED               [  9%]
+test_edge_cases.py::test_delete_nonexistent_project PASSED               [ 11%]
+test_edge_cases.py::test_get_nonexistent_task PASSED                     [ 13%]
+test_edge_cases.py::test_cancel_nonexistent_training FAILED              [ 15%]
+test_edge_cases.py::test_invalid_project_name PASSED                     [ 17%]
+test_edge_cases.py::test_invalid_project_labels FAILED                   [ 19%]
+test_edge_cases.py::test_get_nonexistent_user PASSED                     [ 21%]
+test_edge_cases.py::test_get_nonexistent_training_record FAILED          [ 23%]
+test_edge_cases.py::test_invalid_training_request_missing_fields FAILED  [ 25%]
+test_edge_cases.py::test_get_nonexistent_test_results FAILED             [ 26%]
+test_file_upload.py::test_chunked_file_upload_and_merge SKIPPED (Upload
+progress already cleared after merge - this is expected behavior)        [ 28%]
+test_mlops_advanced.py::test_get_training_log PASSED                     [ 30%]
+test_mlops_advanced.py::test_get_training_records_by_project PASSED      [ 32%]
+test_mlops_advanced.py::test_get_training_records_by_user FAILED         [ 34%]
+test_mlops_advanced.py::test_get_training_record_by_task_id FAILED       [ 36%]
+test_mlops_advanced.py::test_get_completed_trainings PASSED              [ 38%]
+test_mlops_advanced.py::test_start_model_test SKIPPED (Model file not
+found: /root/autodl-
+fs/web_biaozhupingtai/runs/detect/train/weights/best.pt)                 [ 40%]
+test_mlops_advanced.py::test_get_model_test_status FAILED                [ 42%]
+test_mlops_advanced.py::test_get_model_test_results FAILED               [ 44%]
+test_mlops_advanced.py::test_cancel_model_test FAILED                    [ 46%]
+test_mlops_advanced.py::test_get_training_record_not_found FAILED        [ 48%]
+test_mlops_advanced.py::test_cancel_nonexistent_training_by_id FAILED    [ 50%]
+test_project_crud.py::test_update_project PASSED                         [ 51%]
+test_project_crud.py::test_get_project_images FAILED                     [ 53%]
+test_project_crud.py::test_get_project_stats PASSED                      [ 55%]
+test_project_crud.py::test_get_projects_by_status PASSED                 [ 57%]
+test_project_crud.py::test_delete_project FAILED                         [ 59%]
+test_project_crud.py::test_get_nonexistent_project PASSED                [ 61%]
+test_project_crud.py::test_get_project_images_pagination FAILED          [ 63%]
+test_user_auth.py::test_get_current_user PASSED                          [ 65%]
+test_user_auth.py::test_get_user_by_id PASSED                            [ 67%]
+test_user_auth.py::test_get_users_list FAILED                            [ 69%]
+test_user_auth.py::test_get_users_by_organization PASSED                 [ 71%]
+test_user_auth.py::test_logout PASSED                                    [ 73%]
+test_user_auth.py::test_refresh_token PASSED                             [ 75%]
+test_user_auth.py::test_login_with_invalid_credentials FAILED            [ 76%]
+test_user_auth.py::test_register_duplicate_user FAILED                   [ 78%]
+test_user_auth.py::test_register_invalid_email PASSED                    [ 80%]
+test_user_auth.py::test_register_missing_fields PASSED                   [ 82%]
+test_user_auth.py::test_get_nonexistent_user_by_id PASSED                [ 84%]
+test_user_auth.py::test_sync_user_to_label_studio PASSED                 [ 86%]
+test_user_auth.py::test_get_label_studio_login_url PASSED                [ 88%]
+test_user_auth.py::test_get_label_studio_user_info FAILED                [ 90%]
+test_user_auth.py::test_sync_project_to_label_studio PASSED              [ 92%]
+test_vlm_cleaning.py::test_vlm_cleaning_workflow PASSED                  [ 94%]
+test_vlm_cleaning.py::test_vlm_task_cancellation PASSED                  [ 96%]
+test_yolo_training.py::test_yolo_training_workflow PASSED                [ 98%]
+test_yolo_training.py::test_yolo_training_status_and_cancellation PASSED [100%]
+
+=================================== FAILURES ===================================
+_________________ test_user_registration_and_project_creation __________________
+test_auth_and_project.py:44: in test_user_registration_and_project_creation
+    delete_response.raise_for_status()
+/root/miniconda3/envs/e2e_test/lib/python3.10/site-packages/requests/models.py:1026: in raise_for_status
+    raise HTTPError(http_error_msg, response=self)
+E   requests.exceptions.HTTPError: 500 Server Error:  for url: http://localhost:8080/api/v1/projects/1
+______________________________ test_invalid_token ______________________________
+/root/miniconda3/envs/e2e_test/lib/python3.10/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+/root/miniconda3/envs/e2e_test/lib/python3.10/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+/root/miniconda3/envs/e2e_test/lib/python3.10/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+/root/miniconda3/envs/e2e_test/lib/python3.10/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+test_edge_cases.py:18: in test_invalid_token
+    response_data = response.json() if response.status_code >= 400 else {}
+/root/miniconda3/envs/e2e_test/lib/python3.10/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+_______________________ test_cancel_nonexistent_training _______________________
+test_edge_cases.py:73: in test_cancel_nonexistent_training
+    assert response.status_code == 404, "Should return 404 for nonexistent training cancel"
+E   AssertionError: Should return 404 for nonexistent training cancel
+E   assert 200 == 404
+E    +  where 200 = <Response [200]>.status_code
+_________________________ test_invalid_project_labels __________________________
+test_edge_cases.py:97: in test_invalid_project_labels
+    assert response.status_code == 400, "Should return 400 for empty labels"
+E   AssertionError: Should return 400 for empty labels
+E   assert 200 == 400
+E    +  where 200 = <Response [200]>.status_code
+_____________________ test_get_nonexistent_training_record _____________________
+test_edge_cases.py:117: in test_get_nonexistent_training_record
+    assert response.status_code == 404, "Should return 404 for nonexistent training record"
+E   AssertionError: Should return 404 for nonexistent training record
+E   assert 200 == 404
+E    +  where 200 = <Response [200]>.status_code
+_________________ test_invalid_training_request_missing_fields _________________
+test_edge_cases.py:126: in test_invalid_training_request_missing_fields
+    assert response.status_code == 400, "Should return 400 for missing required fields"
+E   AssertionError: Should return 400 for missing required fields
+E   assert 200 == 400
+E    +  where 200 = <Response [200]>.status_code
+______________________ test_get_nonexistent_test_results _______________________
+test_edge_cases.py:136: in test_get_nonexistent_test_results
+    assert response.status_code == 404, "Should return 404 for nonexistent test results"
+E   AssertionError: Should return 404 for nonexistent test results
+E   assert 200 == 404
+E    +  where 200 = <Response [200]>.status_code
+______________________ test_get_training_records_by_user _______________________
+test_mlops_advanced.py:191: in test_get_training_records_by_user
+    assert records_data["success"], "Failed to get training records by user"
+E   AssertionError: Failed to get training records by user
+E   assert False
+_____________________ test_get_training_record_by_task_id ______________________
+test_mlops_advanced.py:256: in test_get_training_record_by_task_id
+    assert record_data["success"], "Failed to get training record by task ID"
+E   AssertionError: Failed to get training record by task ID
+E   assert False
+__________________________ test_get_model_test_status __________________________
+test_mlops_advanced.py:307: in test_get_model_test_status
+    assert response.status_code == 404, "Should return 404 for nonexistent test task"
+E   AssertionError: Should return 404 for nonexistent test task
+E   assert 200 == 404
+E    +  where 200 = <Response [200]>.status_code
+_________________________ test_get_model_test_results __________________________
+test_mlops_advanced.py:315: in test_get_model_test_results
+    assert response.status_code == 404, "Should return 404 for nonexistent test results"
+E   AssertionError: Should return 404 for nonexistent test results
+E   assert 200 == 404
+E    +  where 200 = <Response [200]>.status_code
+____________________________ test_cancel_model_test ____________________________
+test_mlops_advanced.py:323: in test_cancel_model_test
+    assert response.status_code == 404, "Should return 404 for nonexistent test cancel"
+E   AssertionError: Should return 404 for nonexistent test cancel
+E   assert 200 == 404
+E    +  where 200 = <Response [200]>.status_code
+______________________ test_get_training_record_not_found ______________________
+test_mlops_advanced.py:333: in test_get_training_record_not_found
+    assert response.status_code == 404, "Should return 404 for nonexistent training record"
+E   AssertionError: Should return 404 for nonexistent training record
+E   assert 200 == 404
+E    +  where 200 = <Response [200]>.status_code
+____________________ test_cancel_nonexistent_training_by_id ____________________
+test_mlops_advanced.py:343: in test_cancel_nonexistent_training_by_id
+    assert response.status_code == 404, "Should return 404 for nonexistent training cancel"
+E   AssertionError: Should return 404 for nonexistent training cancel
+E   assert 200 == 404
+E    +  where 200 = <Response [200]>.status_code
+___________________________ test_get_project_images ____________________________
+test_project_crud.py:58: in test_get_project_images
+    images_response.raise_for_status()
+/root/miniconda3/envs/e2e_test/lib/python3.10/site-packages/requests/models.py:1026: in raise_for_status
+    raise HTTPError(http_error_msg, response=self)
+E   requests.exceptions.HTTPError: 500 Server Error:  for url: http://localhost:8080/api/v1/projects/11/images?page=0&size=10
+_____________________________ test_delete_project ______________________________
+test_project_crud.py:139: in test_delete_project
+    delete_response.raise_for_status()
+/root/miniconda3/envs/e2e_test/lib/python3.10/site-packages/requests/models.py:1026: in raise_for_status
+    raise HTTPError(http_error_msg, response=self)
+E   requests.exceptions.HTTPError: 500 Server Error:  for url: http://localhost:8080/api/v1/projects/14
+______________________ test_get_project_images_pagination ______________________
+test_project_crud.py:177: in test_get_project_images_pagination
+    images_response.raise_for_status()
+/root/miniconda3/envs/e2e_test/lib/python3.10/site-packages/requests/models.py:1026: in raise_for_status
+    raise HTTPError(http_error_msg, response=self)
+E   requests.exceptions.HTTPError: 500 Server Error:  for url: http://localhost:8080/api/v1/projects/15/images?page=0&size=1
+_____________________________ test_get_users_list ______________________________
+test_user_auth.py:36: in test_get_users_list
+    assert len(users_data["data"]) > 0, "Should have at least one user"
+E   AssertionError: Should have at least one user
+E   assert 0 > 0
+E    +  where 0 = len([])
+_____________________ test_login_with_invalid_credentials ______________________
+test_user_auth.py:74: in test_login_with_invalid_credentials
+    assert response.status_code == 401 or response.status_code == 400, \
+E   AssertionError: Expected 401/400 for invalid credentials, got 200
+E   assert (200 == 401 or 200 == 400)
+E    +  where 200 = <Response [200]>.status_code
+E    +  and   200 = <Response [200]>.status_code
+_________________________ test_register_duplicate_user _________________________
+test_user_auth.py:107: in test_register_duplicate_user
+    assert second_response.status_code == 400, "Second registration should fail"
+E   AssertionError: Second registration should fail
+E   assert 200 == 400
+E    +  where 200 = <Response [200]>.status_code
+_______________________ test_get_label_studio_user_info ________________________
+test_user_auth.py:176: in test_get_label_studio_user_info
+    assert data["success"], "Failed to get Label Studio user info"
+E   AssertionError: Failed to get Label Studio user info
+E   assert False
+=========================== short test summary info ============================
+FAILED test_auth_and_project.py::test_user_registration_and_project_creation - requests.exceptions.HTTPError: 500 Server Error:  for url: http://localhost:8080/api/v1/projects/1
+FAILED test_edge_cases.py::test_invalid_token - requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+FAILED test_edge_cases.py::test_cancel_nonexistent_training - AssertionError: Should return 404 for nonexistent training cancel
+assert 200 == 404
+ +  where 200 = <Response [200]>.status_code
+FAILED test_edge_cases.py::test_invalid_project_labels - AssertionError: Should return 400 for empty labels
+assert 200 == 400
+ +  where 200 = <Response [200]>.status_code
+FAILED test_edge_cases.py::test_get_nonexistent_training_record - AssertionError: Should return 404 for nonexistent training record
+assert 200 == 404
+ +  where 200 = <Response [200]>.status_code
+FAILED test_edge_cases.py::test_invalid_training_request_missing_fields - AssertionError: Should return 400 for missing required fields
+assert 200 == 400
+ +  where 200 = <Response [200]>.status_code
+FAILED test_edge_cases.py::test_get_nonexistent_test_results - AssertionError: Should return 404 for nonexistent test results
+assert 200 == 404
+ +  where 200 = <Response [200]>.status_code
+FAILED test_mlops_advanced.py::test_get_training_records_by_user - AssertionError: Failed to get training records by user
+assert False
+FAILED test_mlops_advanced.py::test_get_training_record_by_task_id - AssertionError: Failed to get training record by task ID
+assert False
+FAILED test_mlops_advanced.py::test_get_model_test_status - AssertionError: Should return 404 for nonexistent test task
+assert 200 == 404
+ +  where 200 = <Response [200]>.status_code
+FAILED test_mlops_advanced.py::test_get_model_test_results - AssertionError: Should return 404 for nonexistent test results
+assert 200 == 404
+ +  where 200 = <Response [200]>.status_code
+FAILED test_mlops_advanced.py::test_cancel_model_test - AssertionError: Should return 404 for nonexistent test cancel
+assert 200 == 404
+ +  where 200 = <Response [200]>.status_code
+FAILED test_mlops_advanced.py::test_get_training_record_not_found - AssertionError: Should return 404 for nonexistent training record
+assert 200 == 404
+ +  where 200 = <Response [200]>.status_code
+FAILED test_mlops_advanced.py::test_cancel_nonexistent_training_by_id - AssertionError: Should return 404 for nonexistent training cancel
+assert 200 == 404
+ +  where 200 = <Response [200]>.status_code
+FAILED test_project_crud.py::test_get_project_images - requests.exceptions.HTTPError: 500 Server Error:  for url: http://localhost:8080/api/v1/projects/11/images?page=0&size=10
+FAILED test_project_crud.py::test_delete_project - requests.exceptions.HTTPError: 500 Server Error:  for url: http://localhost:8080/api/v1/projects/14
+FAILED test_project_crud.py::test_get_project_images_pagination - requests.exceptions.HTTPError: 500 Server Error:  for url: http://localhost:8080/api/v1/projects/15/images?page=0&size=1
+FAILED test_user_auth.py::test_get_users_list - AssertionError: Should have at least one user
+assert 0 > 0
+ +  where 0 = len([])
+FAILED test_user_auth.py::test_login_with_invalid_credentials - AssertionError: Expected 401/400 for invalid credentials, got 200
+assert (200 == 401 or 200 == 400)
+ +  where 200 = <Response [200]>.status_code
+ +  and   200 = <Response [200]>.status_code
+FAILED test_user_auth.py::test_register_duplicate_user - AssertionError: Second registration should fail
+assert 200 == 400
+ +  where 200 = <Response [200]>.status_code
+FAILED test_user_auth.py::test_get_label_studio_user_info - AssertionError: Failed to get Label Studio user info
+assert False
+================== 21 failed, 29 passed, 2 skipped in 21.71s ===================
+ERROR conda.cli.main_run:execute(47): `conda run pytest -v` failed. (See above for error)
+

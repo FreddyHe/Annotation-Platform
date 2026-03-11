@@ -1,0 +1,32 @@
+nohup: ignoring input
+
+> annotation-platform-frontend@1.0.0 dev
+> vite --host 0.0.0.0
+
+
+  VITE v5.4.21  ready in 362 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: http://172.17.0.2:5173/
+4:21:35 PM [vite] Pre-transform error: Invalid end tag.
+4:21:36 PM [vite] Internal server error: Invalid end tag.
+  Plugin: vite:vue
+  File: /root/autodl-fs/Annotation-Platform/frontend-vue/src/components/TaskList.vue:122:25
+  120|          </el-descriptions>
+  121|  
+  122|          <el-divider>任务参数</el-descriptions-item>
+     |                           ^
+  123|          <pre class="task-params">{{ JSON.stringify(currentTask.parameters, null, 2) }}</pre>
+  124|  
+      at createCompilerError (/root/autodl-fs/Annotation-Platform/frontend-vue/node_modules/@vue/compiler-core/dist/compiler-core.cjs.js:1378:17)
+      at emitError (/root/autodl-fs/Annotation-Platform/frontend-vue/node_modules/@vue/compiler-core/dist/compiler-core.cjs.js:3014:5)
+      at Object.onclosetag (/root/autodl-fs/Annotation-Platform/frontend-vue/node_modules/@vue/compiler-core/dist/compiler-core.cjs.js:2391:9)
+      at Tokenizer.stateInClosingTagName (/root/autodl-fs/Annotation-Platform/frontend-vue/node_modules/@vue/compiler-core/dist/compiler-core.cjs.js:799:16)
+      at Tokenizer.parse (/root/autodl-fs/Annotation-Platform/frontend-vue/node_modules/@vue/compiler-core/dist/compiler-core.cjs.js:1157:16)
+      at Object.baseParse (/root/autodl-fs/Annotation-Platform/frontend-vue/node_modules/@vue/compiler-core/dist/compiler-core.cjs.js:3053:13)
+      at Object.parse (/root/autodl-fs/Annotation-Platform/frontend-vue/node_modules/@vue/compiler-dom/dist/compiler-dom.cjs.js:910:23)
+      at Object.parse$1 [as parse] (/root/autodl-fs/Annotation-Platform/frontend-vue/node_modules/@vue/compiler-sfc/dist/compiler-sfc.cjs.js:1824:24)
+      at createDescriptor (file:///root/autodl-fs/Annotation-Platform/frontend-vue/node_modules/@vitejs/plugin-vue/dist/index.mjs:74:43)
+      at transformMain (file:///root/autodl-fs/Annotation-Platform/frontend-vue/node_modules/@vitejs/plugin-vue/dist/index.mjs:2319:34)
+4:23:40 PM [vite] hmr update /src/views/ProjectList.vue, /src/views/ProjectList.vue?vue&type=style&index=0&scoped=33eb13a2&lang.css
+4:34:32 PM [vite] hmr update /src/views/ProjectList.vue

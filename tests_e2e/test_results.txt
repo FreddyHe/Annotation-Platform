@@ -1,0 +1,338 @@
+============================= test session starts ==============================
+platform linux -- Python 3.10.19, pytest-9.0.2, pluggy-1.6.0 -- /root/miniconda3/envs/e2e_test/bin/python3.10
+cachedir: .pytest_cache
+rootdir: /root/autodl-fs/Annotation-Platform
+configfile: pytest.ini
+collecting ... collected 52 items
+
+test_auth_and_project.py::test_user_registration_and_project_creation FAILED [  1%]
+test_dino_detection.py::test_dino_detection_workflow FAILED              [  3%]
+test_dino_detection.py::test_dino_task_cancellation FAILED               [  5%]
+test_edge_cases.py::test_invalid_token FAILED                            [  7%]
+test_edge_cases.py::test_update_nonexistent_project PASSED               [  9%]
+test_edge_cases.py::test_delete_nonexistent_project PASSED               [ 11%]
+test_edge_cases.py::test_get_nonexistent_task PASSED                     [ 13%]
+test_edge_cases.py::test_cancel_nonexistent_training FAILED              [ 15%]
+test_edge_cases.py::test_invalid_project_name PASSED                     [ 17%]
+test_edge_cases.py::test_invalid_project_labels FAILED                   [ 19%]
+test_edge_cases.py::test_get_nonexistent_user PASSED                     [ 21%]
+test_edge_cases.py::test_get_nonexistent_training_record FAILED          [ 23%]
+test_edge_cases.py::test_invalid_training_request_missing_fields FAILED  [ 25%]
+test_edge_cases.py::test_get_nonexistent_test_results FAILED             [ 26%]
+test_file_upload.py::test_chunked_file_upload_and_merge FAILED           [ 28%]
+test_mlops_advanced.py::test_get_training_log FAILED                     [ 30%]
+test_mlops_advanced.py::test_get_training_records_by_project FAILED      [ 32%]
+test_mlops_advanced.py::test_get_training_records_by_user FAILED         [ 34%]
+test_mlops_advanced.py::test_get_training_record_by_task_id FAILED       [ 36%]
+test_mlops_advanced.py::test_get_completed_trainings PASSED              [ 38%]
+test_mlops_advanced.py::test_start_model_test SKIPPED (Model file not
+found: /root/autodl-
+fs/web_biaozhupingtai/runs/detect/train/weights/best.pt)                 [ 40%]
+test_mlops_advanced.py::test_get_model_test_status FAILED                [ 42%]
+test_mlops_advanced.py::test_get_model_test_results FAILED               [ 44%]
+test_mlops_advanced.py::test_cancel_model_test FAILED                    [ 46%]
+test_mlops_advanced.py::test_get_training_record_not_found FAILED        [ 48%]
+test_mlops_advanced.py::test_cancel_nonexistent_training_by_id FAILED    [ 50%]
+test_project_crud.py::test_update_project FAILED                         [ 51%]
+test_project_crud.py::test_get_project_images FAILED                     [ 53%]
+test_project_crud.py::test_get_project_stats FAILED                      [ 55%]
+test_project_crud.py::test_get_projects_by_status FAILED                 [ 57%]
+test_project_crud.py::test_delete_project FAILED                         [ 59%]
+test_project_crud.py::test_get_nonexistent_project PASSED                [ 61%]
+test_project_crud.py::test_get_project_images_pagination FAILED          [ 63%]
+test_user_auth.py::test_get_current_user PASSED                          [ 65%]
+test_user_auth.py::test_get_user_by_id PASSED                            [ 67%]
+test_user_auth.py::test_get_users_list FAILED                            [ 69%]
+test_user_auth.py::test_get_users_by_organization PASSED                 [ 71%]
+test_user_auth.py::test_logout PASSED                                    [ 73%]
+test_user_auth.py::test_refresh_token PASSED                             [ 75%]
+test_user_auth.py::test_login_with_invalid_credentials FAILED            [ 76%]
+test_user_auth.py::test_register_duplicate_user FAILED                   [ 78%]
+test_user_auth.py::test_register_invalid_email PASSED                    [ 80%]
+test_user_auth.py::test_register_missing_fields PASSED                   [ 82%]
+test_user_auth.py::test_get_nonexistent_user_by_id PASSED                [ 84%]
+test_user_auth.py::test_sync_user_to_label_studio FAILED                 [ 86%]
+test_user_auth.py::test_get_label_studio_login_url FAILED                [ 88%]
+test_user_auth.py::test_get_label_studio_user_info FAILED                [ 90%]
+test_user_auth.py::test_sync_project_to_label_studio FAILED              [ 92%]
+test_vlm_cleaning.py::test_vlm_cleaning_workflow FAILED                  [ 94%]
+test_vlm_cleaning.py::test_vlm_task_cancellation FAILED                  [ 96%]
+test_yolo_training.py::test_yolo_training_workflow FAILED                [ 98%]
+test_yolo_training.py::test_yolo_training_status_and_cancellation FAILED [100%]
+
+=================================== FAILURES ===================================
+_________________ test_user_registration_and_project_creation __________________
+test_auth_and_project.py:22: in test_user_registration_and_project_creation
+    assert project_data["success"], f"Project creation failed: {project_data.get('message', 'Unknown error')}"
+E   AssertionError: Project creation failed: 同步项目到 Label Studio 失败: 401 Unauthorized: [no body]
+E   assert False
+_________________________ test_dino_detection_workflow _________________________
+test_dino_detection.py:16: in test_dino_detection_workflow
+    assert project_data["success"], f"Project creation failed: {project_data.get('message', 'Unknown error')}"
+E   AssertionError: Project creation failed: 同步项目到 Label Studio 失败: 401 Unauthorized: [no body]
+E   assert False
+_________________________ test_dino_task_cancellation __________________________
+test_dino_detection.py:79: in test_dino_task_cancellation
+    assert project_data["success"], f"Project creation failed: {project_data.get('message', 'Unknown error')}"
+E   AssertionError: Project creation failed: 同步项目到 Label Studio 失败: 401 Unauthorized: [no body]
+E   assert False
+______________________________ test_invalid_token ______________________________
+/root/miniconda3/envs/e2e_test/lib/python3.10/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+/root/miniconda3/envs/e2e_test/lib/python3.10/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+/root/miniconda3/envs/e2e_test/lib/python3.10/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+/root/miniconda3/envs/e2e_test/lib/python3.10/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+test_edge_cases.py:18: in test_invalid_token
+    response_data = response.json() if response.status_code >= 400 else {}
+/root/miniconda3/envs/e2e_test/lib/python3.10/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+_______________________ test_cancel_nonexistent_training _______________________
+test_edge_cases.py:73: in test_cancel_nonexistent_training
+    assert response.status_code == 404, "Should return 404 for nonexistent training cancel"
+E   AssertionError: Should return 404 for nonexistent training cancel
+E   assert 200 == 404
+E    +  where 200 = <Response [200]>.status_code
+_________________________ test_invalid_project_labels __________________________
+test_edge_cases.py:97: in test_invalid_project_labels
+    assert response.status_code == 400, "Should return 400 for empty labels"
+E   AssertionError: Should return 400 for empty labels
+E   assert 200 == 400
+E    +  where 200 = <Response [200]>.status_code
+_____________________ test_get_nonexistent_training_record _____________________
+test_edge_cases.py:117: in test_get_nonexistent_training_record
+    assert response.status_code == 404, "Should return 404 for nonexistent training record"
+E   AssertionError: Should return 404 for nonexistent training record
+E   assert 200 == 404
+E    +  where 200 = <Response [200]>.status_code
+_________________ test_invalid_training_request_missing_fields _________________
+test_edge_cases.py:126: in test_invalid_training_request_missing_fields
+    assert response.status_code == 400, "Should return 400 for missing required fields"
+E   AssertionError: Should return 400 for missing required fields
+E   assert 200 == 400
+E    +  where 200 = <Response [200]>.status_code
+______________________ test_get_nonexistent_test_results _______________________
+test_edge_cases.py:136: in test_get_nonexistent_test_results
+    assert response.status_code == 404, "Should return 404 for nonexistent test results"
+E   AssertionError: Should return 404 for nonexistent test results
+E   assert 200 == 404
+E    +  where 200 = <Response [200]>.status_code
+______________________ test_chunked_file_upload_and_merge ______________________
+test_file_upload.py:16: in test_chunked_file_upload_and_merge
+    assert project_data["success"], f"Project creation failed: {project_data.get('message', 'Unknown error')}"
+E   AssertionError: Project creation failed: 同步项目到 Label Studio 失败: 401 Unauthorized: [no body]
+E   assert False
+____________________________ test_get_training_log _____________________________
+test_mlops_advanced.py:19: in test_get_training_log
+    project_id = project_data["data"]["id"]
+E   TypeError: 'NoneType' object is not subscriptable
+_____________________ test_get_training_records_by_project _____________________
+test_mlops_advanced.py:86: in test_get_training_records_by_project
+    project_id = project_data["data"]["id"]
+E   TypeError: 'NoneType' object is not subscriptable
+______________________ test_get_training_records_by_user _______________________
+test_mlops_advanced.py:149: in test_get_training_records_by_user
+    project_id = project_data["data"]["id"]
+E   TypeError: 'NoneType' object is not subscriptable
+_____________________ test_get_training_record_by_task_id ______________________
+test_mlops_advanced.py:212: in test_get_training_record_by_task_id
+    project_id = project_data["data"]["id"]
+E   TypeError: 'NoneType' object is not subscriptable
+__________________________ test_get_model_test_status __________________________
+test_mlops_advanced.py:307: in test_get_model_test_status
+    assert response.status_code == 404, "Should return 404 for nonexistent test task"
+E   AssertionError: Should return 404 for nonexistent test task
+E   assert 200 == 404
+E    +  where 200 = <Response [200]>.status_code
+_________________________ test_get_model_test_results __________________________
+test_mlops_advanced.py:315: in test_get_model_test_results
+    assert response.status_code == 404, "Should return 404 for nonexistent test results"
+E   AssertionError: Should return 404 for nonexistent test results
+E   assert 200 == 404
+E    +  where 200 = <Response [200]>.status_code
+____________________________ test_cancel_model_test ____________________________
+test_mlops_advanced.py:323: in test_cancel_model_test
+    assert response.status_code == 404, "Should return 404 for nonexistent test cancel"
+E   AssertionError: Should return 404 for nonexistent test cancel
+E   assert 200 == 404
+E    +  where 200 = <Response [200]>.status_code
+______________________ test_get_training_record_not_found ______________________
+test_mlops_advanced.py:333: in test_get_training_record_not_found
+    assert response.status_code == 404, "Should return 404 for nonexistent training record"
+E   AssertionError: Should return 404 for nonexistent training record
+E   assert 200 == 404
+E    +  where 200 = <Response [200]>.status_code
+____________________ test_cancel_nonexistent_training_by_id ____________________
+test_mlops_advanced.py:343: in test_cancel_nonexistent_training_by_id
+    assert response.status_code == 404, "Should return 404 for nonexistent training cancel"
+E   AssertionError: Should return 404 for nonexistent training cancel
+E   assert 200 == 404
+E    +  where 200 = <Response [200]>.status_code
+_____________________________ test_update_project ______________________________
+test_project_crud.py:16: in test_update_project
+    assert project_data["success"], f"Project creation failed: {project_data.get('message', 'Unknown error')}"
+E   AssertionError: Project creation failed: 同步项目到 Label Studio 失败: 401 Unauthorized: [no body]
+E   assert False
+___________________________ test_get_project_images ____________________________
+test_project_crud.py:48: in test_get_project_images
+    project_id = project_data["data"]["id"]
+E   TypeError: 'NoneType' object is not subscriptable
+____________________________ test_get_project_stats ____________________________
+test_project_crud.py:77: in test_get_project_stats
+    project_id = project_data["data"]["id"]
+E   TypeError: 'NoneType' object is not subscriptable
+_________________________ test_get_projects_by_status __________________________
+test_project_crud.py:106: in test_get_projects_by_status
+    project_id = project_data["data"]["id"]
+E   TypeError: 'NoneType' object is not subscriptable
+_____________________________ test_delete_project ______________________________
+test_project_crud.py:134: in test_delete_project
+    project_id = project_data["data"]["id"]
+E   TypeError: 'NoneType' object is not subscriptable
+______________________ test_get_project_images_pagination ______________________
+test_project_crud.py:167: in test_get_project_images_pagination
+    project_id = project_data["data"]["id"]
+E   TypeError: 'NoneType' object is not subscriptable
+_____________________________ test_get_users_list ______________________________
+test_user_auth.py:36: in test_get_users_list
+    assert len(users_data["data"]) > 0, "Should have at least one user"
+E   AssertionError: Should have at least one user
+E   assert 0 > 0
+E    +  where 0 = len([])
+_____________________ test_login_with_invalid_credentials ______________________
+test_user_auth.py:74: in test_login_with_invalid_credentials
+    assert response.status_code == 401 or response.status_code == 400, \
+E   AssertionError: Expected 401/400 for invalid credentials, got 200
+E   assert (200 == 401 or 200 == 400)
+E    +  where 200 = <Response [200]>.status_code
+E    +  and   200 = <Response [200]>.status_code
+_________________________ test_register_duplicate_user _________________________
+test_user_auth.py:107: in test_register_duplicate_user
+    assert second_response.status_code == 400, "Second registration should fail"
+E   AssertionError: Second registration should fail
+E   assert 200 == 400
+E    +  where 200 = <Response [200]>.status_code
+________________________ test_sync_user_to_label_studio ________________________
+test_user_auth.py:155: in test_sync_user_to_label_studio
+    assert data["success"], "Failed to sync user to Label Studio"
+E   AssertionError: Failed to sync user to Label Studio
+E   assert False
+_______________________ test_get_label_studio_login_url ________________________
+test_user_auth.py:164: in test_get_label_studio_login_url
+    assert data["success"], "Failed to get Label Studio login URL"
+E   AssertionError: Failed to get Label Studio login URL
+E   assert False
+_______________________ test_get_label_studio_user_info ________________________
+test_user_auth.py:176: in test_get_label_studio_user_info
+    assert data["success"], "Failed to get Label Studio user info"
+E   AssertionError: Failed to get Label Studio user info
+E   assert False
+______________________ test_sync_project_to_label_studio _______________________
+test_user_auth.py:189: in test_sync_project_to_label_studio
+    project_id = project_data["data"]["id"]
+E   TypeError: 'NoneType' object is not subscriptable
+__________________________ test_vlm_cleaning_workflow __________________________
+test_vlm_cleaning.py:16: in test_vlm_cleaning_workflow
+    assert project_data["success"], f"Project creation failed: {project_data.get('message', 'Unknown error')}"
+E   AssertionError: Project creation failed: 同步项目到 Label Studio 失败: 401 Unauthorized: [no body]
+E   assert False
+__________________________ test_vlm_task_cancellation __________________________
+test_vlm_cleaning.py:79: in test_vlm_task_cancellation
+    assert project_data["success"], f"Project creation failed: {project_data.get('message', 'Unknown error')}"
+E   AssertionError: Project creation failed: 同步项目到 Label Studio 失败: 401 Unauthorized: [no body]
+E   assert False
+_________________________ test_yolo_training_workflow __________________________
+test_yolo_training.py:16: in test_yolo_training_workflow
+    assert project_data["success"], f"Project creation failed: {project_data.get('message', 'Unknown error')}"
+E   AssertionError: Project creation failed: 同步项目到 Label Studio 失败: 401 Unauthorized: [no body]
+E   assert False
+__________________ test_yolo_training_status_and_cancellation __________________
+test_yolo_training.py:92: in test_yolo_training_status_and_cancellation
+    assert project_data["success"], f"Project creation failed: {project_data.get('message', 'Unknown error')}"
+E   AssertionError: Project creation failed: 同步项目到 Label Studio 失败: 401 Unauthorized: [no body]
+E   assert False
+=========================== short test summary info ============================
+FAILED test_auth_and_project.py::test_user_registration_and_project_creation - AssertionError: Project creation failed: 同步项目到 Label Studio 失败: 401 Unauthorized: [no body]
+assert False
+FAILED test_dino_detection.py::test_dino_detection_workflow - AssertionError: Project creation failed: 同步项目到 Label Studio 失败: 401 Unauthorized: [no body]
+assert False
+FAILED test_dino_detection.py::test_dino_task_cancellation - AssertionError: Project creation failed: 同步项目到 Label Studio 失败: 401 Unauthorized: [no body]
+assert False
+FAILED test_edge_cases.py::test_invalid_token - requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+FAILED test_edge_cases.py::test_cancel_nonexistent_training - AssertionError: Should return 404 for nonexistent training cancel
+assert 200 == 404
+ +  where 200 = <Response [200]>.status_code
+FAILED test_edge_cases.py::test_invalid_project_labels - AssertionError: Should return 400 for empty labels
+assert 200 == 400
+ +  where 200 = <Response [200]>.status_code
+FAILED test_edge_cases.py::test_get_nonexistent_training_record - AssertionError: Should return 404 for nonexistent training record
+assert 200 == 404
+ +  where 200 = <Response [200]>.status_code
+FAILED test_edge_cases.py::test_invalid_training_request_missing_fields - AssertionError: Should return 400 for missing required fields
+assert 200 == 400
+ +  where 200 = <Response [200]>.status_code
+FAILED test_edge_cases.py::test_get_nonexistent_test_results - AssertionError: Should return 404 for nonexistent test results
+assert 200 == 404
+ +  where 200 = <Response [200]>.status_code
+FAILED test_file_upload.py::test_chunked_file_upload_and_merge - AssertionError: Project creation failed: 同步项目到 Label Studio 失败: 401 Unauthorized: [no body]
+assert False
+FAILED test_mlops_advanced.py::test_get_training_log - TypeError: 'NoneType' object is not subscriptable
+FAILED test_mlops_advanced.py::test_get_training_records_by_project - TypeError: 'NoneType' object is not subscriptable
+FAILED test_mlops_advanced.py::test_get_training_records_by_user - TypeError: 'NoneType' object is not subscriptable
+FAILED test_mlops_advanced.py::test_get_training_record_by_task_id - TypeError: 'NoneType' object is not subscriptable
+FAILED test_mlops_advanced.py::test_get_model_test_status - AssertionError: Should return 404 for nonexistent test task
+assert 200 == 404
+ +  where 200 = <Response [200]>.status_code
+FAILED test_mlops_advanced.py::test_get_model_test_results - AssertionError: Should return 404 for nonexistent test results
+assert 200 == 404
+ +  where 200 = <Response [200]>.status_code
+FAILED test_mlops_advanced.py::test_cancel_model_test - AssertionError: Should return 404 for nonexistent test cancel
+assert 200 == 404
+ +  where 200 = <Response [200]>.status_code
+FAILED test_mlops_advanced.py::test_get_training_record_not_found - AssertionError: Should return 404 for nonexistent training record
+assert 200 == 404
+ +  where 200 = <Response [200]>.status_code
+FAILED test_mlops_advanced.py::test_cancel_nonexistent_training_by_id - AssertionError: Should return 404 for nonexistent training cancel
+assert 200 == 404
+ +  where 200 = <Response [200]>.status_code
+FAILED test_project_crud.py::test_update_project - AssertionError: Project creation failed: 同步项目到 Label Studio 失败: 401 Unauthorized: [no body]
+assert False
+FAILED test_project_crud.py::test_get_project_images - TypeError: 'NoneType' object is not subscriptable
+FAILED test_project_crud.py::test_get_project_stats - TypeError: 'NoneType' object is not subscriptable
+FAILED test_project_crud.py::test_get_projects_by_status - TypeError: 'NoneType' object is not subscriptable
+FAILED test_project_crud.py::test_delete_project - TypeError: 'NoneType' object is not subscriptable
+FAILED test_project_crud.py::test_get_project_images_pagination - TypeError: 'NoneType' object is not subscriptable
+FAILED test_user_auth.py::test_get_users_list - AssertionError: Should have at least one user
+assert 0 > 0
+ +  where 0 = len([])
+FAILED test_user_auth.py::test_login_with_invalid_credentials - AssertionError: Expected 401/400 for invalid credentials, got 200
+assert (200 == 401 or 200 == 400)
+ +  where 200 = <Response [200]>.status_code
+ +  and   200 = <Response [200]>.status_code
+FAILED test_user_auth.py::test_register_duplicate_user - AssertionError: Second registration should fail
+assert 200 == 400
+ +  where 200 = <Response [200]>.status_code
+FAILED test_user_auth.py::test_sync_user_to_label_studio - AssertionError: Failed to sync user to Label Studio
+assert False
+FAILED test_user_auth.py::test_get_label_studio_login_url - AssertionError: Failed to get Label Studio login URL
+assert False
+FAILED test_user_auth.py::test_get_label_studio_user_info - AssertionError: Failed to get Label Studio user info
+assert False
+FAILED test_user_auth.py::test_sync_project_to_label_studio - TypeError: 'NoneType' object is not subscriptable
+FAILED test_vlm_cleaning.py::test_vlm_cleaning_workflow - AssertionError: Project creation failed: 同步项目到 Label Studio 失败: 401 Unauthorized: [no body]
+assert False
+FAILED test_vlm_cleaning.py::test_vlm_task_cancellation - AssertionError: Project creation failed: 同步项目到 Label Studio 失败: 401 Unauthorized: [no body]
+assert False
+FAILED test_yolo_training.py::test_yolo_training_workflow - AssertionError: Project creation failed: 同步项目到 Label Studio 失败: 401 Unauthorized: [no body]
+assert False
+FAILED test_yolo_training.py::test_yolo_training_status_and_cancellation - AssertionError: Project creation failed: 同步项目到 Label Studio 失败: 401 Unauthorized: [no body]
+assert False
+=================== 36 failed, 15 passed, 1 skipped in 4.88s ===================
+ERROR conda.cli.main_run:execute(47): `conda run pytest -v` failed. (See above for error)
+

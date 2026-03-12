@@ -19,6 +19,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -60,6 +61,10 @@ public class ProjectController {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new com.annotation.platform.exception.ResourceNotFoundException("User", "id", userId));
 
+        if (projectRepository.existsByNameAndOrganizationId(request.getName(), organizationId)) {
+            throw new com.annotation.platform.exception.BusinessException("项目名称已存在");
+        }
+
         Project project = Project.builder()
                 .name(request.getName())
                 .labels(request.getLabels())
@@ -70,7 +75,12 @@ public class ProjectController {
                 .processedImages(0)
                 .build();
 
-        Project savedProject = projectRepository.save(project);
+        Project savedProject;
+        try {
+            savedProject = projectRepository.save(project);
+        } catch (DataIntegrityViolationException e) {
+            throw new com.annotation.platform.exception.BusinessException("项目名称已存在");
+        }
 
         labelStudioProxyService.syncProjectToLS(savedProject, userId);
 

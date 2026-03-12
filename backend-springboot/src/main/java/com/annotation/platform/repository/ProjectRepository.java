@@ -13,9 +13,9 @@ import java.util.Optional;
 @Repository
 public interface ProjectRepository extends JpaRepository<Project, Long> {
 
-    Optional<Project> findByName(String name);
+    boolean existsByNameAndOrganizationId(String name, Long organizationId);
 
-    boolean existsByName(String name);
+    Optional<Project> findByNameAndOrganizationId(String name, Long organizationId);
 
     Page<Project> findByOrganizationId(Long organizationId, Pageable pageable);
 

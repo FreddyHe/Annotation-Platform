@@ -187,6 +187,11 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
 
                 addUserToOrganizationInLSDB(user.getOrganization().getLsOrgId(), user.getLsUserId());
 
+                if (user.getOrganization().getLsOrgId() != null && user.getOrganization().getLsOrgId() != 1L) {
+                    removeUserFromOrganizationInLSDB(1L, user.getLsUserId());
+                    log.info("已将用户从 LS 默认组织中移除: lsUserId={}", user.getLsUserId());
+                }
+
                 if (user.getOrganization() != null 
                         && user.getOrganization().getCreatedBy() != null 
                         && user.getOrganization().getCreatedBy().getId().equals(user.getId()) 
@@ -256,6 +261,12 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
             }
 
             String labelConfig = generateLabelConfig(project.getLabels());
+
+            if (organization.getLsOrgId() != null && createdBy != null && createdBy.getLsUserId() != null) {
+                updateUserActiveOrganizationInLSDB(createdBy.getLsUserId(), organization.getLsOrgId());
+                log.info("创建项目前更新 LS 用户 active_organization_id: lsUserId={}, lsOrgId={}",
+                         createdBy.getLsUserId(), organization.getLsOrgId());
+            }
 
             String url = String.format("%s/api/projects", labelStudioUrl);
             HttpHeaders headers = new HttpHeaders();
@@ -811,6 +822,19 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
             }
         } catch (SQLException e) {
             log.error("添加用户到组织成员表失败: lsOrgId={}, lsUserId={}, error={}", lsOrgId, lsUserId, e.getMessage());
+        }
+    }
+
+    private void removeUserFromOrganizationInLSDB(Long lsOrgId, Long lsUserId) {
+        String sql = "DELETE FROM organizations_organizationmember WHERE organization_id = ? AND user_id = ?";
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + labelStudioDbPath);
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setLong(1, lsOrgId);
+            stmt.setLong(2, lsUserId);
+            int deleted = stmt.executeUpdate();
+            log.info("从 LS 组织成员表移除用户: lsOrgId={}, lsUserId={}, deletedRows={}", lsOrgId, lsUserId, deleted);
+        } catch (SQLException e) {
+            log.error("从 LS 组织成员表移除用户失败: lsOrgId={}, lsUserId={}, error={}", lsOrgId, lsUserId, e.getMessage(), e);
         }
     }
 

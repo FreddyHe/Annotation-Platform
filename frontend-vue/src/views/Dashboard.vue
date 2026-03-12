@@ -144,7 +144,7 @@ const loadStats = async () => {
 
 const loadRecentProjects = async () => {
   try {
-    const response = await fetch('/api/v1/projects?page=0&size=3&status=PROCESSING', {
+    const response = await fetch('/api/v1/projects?page=0&size=5', {
       headers: {
         'Authorization': `Bearer ${localStorage.getItem('token')}`
       }
@@ -160,25 +160,6 @@ const loadRecentProjects = async () => {
           processedImages: project.processedImages || 0,
           createdAt: project.createdAt
         }))
-      } else {
-        const response2 = await fetch('/api/v1/projects?page=0&size=3', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        })
-        if (response2.ok) {
-          const data2 = await response2.json()
-          if (data2.data && data2.data.length > 0) {
-            recentProjects.value = data2.data.map(project => ({
-              id: project.id,
-              name: project.name,
-              status: project.status,
-              totalImages: project.totalImages || 0,
-              processedImages: project.processedImages || 0,
-              createdAt: project.createdAt
-            }))
-          }
-        }
       }
     }
   } catch (error) {

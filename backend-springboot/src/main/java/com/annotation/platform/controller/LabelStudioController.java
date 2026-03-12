@@ -42,7 +42,7 @@ public class LabelStudioController {
     public Result<Void> syncUser(HttpServletRequest request) {
         Long userId = (Long) request.getAttribute("userId");
         User user = userRepository.findById(userId).orElseThrow();
-        labelStudioProxyService.syncUserToLS(user);
+        labelStudioProxyService.syncUserToLS(user, null);
         return Result.success();
     }
 

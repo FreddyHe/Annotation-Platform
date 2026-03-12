@@ -21,14 +21,18 @@ public interface LabelStudioProxyService {
     /**
      * 在LS中创建用户，并将 lsUserId + lsToken 写回 User 实体
      * 使用 admin-token 调用 LS API
+     * @param user 用户对象
+     * @param plainPassword 用户明文密码（用于设置 LS 用户密码）
      */
-    void syncUserToLS(User user);
+    void syncUserToLS(User user, String plainPassword);
 
     /**
      * 同步组织到LS
      * 使用 admin-token
+     * @param organization 组织对象
+     * @param createdBy 组织创建者（用于设置 LS 数据库中的 created_by_id）
      */
-    void syncOrganizationToLS(Organization org);
+    void syncOrganizationToLS(Organization organization, User createdBy);
 
     // ========== 项目级操作（内部自动读取用户 ls_token）==========
 

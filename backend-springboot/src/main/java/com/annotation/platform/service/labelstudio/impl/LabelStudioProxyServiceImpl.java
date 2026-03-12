@@ -110,7 +110,7 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
             return user.getLsToken();
         }
 
-        syncUserToLS(user);
+        syncUserToLS(user, null);
 
         User updatedUser = userRepository.findById(userId).orElseThrow();
         return updatedUser.getLsToken();
@@ -118,7 +118,7 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
 
     @Override
     @Transactional
-    public void syncUserToLS(User user) {
+    public void syncUserToLS(User user, String plainPassword) {
         try {
             if (user.getLsUserId() != null && user.getLsSynced() && user.getLsToken() != null && !user.getLsToken().isBlank()) {
                 log.info("用户已同步到 Label Studio: userId={}, lsUserId={}", user.getId(), user.getLsUserId());
@@ -135,10 +135,17 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
                     userRepository.save(user);
                     log.info("从数据库读取 Token 成功: userId={}, lsUserId={}", user.getId(), user.getLsUserId());
                 }
+                if (plainPassword != null && !plainPassword.isBlank()) {
+                    String existingPassword = fetchPasswordFromLSDB(user.getLsUserId());
+                    if (existingPassword == null || existingPassword.isBlank()) {
+                        setLSUserPassword(user.getLsUserId(), plainPassword);
+                        log.info("为已有 LS 用户补充密码: lsUserId={}", user.getLsUserId());
+                    }
+                }
                 return;
             }
 
-            syncOrganizationToLS(user.getOrganization());
+            syncOrganizationToLS(user.getOrganization(), user);
 
             String url = String.format("%s/api/users", labelStudioUrl);
             HttpHeaders headers = new HttpHeaders();
@@ -150,7 +157,6 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
             userData.put("email", user.getEmail());
             userData.put("first_name", user.getDisplayName());
             userData.put("last_name", "");
-            userData.put("organization", user.getOrganization().getLsOrgId());
             userData.put("is_superuser", false);
             userData.put("is_staff", false);
             userData.put("is_active", true);
@@ -176,6 +182,21 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
                 user.setLsSynced(true);
                 user.setUpdatedAt(LocalDateTime.now());
                 userRepository.save(user);
+
+                updateUserActiveOrganizationInLSDB(user.getLsUserId(), user.getOrganization().getLsOrgId());
+
+                addUserToOrganizationInLSDB(user.getOrganization().getLsOrgId(), user.getLsUserId());
+
+                if (user.getOrganization() != null 
+                        && user.getOrganization().getCreatedBy() != null 
+                        && user.getOrganization().getCreatedBy().getId().equals(user.getId()) 
+                        && user.getOrganization().getLsOrgId() != null) {
+                    updateOrganizationCreatedByInLSDB(user.getOrganization().getLsOrgId(), user.getLsUserId());
+                }
+
+                if (plainPassword != null && !plainPassword.isBlank()) {
+                    setLSUserPassword(lsUser.getLong("id"), plainPassword);
+                }
 
                 log.info("用户同步到 Label Studio 成功: userId={}, lsUserId={}", user.getId(), user.getLsUserId());
             } else {
@@ -212,23 +233,42 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
                 return project.getLsProjectId();
             }
 
-            String lsToken = getUserLsToken(userId);
-            if (lsToken == null) {
-                log.warn("无法获取用户 Token，跳过项目同步: userId={}", userId);
+            Organization organization = null;
+            if (project.getOrganization() != null) {
+                organization = organizationRepository.findById(project.getOrganization().getId()).orElse(null);
+            }
+            if (organization == null) {
+                log.warn("项目没有关联组织，跳过 LS 同步: projectId={}", project.getId());
                 return null;
             }
 
-            syncOrganizationToLS(project.getOrganization());
+            User createdBy = null;
+            if (organization.getCreatedBy() != null) {
+                createdBy = userRepository.findById(organization.getCreatedBy().getId()).orElse(null);
+            }
+
+            syncOrganizationToLS(organization, createdBy);
+
+            String lsToken = getOrganizationAdminToken(organization);
+            if (lsToken == null) {
+                log.warn("无法获取组织管理员 Token，fallback 到 admin token: orgId={}", organization.getId());
+                lsToken = adminToken;
+            }
+
+            String labelConfig = generateLabelConfig(project.getLabels());
 
             String url = String.format("%s/api/projects", labelStudioUrl);
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.set("Authorization", "Token " + adminToken);
+            headers.set("Authorization", "Token " + lsToken);
 
             Map<String, Object> projectData = new HashMap<>();
             projectData.put("title", project.getName());
             projectData.put("description", "Project from Annotation Platform");
-            projectData.put("organization", project.getOrganization().getLsOrgId());
+            projectData.put("label_config", labelConfig);
+            if (organization.getLsOrgId() != null) {
+                projectData.put("organization", organization.getLsOrgId());
+            }
 
             HttpEntity<String> entity = new HttpEntity<>(JSON.toJSONString(projectData), headers);
             ResponseEntity<String> response = restTemplate.exchange(
@@ -288,7 +328,7 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
     @Override
     public Long mountLocalStorage(Long lsProjectId, String localPath, Long userId) {
         try {
-            String lsToken = getUserLsToken(userId);
+            String lsToken = getUserLsTokenWithFallback(userId);
             if (lsToken == null) {
                 log.warn("无法获取用户 Token，跳过存储挂载: userId={}", userId);
                 return null;
@@ -347,7 +387,7 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
     @Override
     public boolean syncLocalStorage(Long storageId, Long userId) {
         try {
-            String lsToken = getUserLsToken(userId);
+            String lsToken = getUserLsTokenWithFallback(userId);
             if (lsToken == null) {
                 log.warn("无法获取用户 Token，跳过存储同步: userId={}", userId);
                 return false;
@@ -391,7 +431,7 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
         stats.put("total", 0);
 
         try {
-            String lsToken = getUserLsToken(userId);
+            String lsToken = getUserLsTokenWithFallback(userId);
             if (lsToken == null) {
                 log.warn("无法获取用户 Token，跳过预测导入: userId={}", userId);
                 return stats;
@@ -495,7 +535,7 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
     }
 
     @Override
-    public void syncOrganizationToLS(Organization organization) {
+    public void syncOrganizationToLS(Organization organization, User createdBy) {
         if (organization == null) {
             return;
         }
@@ -527,6 +567,10 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
                 organization.setLsOrgId(lsOrg.getLong("id"));
                 organization.setUpdatedAt(LocalDateTime.now());
                 organizationRepository.save(organization);
+
+                if (createdBy != null && createdBy.getLsUserId() != null) {
+                    updateOrganizationCreatedByInLSDB(lsOrg.getLong("id"), createdBy.getLsUserId());
+                }
             }
 
         } catch (Exception e) {
@@ -593,7 +637,7 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
     @Override
     public int getProjectTaskCount(Long lsProjectId, Long userId) {
         try {
-            String lsToken = getUserLsToken(userId);
+            String lsToken = getUserLsTokenWithFallback(userId);
             if (lsToken == null) {
                 log.warn("无法获取用户 Token，跳过获取 task 数量: userId={}", userId);
                 return 0;
@@ -651,8 +695,179 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
             return user.getLsToken();
         }
 
-        syncUserToLS(user);
+        syncUserToLS(user, null);
         User updatedUser = userRepository.findById(userId).orElse(null);
         return updatedUser != null ? updatedUser.getLsToken() : null;
+    }
+
+    private String getUserLsTokenWithFallback(Long userId) {
+        String lsToken = getUserLsToken(userId);
+        if (lsToken != null) {
+            return lsToken;
+        }
+
+        User user = userRepository.findById(userId).orElse(null);
+        if (user != null && user.getOrganization() != null) {
+            return getOrganizationAdminToken(user.getOrganization());
+        }
+
+        return null;
+    }
+
+    private String getOrganizationAdminToken(Organization organization) {
+        if (organization == null || organization.getId() == null) {
+            return null;
+        }
+
+        Organization org = organizationRepository.findById(organization.getId()).orElse(null);
+        if (org == null || org.getCreatedBy() == null) {
+            return null;
+        }
+
+        User admin = userRepository.findById(org.getCreatedBy().getId()).orElse(null);
+        if (admin == null || admin.getLsToken() == null || admin.getLsToken().isBlank()) {
+            return null;
+        }
+
+        return admin.getLsToken();
+    }
+
+    private String generateLabelConfig(List<String> labels) {
+        if (labels == null || labels.isEmpty()) {
+            return "<View></View>";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("<View>\n");
+        sb.append("  <Image name=\"image\" value=\"$image\" zoom=\"true\"/>\n");
+        sb.append("  <RectangleLabels name=\"label\" toName=\"image\">\n");
+
+        String[] colors = {
+            "#FF0000", "#00FF00", "#0000FF", "#FFFF00", "#FF00FF", "#00FFFF",
+            "#FFA500", "#800080", "#008000", "#FFC0CB", "#A52A2A", "#808080"
+        };
+
+        for (int i = 0; i < labels.size(); i++) {
+            String color = colors[i % colors.length];
+            sb.append("    <Label value=\"").append(labels.get(i)).append("\" background=\"").append(color).append("\"/>\n");
+        }
+
+        sb.append("  </RectangleLabels>\n");
+        sb.append("</View>");
+
+        return sb.toString();
+    }
+
+    private void updateOrganizationCreatedByInLSDB(Long lsOrgId, Long lsUserId) {
+        String sql = "UPDATE organization SET created_by_id = ? WHERE id = ?";
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + labelStudioDbPath);
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setLong(1, lsUserId);
+            stmt.setLong(2, lsOrgId);
+            int updated = stmt.executeUpdate();
+            log.info("更新 LS 组织 created_by_id: lsOrgId={}, lsUserId={}, updatedRows={}", lsOrgId, lsUserId, updated);
+        } catch (SQLException e) {
+            log.error("更新 LS 组织 created_by_id 失败: lsOrgId={}, lsUserId={}, error={}", lsOrgId, lsUserId, e.getMessage(), e);
+        }
+    }
+
+    private void updateUserActiveOrganizationInLSDB(Long lsUserId, Long lsOrgId) {
+        String sql = "UPDATE htx_user SET active_organization_id = ? WHERE id = ?";
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + labelStudioDbPath);
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setLong(1, lsOrgId);
+            stmt.setLong(2, lsUserId);
+            int updated = stmt.executeUpdate();
+            log.info("更新 LS 用户 active_organization_id: lsUserId={}, lsOrgId={}, updatedRows={}", lsUserId, lsOrgId, updated);
+        } catch (SQLException e) {
+            log.error("更新 LS 用户 active_organization_id 失败: lsUserId={}, lsOrgId={}, error={}", lsUserId, lsOrgId, e.getMessage(), e);
+        }
+    }
+
+    private void addUserToOrganizationInLSDB(Long lsOrgId, Long lsUserId) {
+        String checkSql = "SELECT COUNT(*) FROM organizations_organizationmember WHERE organization_id = ? AND user_id = ?";
+        String insertSql = "INSERT INTO organizations_organizationmember (organization_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)";
+        
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + labelStudioDbPath)) {
+            try (PreparedStatement checkStmt = conn.prepareStatement(checkSql)) {
+                checkStmt.setLong(1, lsOrgId);
+                checkStmt.setLong(2, lsUserId);
+                try (ResultSet rs = checkStmt.executeQuery()) {
+                    if (rs.next() && rs.getInt(1) > 0) {
+                        log.info("用户已在组织成员表中: lsOrgId={}, lsUserId={}", lsOrgId, lsUserId);
+                        return;
+                    }
+                }
+            }
+            
+            String now = java.time.LocalDateTime.now().toString();
+            try (PreparedStatement insertStmt = conn.prepareStatement(insertSql)) {
+                insertStmt.setLong(1, lsOrgId);
+                insertStmt.setLong(2, lsUserId);
+                insertStmt.setString(3, now);
+                insertStmt.setString(4, now);
+                int rows = insertStmt.executeUpdate();
+                log.info("添加用户到组织成员表: lsOrgId={}, lsUserId={}, rows={}", lsOrgId, lsUserId, rows);
+            }
+        } catch (SQLException e) {
+            log.error("添加用户到组织成员表失败: lsOrgId={}, lsUserId={}, error={}", lsOrgId, lsUserId, e.getMessage());
+        }
+    }
+
+    private String fetchPasswordFromLSDB(Long lsUserId) {
+        String sql = "SELECT password FROM htx_user WHERE id = ?";
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + labelStudioDbPath);
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setLong(1, lsUserId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getString("password");
+                }
+            }
+        } catch (SQLException e) {
+            log.error("从 Label Studio 数据库读取密码失败: lsUserId={}, error={}", lsUserId, e.getMessage(), e);
+        }
+        return null;
+    }
+
+    private void setLSUserPassword(Long lsUserId, String plainPassword) {
+        String passwordHash = generateDjangoPasswordHash(plainPassword);
+        if (passwordHash == null) {
+            log.warn("生成密码哈希失败，跳过设置密码: lsUserId={}", lsUserId);
+            return;
+        }
+
+        String sql = "UPDATE htx_user SET password = ? WHERE id = ?";
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + labelStudioDbPath);
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, passwordHash);
+            stmt.setLong(2, lsUserId);
+            int rows = stmt.executeUpdate();
+            if (rows > 0) {
+                log.info("设置 LS 用户密码成功: lsUserId={}", lsUserId);
+            }
+        } catch (SQLException e) {
+            log.error("设置 LS 用户密码失败: lsUserId={}, error={}", lsUserId, e.getMessage(), e);
+        }
+    }
+
+    private String generateDjangoPasswordHash(String password) {
+        try {
+            int iterations = 870000;
+            byte[] saltBytes = new byte[16];
+            new java.security.SecureRandom().nextBytes(saltBytes);
+            String salt = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(saltBytes);
+
+            javax.crypto.SecretKeyFactory factory = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
+            java.security.spec.KeySpec spec = new javax.crypto.spec.PBEKeySpec(
+                password.toCharArray(), salt.getBytes(java.nio.charset.StandardCharsets.UTF_8), iterations, 256);
+            javax.crypto.SecretKey key = factory.generateSecret(spec);
+            String hash = java.util.Base64.getEncoder().encodeToString(key.getEncoded());
+
+            return String.format("pbkdf2_sha256$%d$%s$%s", iterations, salt, hash);
+        } catch (Exception e) {
+            log.error("生成密码哈希失败: {}", e.getMessage());
+            return null;
+        }
     }
 }

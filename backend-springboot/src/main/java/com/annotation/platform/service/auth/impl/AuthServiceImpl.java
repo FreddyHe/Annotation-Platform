@@ -56,7 +56,7 @@ public class AuthServiceImpl implements AuthService {
 
             if (!user.getLsSynced() || user.getLsToken() == null) {
                 try {
-                    labelStudioProxyService.syncUserToLS(user);
+                    labelStudioProxyService.syncUserToLS(user, request.getPassword());
                     log.info("登录时同步用户到 Label Studio: userId={}, lsUserId={}", 
                              user.getId(), user.getLsUserId());
                     user = userService.findById(user.getId());
@@ -114,6 +114,7 @@ public class AuthServiceImpl implements AuthService {
         }
 
         Organization organization = null;
+        boolean isNewOrganization = false;
         if (request.getOrganizationName() != null && !request.getOrganizationName().isBlank()) {
             organization = organizationRepository.findByName(request.getOrganizationName())
                     .orElseGet(() -> {
@@ -125,6 +126,7 @@ public class AuthServiceImpl implements AuthService {
                                 .build();
                         return organizationRepository.save(newOrg);
                     });
+            isNewOrganization = organization.getCreatedBy() == null;
         } else {
             organization = organizationRepository.findByName("Default")
                     .orElseGet(() -> {
@@ -136,6 +138,7 @@ public class AuthServiceImpl implements AuthService {
                                 .build();
                         return organizationRepository.save(newOrg);
                     });
+            isNewOrganization = organization.getCreatedBy() == null;
         }
 
         User user = User.builder()
@@ -150,6 +153,13 @@ public class AuthServiceImpl implements AuthService {
                 .build();
 
         User savedUser = userService.createUser(user);
+
+        if (isNewOrganization) {
+            organization.setCreatedBy(savedUser);
+            organization.setUpdatedAt(LocalDateTime.now());
+            organizationRepository.save(organization);
+        }
+
         userService.updateLastLogin(savedUser.getId());
 
         String jwtToken = jwtUtils.generateToken(savedUser.getUsername(), savedUser.getId(), savedUser.getOrganization() != null ? savedUser.getOrganization().getId() : null);
@@ -163,7 +173,7 @@ public class AuthServiceImpl implements AuthService {
         sessionRepository.save(session);
 
         try {
-            labelStudioProxyService.syncUserToLS(savedUser);
+            labelStudioProxyService.syncUserToLS(savedUser, request.getPassword());
             savedUser = userService.findById(savedUser.getId());
             log.info("用户注册并绑定LS成功: userId={}, lsUserId={}", 
                      savedUser.getId(), savedUser.getLsUserId());

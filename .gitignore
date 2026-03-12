@@ -20,3 +20,7 @@ training_runs/
 .DS_Store
 .ipynb_checkpoints/
 .vscode/
+
+
+backend-springboot/target/
+*.jar

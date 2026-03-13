@@ -65,4 +65,7 @@ public class User {
 
     @Column(name = "ls_org_id")
     private Long lsOrgId;
+
+    @Column(name = "avatar_url", length = 500)
+    private String avatarUrl;
 }

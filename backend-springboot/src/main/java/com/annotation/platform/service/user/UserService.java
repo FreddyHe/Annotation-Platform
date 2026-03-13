@@ -1,6 +1,7 @@
 package com.annotation.platform.service.user;
 
 import com.annotation.platform.dto.response.common.PageableResponse;
+import com.annotation.platform.dto.response.user.UserProfileResponse;
 import com.annotation.platform.entity.User;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -30,6 +31,8 @@ public interface UserService {
     boolean existsByUsername(String username);
 
     boolean existsByEmail(String email);
+
+    UserProfileResponse getUserProfile(Long userId);
 
     PageableResponse buildPageableResponse(Page<?> page);
 }

@@ -404,11 +404,93 @@ git push origin master
   - ✅ 不同组织创建同名项目 → 成功创建
   - ✅ 并发创建同名项目 → 被 try-catch 捕获并返回友好提示
 
+### 7.12 个人中心：数据维度与 UI 布局（已修复）
+
+- **后端**：ProjectRepository 新增组织维度查询方法，UserServiceImpl 改为组织维度统计
+- **前端**：Profile.vue 重写为单列垂直布局，移除栅格布局，改为纯垂直堆叠
+
+### 7.13 个人中心：头像与 Profile 接口（已完成）
+
+- **后端**：User 实体新增 avatarUrl 字段，新增 UserProfileResponse DTO，新增 /users/me/profile 接口
+- **前端**：新增头像工具类 generateDefaultAvatar，Store 增加 avatarUrl getter 和 fetchUserProfile action，布局组件绑定头像
+
+### 7.14 个人中心：LS 免密直达（已完成）——有bug
+
+- **前端**：Profile.vue 实现完整的 Dashboard 布局，包括基础信息、组织架构、数据统计、系统状态、最近项目
+- **核心功能**：jumpToLabelStudio 方法实现免密登录，动态创建隐藏表单 POST 到 Label Studio
+
+### 7.15 后端编译错误：Lombok 注解处理器失效（已修复）
+
+- **现象**: 执行 `mvn clean compile` 时出现大量"cannot find symbol"错误，具体包括：
+  - 找不到 `log` 变量（FileUploadController、AuthController、JwtUtils、JwtAuthenticationFilter）
+  - 找不到 `builder()` 方法（UploadChunkRequest）
+  - 找不到 `getFileId()`、`getFilename()` 方法（MergeChunksRequest）
+  - 找不到 `getCode()`、`getMessage()` 方法（ErrorCode）
+  - 找不到 `getId()`、`getOrganization()` 方法（User）
+- **原因**: 
+  1. pom.xml 缺少 maven-compiler-plugin 配置，没有显式配置注解处理器路径
+  2. ProjectRepository 中有重复的方法定义（`countByCreatedById` 和 `countImagesByCreatedById` 被定义了两次）
+- **修复方案**:
+  1. 在 pom.xml 的 `<build><plugins>` 节点中，在 `spring-boot-maven-plugin` 之前添加 `maven-compiler-plugin` 配置
+  2. 在 maven-compiler-plugin 中配置 `annotationProcessorPaths`，包含 Lombok 和 MapStruct processor
+  3. 删除 ProjectRepository 中重复的方法定义
+- **修复文件**:
+  - `backend-springboot/pom.xml`
+  - `backend-springboot/src/main/java/com/annotation/platform/repository/ProjectRepository.java`
+- **修复代码**:
+  ```xml
+  <!-- pom.xml -->
+  <plugin>
+      <groupId>org.apache.maven.plugins</groupId>
+      <artifactId>maven-compiler-plugin</artifactId>
+      <version>3.11.0</version>
+      <configuration>
+          <source>17</source>
+          <target>17</target>
+          <annotationProcessorPaths>
+              <path>
+                  <groupId>org.projectlombok</groupId>
+                  <artifactId>lombok</artifactId>
+                  <version>${lombok.version}</version>
+              </path>
+              <path>
+                  <groupId>org.mapstruct</groupId>
+                  <artifactId>mapstruct-processor</artifactId>
+                  <version>${mapstruct.version}</version>
+              </path>
+          </annotationProcessorPaths>
+      </configuration>
+  </plugin>
+  ```
+- **Git 提交**: `fix: 修复 Lombok 编译错误，添加 maven-compiler-plugin 配置并删除 ProjectRepository 重复方法`
+- **验证结果**:
+  - ✅ `mvn clean compile` - BUILD SUCCESS
+  - ✅ `mvn clean package -DskipTests` - BUILD SUCCESS
+  - ✅ 服务启动成功，日志显示 "Started AnnotationPlatformApplication in 8.962 seconds"
+  - ✅ 所有服务正常运行（端口 5001、5003、8001、8080、5173）
+
 ---
 
 ## 八、当前待解决的问题
 
-（无）
+### 8.1 个人中心：LS 免密直达功能无法正常工作
+
+**现象**: 在个人中心点击"进入 Label Studio 工作台"按钮时，显示错误提示"未能获取到 Label Studio 登录凭证，请联系管理员"，无法正确跳转自动登录
+
+**原因**: 待调查
+
+**待分析**:
+- 前端 Profile.vue 中的 jumpToLabelStudio 方法实现
+- 后端是否提供了获取 LS 登录凭证的接口
+- LS admin token 是否正确配置
+- 用户 LS token 是否正确生成和存储
+- 但编译仍然报错，说明注解处理器仍未生效
+
+**待尝试的解决方案**：
+1. 检查 Maven 编译器是否正确识别 Lombok 注解处理器
+2. 尝试使用 `mvn clean install` 而不是 `mvn clean compile`
+3. 检查是否有缓存问题，需要清理 Maven 本地仓库
+4. 考虑直接使用已编译好的 jar 包启动服务（如果存在）
 
 ---
 
@@ -418,3 +500,16 @@ git push origin master
 2. 每个组织在 LS 中有对应组织，第一个创建者是管理员
 3. **所有 LS 项目操作使用组织管理员的 token**（不是全局 admin token）
 4. 项目自动归属到管理员的 active_organization
+
+
+## 十、当前 Debug 指令 (Agent 请直接执行)
+
+**你好，Agent。请仔细阅读本文件中【八、当前待解决的问题 - 8.1 后端编译错误】的上下文。**
+
+请你先检查所有服务的启动状态，
+然后请看当前待解决的问题，并分析要解决这个问题应该要涉及到哪些文件和代码，请先生成一个详细的修改报告，涉及到哪些代码，要对项目的结构做哪些修改
+
+## 十一、改完bug之后的事情
+
+1. 把改的bug填写到七、已解决的问题记录中，
+2. 

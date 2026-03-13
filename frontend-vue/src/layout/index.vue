@@ -76,7 +76,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { ElMessageBox } from 'element-plus'
@@ -89,7 +89,7 @@ const isCollapse = ref(false)
 
 const activeMenu = computed(() => route.path)
 const displayName = computed(() => userStore.displayName || '用户')
-const userAvatar = computed(() => '')
+const userAvatar = computed(() => userStore.avatarUrl)
 
 const toggleSidebar = () => {
   isCollapse.value = !isCollapse.value
@@ -98,10 +98,10 @@ const toggleSidebar = () => {
 const handleCommand = (command) => {
   switch (command) {
     case 'profile':
-      ElMessageBox.info('个人中心功能开发中')
+      router.push('/profile')
       break
     case 'settings':
-      ElMessageBox.info('设置功能开发中')
+      router.push('/settings')
       break
     case 'logout':
       handleLogout()
@@ -119,6 +119,14 @@ const handleLogout = () => {
     router.push('/login')
   }).catch(() => {})
 }
+
+onMounted(async () => {
+  try {
+    await userStore.fetchUserProfile()
+  } catch (error) {
+    console.error('加载用户资料失败:', error)
+  }
+})
 </script>
 
 <style scoped>

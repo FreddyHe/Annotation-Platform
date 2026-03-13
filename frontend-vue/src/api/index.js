@@ -47,6 +47,13 @@ export const userAPI = {
     })
   },
 
+  getUserProfile() {
+    return request({
+      url: '/users/me/profile',
+      method: 'get'
+    })
+  },
+
   getUserById(id) {
     return request({
       url: `/users/${id}`,

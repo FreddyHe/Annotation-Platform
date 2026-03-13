@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
-import { authAPI } from '@/api'
+import { authAPI, userAPI } from '@/api'
+import { generateDefaultAvatar } from '@/utils/avatar'
 
 export const useUserStore = defineStore('user', {
   state: () => ({
@@ -12,7 +13,13 @@ export const useUserStore = defineStore('user', {
     username: (state) => state.userInfo?.username || '',
     email: (state) => state.userInfo?.email || '',
     displayName: (state) => state.userInfo?.displayName || '',
-    organization: (state) => state.userInfo?.organization || null
+    organization: (state) => state.userInfo?.organization || null,
+    avatarUrl: (state) => {
+      if (state.userInfo?.avatarUrl) {
+        return state.userInfo.avatarUrl
+      }
+      return generateDefaultAvatar(state.userInfo?.username || 'User')
+    }
   },
 
   actions: {
@@ -58,6 +65,17 @@ export const useUserStore = defineStore('user', {
       this.userInfo = null
       localStorage.removeItem('token')
       localStorage.removeItem('userInfo')
+    },
+
+    async fetchUserProfile() {
+      try {
+        const response = await userAPI.getUserProfile()
+        this.setUserInfo(response.data)
+        return response
+      } catch (error) {
+        console.error('获取用户资料失败:', error)
+        throw error
+      }
     }
   }
 })

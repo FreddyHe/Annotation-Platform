@@ -2,6 +2,7 @@ package com.annotation.platform.controller;
 
 import com.annotation.platform.common.Result;
 import com.annotation.platform.dto.response.auth.LoginResponse;
+import com.annotation.platform.dto.response.user.UserProfileResponse;
 import com.annotation.platform.entity.Project;
 import com.annotation.platform.entity.User;
 import com.annotation.platform.repository.OrganizationRepository;
@@ -148,5 +149,13 @@ public class UserController {
         stats.put("completedTasks", completedTasks);
         
         return Result.success(stats);
+    }
+
+    @GetMapping("/me/profile")
+    @Transactional
+    public Result<UserProfileResponse> getUserProfile(HttpServletRequest request) {
+        Long userId = (Long) request.getAttribute("userId");
+        UserProfileResponse profile = userService.getUserProfile(userId);
+        return Result.success(profile);
     }
 }

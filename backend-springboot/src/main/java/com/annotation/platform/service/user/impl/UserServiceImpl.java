@@ -2,11 +2,14 @@ package com.annotation.platform.service.user.impl;
 
 import com.annotation.platform.common.ErrorCode;
 import com.annotation.platform.dto.response.common.PageableResponse;
+import com.annotation.platform.dto.response.user.UserProfileResponse;
 import com.annotation.platform.entity.Organization;
+import com.annotation.platform.entity.Project;
 import com.annotation.platform.entity.User;
 import com.annotation.platform.exception.BusinessException;
 import com.annotation.platform.exception.ResourceNotFoundException;
 import com.annotation.platform.repository.OrganizationRepository;
+import com.annotation.platform.repository.ProjectRepository;
 import com.annotation.platform.repository.UserRepository;
 import com.annotation.platform.service.user.UserService;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +30,7 @@ public class UserServiceImpl implements UserService {
 
     private final UserRepository userRepository;
     private final OrganizationRepository organizationRepository;
+    private final ProjectRepository projectRepository;
     private final PasswordEncoder passwordEncoder;
 
     @Override
@@ -139,6 +143,98 @@ public class UserServiceImpl implements UserService {
     @Override
     public boolean existsByEmail(String email) {
         return userRepository.existsByEmail(email);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public UserProfileResponse getUserProfile(Long userId) {
+        User user = findById(userId);
+
+        Long orgId = null;
+        String orgName = null;
+        String orgDisplayName = null;
+        Boolean isOrgCreator = false;
+
+        if (user.getOrganization() != null) {
+            orgId = user.getOrganization().getId();
+            orgName = user.getOrganization().getName();
+            orgDisplayName = user.getOrganization().getDisplayName();
+            isOrgCreator = user.getOrganization().getCreatedBy() != null && 
+                           user.getOrganization().getCreatedBy().getId().equals(userId);
+        }
+
+        long totalProjects = 0;
+        long totalImages = 0;
+        long processingTasks = 0;
+        long completedTasks = 0;
+        List<Project> recentProjects = List.of();
+
+        if (orgId != null) {
+            totalProjects = projectRepository.countByOrganizationId(orgId);
+            totalImages = projectRepository.countImagesByOrganizationId(orgId);
+
+            List<Project.ProjectStatus> processingStatuses = List.of(
+                Project.ProjectStatus.UPLOADING,
+                Project.ProjectStatus.DETECTING,
+                Project.ProjectStatus.CLEANING,
+                Project.ProjectStatus.SYNCING
+            );
+            processingTasks = projectRepository.countByOrganizationIdAndStatusIn(orgId, processingStatuses);
+
+            completedTasks = projectRepository.countByOrganizationIdAndStatusIn(
+                orgId, 
+                List.of(Project.ProjectStatus.COMPLETED)
+            );
+
+            recentProjects = projectRepository.findTop5ByOrganizationIdOrderByCreatedAtDesc(orgId);
+        }
+        List<UserProfileResponse.RecentProjectInfo> recentProjectInfos = recentProjects.stream()
+            .limit(5)
+            .map(project -> UserProfileResponse.RecentProjectInfo.builder()
+                .id(project.getId())
+                .name(project.getName())
+                .status(project.getStatus().name())
+                .totalImages(project.getTotalImages() != null ? project.getTotalImages() : 0)
+                .processedImages(project.getProcessedImages() != null ? project.getProcessedImages() : 0)
+                .createdAt(project.getCreatedAt())
+                .build())
+            .toList();
+
+        String lsPassword = null;
+        try {
+            if (user.getLsSynced() != null && user.getLsSynced() && user.getLsToken() != null) {
+                String[] parts = user.getLsToken().split(":");
+                if (parts.length >= 2) {
+                    lsPassword = parts[1];
+                }
+            }
+        } catch (Exception e) {
+            log.warn("解析 LS 密码失败: userId={}, error={}", userId, e.getMessage());
+        }
+
+        return UserProfileResponse.builder()
+            .id(user.getId())
+            .username(user.getUsername())
+            .email(user.getEmail())
+            .displayName(user.getDisplayName())
+            .avatarUrl(user.getAvatarUrl())
+            .createdAt(user.getCreatedAt())
+            .lastLoginAt(user.getLastLogin())
+            .orgId(orgId)
+            .orgName(orgName)
+            .orgDisplayName(orgDisplayName)
+            .isOrgCreator(isOrgCreator)
+            .totalProjects(totalProjects)
+            .totalImages(totalImages)
+            .processingTasks(processingTasks)
+            .completedTasks(completedTasks)
+            .recentProjects(recentProjectInfos)
+            .isActive(user.getIsActive())
+            .lsSyncStatus(user.getLsSynced())
+            .lsUserId(user.getLsUserId())
+            .lsEmail(user.getEmail())
+            .lsPassword(lsPassword)
+            .build();
     }
 
     @Override

@@ -44,6 +44,18 @@ const routes = [
         name: 'ModelTraining',
         component: () => import('@/views/ModelTraining.vue'),
         meta: { title: '模型训练', icon: 'Cpu' }
+      },
+      {
+        path: 'profile',
+        name: 'Profile',
+        component: () => import('@/views/Profile.vue'),
+        meta: { title: '个人中心', icon: 'User' }
+      },
+      {
+        path: 'settings',
+        name: 'Settings',
+        component: () => import('@/views/Settings.vue'),
+        meta: { title: '设置', icon: 'Setting' }
       }
     ]
   }

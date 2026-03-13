@@ -1,7 +1,7 @@
 # 智能标注平台 Debug 手册
 
 本文件是跨窗口持久化的 debug 上下文。每次新开 Agent 窗口时，请先阅读本文件。
-路径：`/root/autodl-fs/Annotation-Platform/debug.md`
+路径：`/root/autodl-fs/Annotation-Platform/debug.md`，并先阅读”当前 Debug 指令 (Agent 请直接执行)“
 
 ---
 
@@ -469,28 +469,57 @@ git push origin master
   - ✅ 服务启动成功，日志显示 "Started AnnotationPlatformApplication in 8.962 seconds"
   - ✅ 所有服务正常运行（端口 5001、5003、8001、8080、5173）
 
+### 7.16 个人中心 LS 免密直达功能无法使用（已修复）
+
+- **现象**: 在个人中心点击"进入 Label Studio 工作台"按钮时，显示错误提示"未能获取到 Label Studio 登录凭证，请联系管理员"，无法正确跳转自动登录
+- **原因**:
+  1. 前端依赖 `userInfo.value.lsEmail` 和 `userInfo.value.lsPassword` 字段，但这两个字段在后端没有正确设置
+  2. 后端尝试从 `lsToken` 解析密码（假设格式为 "email:password"），但 `lsToken` 实际存储的是 Label Studio 的 API Token
+  3. Label Studio 使用 Django 密码哈希，无法从哈希还原明文密码
+  4. 后端已提供 `getLoginUrl` 方法，可以生成带 token 的登录链接，但前端没有使用
+- **修复方案**:
+  1. 前端改用 `labelStudioAPI.getLoginUrl()` 获取登录链接
+  2. 使用 `window.open` 打开登录链接，而不是 POST 表单提交
+  3. 移除对 `lsEmail` 和 `lsPassword` 的依赖
+- **修复文件**:
+  - `frontend-vue/src/views/Profile.vue`
+- **修复代码**:
+  ```javascript
+  // 添加 import
+  import { labelStudioAPI } from '@/api'
+
+  // 修改 jumpToLabelStudio 方法
+  const jumpToLabelStudio = async () => {
+    try {
+      ElMessage.info('正在跳转到 Label Studio...')
+      
+      const response = await labelStudioAPI.getLoginUrl({
+        returnUrl: '/'
+      })
+      
+      if (response.data) {
+        window.open(response.data, '_blank')
+      } else {
+        ElMessage.error('未能获取到 Label Studio 登录链接，请联系管理员')
+      }
+    } catch (error) {
+      console.error('跳转到 Label Studio 失败:', error)
+      ElMessage.error('跳转失败，请稍后重试')
+    }
+  }
+  ```
+- **Git 提交**: `fix: 修复 LS 免密直达功能，改用 Token 认证替代明文密码方式`
+- **验证结果**:
+  - ✅ 后端接口 `/label-studio/login-url` 已存在
+  - ✅ 前端 `api/index.js` 中 `getLoginUrl` 方法已存在
+  - ✅ 所有服务正常运行（端口 5001、5003、8001、8080、5173）
+
 ---
 
 ## 八、当前待解决的问题
 
-### 8.1 个人中心：LS 免密直达功能无法正常工作
+（暂无）
 
-**现象**: 在个人中心点击"进入 Label Studio 工作台"按钮时，显示错误提示"未能获取到 Label Studio 登录凭证，请联系管理员"，无法正确跳转自动登录
-
-**原因**: 待调查
-
-**待分析**:
-- 前端 Profile.vue 中的 jumpToLabelStudio 方法实现
-- 后端是否提供了获取 LS 登录凭证的接口
-- LS admin token 是否正确配置
-- 用户 LS token 是否正确生成和存储
-- 但编译仍然报错，说明注解处理器仍未生效
-
-**待尝试的解决方案**：
-1. 检查 Maven 编译器是否正确识别 Lombok 注解处理器
-2. 尝试使用 `mvn clean install` 而不是 `mvn clean compile`
-3. 检查是否有缓存问题，需要清理 Maven 本地仓库
-4. 考虑直接使用已编译好的 jar 包启动服务（如果存在）
 
 ---
 
@@ -504,12 +533,12 @@ git push origin master
 
 ## 十、当前 Debug 指令 (Agent 请直接执行)
 
-**你好，Agent。请仔细阅读本文件中【八、当前待解决的问题 - 8.1 后端编译错误】的上下文。**
+**你好，Agent。请仔细阅读本文件中【八、当前待解决的问题 】的上下文。**
 
 请你先检查所有服务的启动状态，
-然后请看当前待解决的问题，并分析要解决这个问题应该要涉及到哪些文件和代码，请先生成一个详细的修改报告，涉及到哪些代码，要对项目的结构做哪些修改
+然后请看当前待解决的问题，并分析要解决这个问题应该要涉及到哪些文件和代码，请先生成一个详细的修改报告，涉及到哪些代码，要对项目的结构做哪些修改，先生成分析报告，而不做任何修改
 
 ## 十一、改完bug之后的事情
 
-1. 把改的bug填写到七、已解决的问题记录中，
-2. 
+1. 把改的bug填写到七、已解决的问题记录中，可以简略一点
+2. 按第六点说明提交git

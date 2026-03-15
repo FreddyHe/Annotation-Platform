@@ -46,6 +46,12 @@ const routes = [
         meta: { title: '模型训练', icon: 'Cpu' }
       },
       {
+        path: 'single-class-detection',
+        name: 'SingleClassDetection',
+        component: () => import('@/views/SingleClassDetection.vue'),
+        meta: { title: '单类别检测', icon: 'Monitor' }
+      },
+      {
         path: 'profile',
         name: 'Profile',
         component: () => import('@/views/Profile.vue'),

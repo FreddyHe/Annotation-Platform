@@ -139,6 +139,7 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
                     String existingPassword = fetchPasswordFromLSDB(user.getLsUserId());
                     if (existingPassword == null || existingPassword.isBlank()) {
                         setLSUserPassword(user.getLsUserId(), plainPassword);
+                        user.setLsPlainPassword(plainPassword);
                         log.info("为已有 LS 用户补充密码: lsUserId={}", user.getLsUserId());
                     }
                 }
@@ -201,6 +202,7 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
 
                 if (plainPassword != null && !plainPassword.isBlank()) {
                     setLSUserPassword(lsUser.getLong("id"), plainPassword);
+                    user.setLsPlainPassword(plainPassword);
                 }
 
                 log.info("用户同步到 Label Studio 成功: userId={}, lsUserId={}", user.getId(), user.getLsUserId());

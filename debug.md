@@ -12,7 +12,7 @@
 | 组件 | 技术栈 | 端口 | 启动方式 |
 |------|--------|------|---------|
 | 后端 | Spring Boot 3.2 + JPA + H2 | 8080 | 见下方 |
-| 前端 | Vue 3 + Element Plus + Vite | 5173 | `cd frontend-vue && npm run dev` |
+| 前端 | Vue 3 + Element Plus + Vite | 6006 | cd frontend-vue && npx vite --host 0.0.0.0 --port 6006 |
 | Label Studio | Python (conda: web_annotation) | 5001 | 见下方 |
 | 算法服务 | FastAPI (conda: algo_service) | 8001 | 见下方 |
 | DINO 模型服务 | Python (conda: groundingdino310) | 5003 | 见下方 |
@@ -106,7 +106,7 @@ nohup uvicorn main:app --host 0.0.0.0 --port 8001 > /tmp/algorithm.log 2>&1 &
 
 ```bash
 echo "=== 端口检查 ==="
-for port in 5001 5003 8001 8080 5173; do
+for port in 5001 5003 8001 8080 6006; do
   if lsof -ti:$port > /dev/null 2>&1; then
     echo "  端口 $port: ✅ 运行中"
   else
@@ -514,6 +514,44 @@ git push origin master
   - ✅ 前端 `api/index.js` 中 `getLoginUrl` 方法已存在
   - ✅ 所有服务正常运行（端口 5001、5003、8001、8080、5173）
 
+### 7.17 单类别检测功能（已完成）
+
+- **功能说明**: 新增"单类别检测"页面，用户可选择 10 个虚拟模型（行人、汽车、自行车等），实际统一加载同一个 YOLOv8x best.pt，按 class_id 过滤检测结果，返回标注图片 + 检测详情
+- **模型路径**: `/root/autodl-fs/xingmu_jiancepingtai/runs/detect/train7/weights/best.pt`（10 类 VisDrone 模型）
+
+- **新增文件**:
+  - `algorithm-service/routers/single_class_detection.py` — 算法服务检测路由
+  - `backend-springboot/.../controller/SingleClassDetectionController.java` — 后端 Controller
+  - `backend-springboot/.../service/SingleClassDetectionService.java` — 后端 Service
+  - `frontend-vue/src/views/SingleClassDetection.vue` — 前端页面
+
+- **修改文件**:
+  - `algorithm-service/main.py` — 注册新路由
+  - `backend-springboot/.../config/SecurityConfig.java` — 放行 `/detection/**`
+  - `backend-springboot/src/main/resources/application.yml` — 添加 yolo.model.path 配置
+  - `frontend-vue/src/router/index.js` — 添加路由
+  - `frontend-vue/src/layout/index.vue` — 侧边栏菜单添加"单类别检测"
+
+- **遇到的 bug 及修复**:
+  - MultipartFile 转发时 Integer 无法序列化 → 所有数值参数改为 String.valueOf()
+  - application.yml 中模型路径指向了错误的 6MB 文件 → 改为正确的 YOLOv8x 路径
+  - 前端字段名与后端返回不匹配 → 统一字段名
+
+- **前端访问**: 当前前端服务运行在 6006 端口，通过 AutoDL 自定义服务暴露公网访问
+
+### 7.18 前端服务端口变更说明
+
+- **原端口**: 5173（Vite 默认）
+- **现端口**: 6006（AutoDL 自定义服务默认暴露端口）
+- **原因**: VS Code 端口转发 5173 不稳定，改用 AutoDL 原生支持的 6006 端口可直接通过公网访问
+- **启动命令**:
+  ```bash
+  pkill -f "vite" 2>/dev/null; sleep 2
+  cd /root/autodl-fs/Annotation-Platform/frontend-vue
+  nohup npx vite --host 0.0.0.0 --port 6006 > /tmp/frontend.log 2>&1 &
+  ```
+- **公网访问地址**: `http://122.51.47.91:24379/single-class-detection`（通过 AutoDL 自定义服务转发）
+
 ---
 
 ## 八、当前待解决的问题
@@ -533,7 +571,7 @@ git push origin master
 
 ## 十、当前 Debug 指令 (Agent 请直接执行)
 
-**你好，Agent。请仔细阅读本文件中【八、当前待解决的问题 】的上下文。**
+你好，Agent。请仔细阅读本文件中【八、当前待解决的问题】的上下文。
 
 请你先检查所有服务的启动状态，
 然后请看当前待解决的问题，并分析要解决这个问题应该要涉及到哪些文件和代码，请先生成一个详细的修改报告，涉及到哪些代码，要对项目的结构做哪些修改，先生成分析报告，而不做任何修改

@@ -59,6 +59,9 @@ public class User {
     @Column(name = "ls_token", length = 255)
     private String lsToken;
 
+    @Column(name = "ls_plain_password", length = 255)
+    private String lsPlainPassword;
+
     @Column(name = "ls_synced")
     @Builder.Default
     private Boolean lsSynced = false;

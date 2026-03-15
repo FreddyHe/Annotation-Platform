@@ -28,6 +28,10 @@
           <el-icon><Cpu /></el-icon>
           <span>模型训练</span>
         </el-menu-item>
+        <el-menu-item index="/single-class-detection">
+          <el-icon><Monitor /></el-icon>
+          <span>单类别检测</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     

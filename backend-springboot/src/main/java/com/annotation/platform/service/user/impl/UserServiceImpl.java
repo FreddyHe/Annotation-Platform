@@ -202,11 +202,8 @@ public class UserServiceImpl implements UserService {
 
         String lsPassword = null;
         try {
-            if (user.getLsSynced() != null && user.getLsSynced() && user.getLsToken() != null) {
-                String[] parts = user.getLsToken().split(":");
-                if (parts.length >= 2) {
-                    lsPassword = parts[1];
-                }
+            if (user.getLsSynced() != null && user.getLsSynced() && user.getLsPlainPassword() != null) {
+                lsPassword = user.getLsPlainPassword();
             }
         } catch (Exception e) {
             log.warn("解析 LS 密码失败: userId={}, error={}", userId, e.getMessage());

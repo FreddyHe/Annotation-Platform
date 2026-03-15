@@ -54,6 +54,16 @@ public class AuthServiceImpl implements AuthService {
             User user = userService.findByUsername(request.getUsername());
             userService.updateLastLogin(user.getId());
 
+            if (request.getPassword() != null && !request.getPassword().isBlank()) {
+                try {
+                    user.setLsPlainPassword(request.getPassword());
+                    userRepository.save(user);
+                    log.info("登录时保存 LS 明文密码: userId={}", user.getId());
+                } catch (Exception e) {
+                    log.warn("保存 LS 明文密码失败: userId={}, error={}", user.getId(), e.getMessage());
+                }
+            }
+
             if (!user.getLsSynced() || user.getLsToken() == null) {
                 try {
                     labelStudioProxyService.syncUserToLS(user, request.getPassword());

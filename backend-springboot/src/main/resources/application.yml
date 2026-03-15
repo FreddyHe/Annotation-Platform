@@ -101,6 +101,10 @@ app:
     url: http://localhost:8001
     timeout: 600000
 
+  yolo:
+    model:
+      path: /root/autodl-fs/xingmu_jiancepingtai/runs/detect/train7/weights/best.pt
+
   training:
     output-base-path: /root/autodl-fs/Annotation-Platform/training_runs
     conda-env: xingmu_yolo

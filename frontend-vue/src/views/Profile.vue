@@ -161,7 +161,6 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { labelStudioAPI } from '@/api'
 import { ElMessage } from 'element-plus'
 import { Monitor, Edit } from '@element-plus/icons-vue'
 
@@ -206,18 +205,63 @@ const getStatusType = (status) => {
 }
 
 const jumpToLabelStudio = async () => {
+  if (!userInfo.value.lsEmail || !userInfo.value.lsPassword) {
+    ElMessage.warning('未能获取到 Label Studio 登录凭证，请联系管理员')
+    return
+  }
+
   try {
     ElMessage.info('正在跳转到 Label Studio...')
     
-    const response = await labelStudioAPI.getLoginUrl({
-      returnUrl: '/'
-    })
+    const lsLoginUrl = 'http://122.51.47.91:28450/user/login/'
     
-    if (response.data) {
-      window.open(response.data, '_blank')
-    } else {
-      ElMessage.error('未能获取到 Label Studio 登录链接，请联系管理员')
+    const fetchCsrfToken = async () => {
+      const response = await fetch(lsLoginUrl, {
+        method: 'GET',
+        credentials: 'include'
+      })
+      
+      const cookies = response.headers.get('set-cookie') || document.cookie
+      const csrfMatch = cookies.match(/csrftoken=([^;]+)/)
+      return csrfMatch ? csrfMatch[1] : null
     }
+    
+    const csrfToken = await fetchCsrfToken()
+    
+    if (!csrfToken) {
+      ElMessage.warning('未能获取 CSRF Token，请手动登录')
+      window.open(lsLoginUrl, '_blank')
+      return
+    }
+    
+    const form = document.createElement('form')
+    form.action = lsLoginUrl
+    form.method = 'POST'
+    form.target = '_blank'
+    form.style.display = 'none'
+
+    const emailInput = document.createElement('input')
+    emailInput.name = 'email'
+    emailInput.value = userInfo.value.lsEmail
+    
+    const passwordInput = document.createElement('input')
+    passwordInput.name = 'password'
+    passwordInput.value = userInfo.value.lsPassword
+    
+    const csrfInput = document.createElement('input')
+    csrfInput.name = 'csrfmiddlewaretoken'
+    csrfInput.value = csrfToken
+
+    form.appendChild(emailInput)
+    form.appendChild(passwordInput)
+    form.appendChild(csrfInput)
+    document.body.appendChild(form)
+    
+    form.submit()
+    
+    setTimeout(() => {
+      document.body.removeChild(form)
+    }, 100)
   } catch (error) {
     console.error('跳转到 Label Studio 失败:', error)
     ElMessage.error('跳转失败，请稍后重试')

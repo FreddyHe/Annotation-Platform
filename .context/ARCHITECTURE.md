@@ -79,6 +79,16 @@
 - `ovd_test_results`：GroundingDINO 示例图检测结果（含 `bbox_json`、`test_time`）
 - `vlm_quality_scores`：VLM 对检测结果的质量评分（外键 `ovd_test_result_id`）
 
+### 接口概览（可行性评估模块补充）
+
+- 数据集检索结果（DatasetSearchResult）
+  - 基础路径：`/api/v1/feasibility/assessments/{assessmentId}/datasets`
+  - `POST    .../datasets`：创建单条
+  - `POST    .../datasets/batch`：批量创建
+  - `GET     .../datasets[?categoryName=&source=]`：查询评估下所有数据集（按 `relevanceScore` 降序），支持可选过滤
+  - `GET     .../datasets/{id}`：查详情
+  - `DELETE  .../datasets/{id}`：删除
+
 ### LS SQLite 数据库
 
 路径：`/root/.local/share/label-studio/label_studio.sqlite3`。可以直接用 `sqlite3` 查询（查询命令见 SETUP.md）。写入需谨慎，LS 运行时可能有锁。

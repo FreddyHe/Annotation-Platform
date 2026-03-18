@@ -18,6 +18,11 @@
 
 ## 问题记录
 
+### 2026-03-18: Spring Boot 启动失败（H2 文件锁 / 端口占用）
+- **根因**: 后端使用文件型 H2 数据库，运行中的进程锁定 `testdb.mv.db`；同时端口被其他进程占用。
+- **方案**: 采用启动参数覆盖进行隔离验证：临时改用内存 H2（`--spring.datasource.url=jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1`）并切换端口（如 `--server.port=8090`）；确认功能通过后再在默认 8080 + 文件型 H2 上运行。
+- **教训**: 碰到数据库锁或端口冲突，优先使用运行参数进行环境隔离，避免影响现有服务。
+
 ### 2026-03-17: /feasibility/ 路径全部 404
 - **根因**: 测试时用了 `/feasibility/assessments` 而不是 `/api/v1/feasibility/assessments`。context-path 是 `/api/v1`，Controller 上 `@RequestMapping("/feasibility")` 的实际路径是 `/api/v1/feasibility`。
 - **教训**: 新接口测试必须加 `/api/v1` 前缀。Tomcat 原生 404（不是 Spring JSON 错误）通常意味着路径根本没匹配到任何 Controller。

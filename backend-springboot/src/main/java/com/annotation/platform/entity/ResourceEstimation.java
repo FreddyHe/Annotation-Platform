@@ -6,11 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.CreationTimestamp;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
-import java.util.List;
 
 @Entity
 @Table(name = "resource_estimations")
@@ -24,8 +21,16 @@ public class ResourceEstimation {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "resource_type", nullable = false, length = 50)
-    private String resourceType;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "assessment_id", nullable = false, foreignKey = @ForeignKey(name = "fk_resource_estimation_assessment"))
+    private FeasibilityAssessment assessment;
+
+    @Column(name = "category_name", nullable = false, length = 200)
+    private String categoryName;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "feasibility_bucket", length = 50)
+    private FeasibilityBucket feasibilityBucket;
 
     @Column(name = "estimated_images")
     private Integer estimatedImages;
@@ -33,20 +38,22 @@ public class ResourceEstimation {
     @Column(name = "estimated_man_days")
     private Integer estimatedManDays;
 
-    @Column(name = "hardware_requirements", columnDefinition = "TEXT")
-    private String hardwareRequirements;
+    @Column(name = "gpu_hours")
+    private Integer gpuHours;
 
-    @Column(name = "estimated_days")
-    private Integer estimatedDays;
+    @Column(name = "iteration_count")
+    private Integer iterationCount;
+
+    @Column(name = "estimated_total_days")
+    private Integer estimatedTotalDays;
 
     @Column(name = "estimated_cost")
     private Double estimatedCost;
 
+    @Column(name = "notes", columnDefinition = "TEXT")
+    private String notes;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "category_assessment_id", foreignKey = @ForeignKey(name = "fk_resource_category"))
-    private CategoryAssessment categoryAssessment;
 }

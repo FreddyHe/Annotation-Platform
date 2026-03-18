@@ -51,6 +51,12 @@ git push origin master
 - **权限**: 从 `HttpServletRequest` 的 attribute 中获取 `userId` 和 `organizationId`（JWT 过滤器设置的）
 - **白名单**: 新增需要匿名访问的接口时，同步更新 `SecurityConfig` 的 `requestMatchers(...).permitAll()`
 
+### 匿名访问白名单（当前）
+
+- `/feasibility/assessments/*/ovd-results/**`
+- `/feasibility/ovd-results/*/quality-scores/**`
+- `/feasibility/assessments/*/datasets/**`
+
 ### Vue（前端）
 
 - **API 封装**: 所有后端调用写在 `src/api/index.js`，不在组件里直接写 fetch

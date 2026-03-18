@@ -56,6 +56,8 @@ public class SecurityConfig {
                         .requestMatchers("/detection/**").permitAll()
                         .requestMatchers("/feasibility/assessments/*/ovd-results/**").permitAll()
                         .requestMatchers("/feasibility/assessments/*/datasets/**").permitAll()
+                        .requestMatchers("/feasibility/assessments/*/resource-estimations/**").permitAll()
+                        .requestMatchers("/feasibility/assessments/*/implementation-plans/**").permitAll()
                         .requestMatchers("/feasibility/ovd-results/*/quality-scores/**").permitAll()
                         .anyRequest().authenticated()
                 )

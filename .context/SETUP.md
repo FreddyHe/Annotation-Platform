@@ -33,6 +33,26 @@ curl -s http://localhost:8080/api/v1/auth/login -X POST \
   -d '{"username":"test","password":"test"}' | head -c 100
 ```
 
+### 开发验证（临时内存库与改端口）
+
+当遇到 H2 文件锁或端口冲突时，可使用临时参数进行隔离验证：
+
+```bash
+cd /root/autodl-fs/Annotation-Platform/backend-springboot
+mvn clean package -DskipTests
+kill $(lsof -ti:8090) 2>/dev/null; sleep 3
+nohup java -jar target/platform-backend-1.0.0.jar \
+  --server.port=8090 \
+  --spring.datasource.url="jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1" \
+  > /tmp/springboot-dev.log 2>&1 &
+sleep 12 && grep "Started" /tmp/springboot-dev.log
+
+# 接口快速验证（DatasetSearchResult）
+curl -s -X POST http://localhost:8090/api/v1/feasibility/assessments/1/datasets \
+  -H "Content-Type: application/json" \
+  -d '{"categoryName":"大型石块","source":"ROBOFLOW","datasetName":"Rock Detection Dataset","relevanceScore":0.85}' | head -c 200
+```
+
 可行性评估（OVD/VLM）接口验证：
 ```bash
 # 创建 OVD 检测结果（bboxJson 是字符串字段，curl 中尽量先用 {} 验证通路）

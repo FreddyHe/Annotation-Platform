@@ -71,5 +71,9 @@ public class FeasibilityAssessment {
 
     @OneToMany(mappedBy = "assessment", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @Builder.Default
+    private List<ResourceEstimation> resourceEstimations = new ArrayList<>();
+
+    @OneToMany(mappedBy = "assessment", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    @Builder.Default
     private List<ImplementationPlan> implementationPlans = new ArrayList<>();
 }

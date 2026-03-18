@@ -24,6 +24,9 @@ public class DatasetSearchResult {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "category_name", length = 200)
+    private String categoryName;
+
     @Column(name = "source", nullable = false, length = 50)
     private String source;
 

@@ -7,6 +7,7 @@ import com.annotation.platform.dto.request.algorithm.VlmCleanRequest;
 import com.annotation.platform.dto.response.algorithm.DinoDetectResponse;
 import com.annotation.platform.dto.response.algorithm.VlmCleanResponse;
 import com.annotation.platform.service.algorithm.AlgorithmService;
+import com.annotation.platform.service.user.UserModelConfigService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -31,6 +32,8 @@ public class AlgorithmServiceImpl implements AlgorithmService {
 
     @Value("${app.file.upload.base-path:/root/autodl-fs/uploads}")
     private String uploadBasePath;
+
+    private final UserModelConfigService userModelConfigService;
 
     private final RestTemplate restTemplate = new RestTemplate();
 
@@ -124,9 +127,14 @@ public class AlgorithmServiceImpl implements AlgorithmService {
             requestBody.put("project_id", request.getProjectId());
             requestBody.put("detections", request.getDetections());
             requestBody.put("label_definitions", request.getLabelDefinitions());
-            requestBody.put("api_key", request.getApiKey());
-            requestBody.put("endpoint", request.getEndpoint());
             requestBody.put("task_id", request.getTaskId());
+
+            var effectiveConfig = userModelConfigService.getEffectiveConfig(request.getUserId());
+            requestBody.put("vlm_api_key", effectiveConfig.getVlmApiKey());
+            requestBody.put("vlm_base_url", effectiveConfig.getVlmBaseUrl());
+            requestBody.put("vlm_model_name", effectiveConfig.getVlmModelName());
+            requestBody.put("api_key", effectiveConfig.getVlmApiKey());
+            requestBody.put("endpoint", effectiveConfig.getVlmBaseUrl());
             
             // 提取 image_paths 列表（从 detections 中提取唯一的 image_path）
             if (request.getImagePaths() != null && !request.getImagePaths().isEmpty()) {

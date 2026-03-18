@@ -44,6 +44,9 @@ class VlmCleanRequest(BaseModel):
     label_definitions: Dict[str, str] = Field(..., description="Label definitions")
     api_key: Optional[str] = Field(default=None, description="API key for cloud service")
     endpoint: Optional[str] = Field(default=None, description="Cloud service endpoint")
+    vlm_api_key: Optional[str] = Field(default=None, description="VLM API key (preferred)")
+    vlm_base_url: Optional[str] = Field(default=None, description="VLM Base URL (preferred)")
+    vlm_model_name: Optional[str] = Field(default=None, description="VLM Model name (preferred)")
     task_id: Optional[str] = Field(default=None, description="Task ID for tracking")
 
 
@@ -54,6 +57,56 @@ class VlmCleanResponse(BaseModel):
     task_id: str
     status: str
     results: List[Dict[str, Any]]
+
+
+class ModelConfigTestRequest(BaseModel):
+    api_key: Optional[str] = Field(default=None, description="API key")
+    base_url: Optional[str] = Field(default=None, description="Base URL")
+    model_name: Optional[str] = Field(default=None, description="Model name")
+
+
+@router.post("/model-config/test-vlm")
+async def test_vlm_model_config(request: ModelConfigTestRequest):
+    from openai import OpenAI
+
+    api_key = request.api_key or "sk-644be34708ab44a38a0a28c82e37d6b6"
+    base_url = request.base_url or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    model_name = request.model_name or "qwen-vl-plus"
+
+    try:
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        client.chat.completions.create(
+            model=model_name,
+            messages=[{"role": "user", "content": "ping"}],
+            max_tokens=4,
+            temperature=0
+        )
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"VLM connectivity test failed: {e}")
+        return {"success": False}
+
+
+@router.post("/model-config/test-llm")
+async def test_llm_model_config(request: ModelConfigTestRequest):
+    from openai import OpenAI
+
+    api_key = request.api_key or "sk-AomDFLTBpbXd6JXk2hSv2WvzWccvww3TGkPRnA5L51ENOmNt"
+    base_url = request.base_url or "https://api.chatanywhere.tech/v1"
+    model_name = request.model_name or "gpt-4.1"
+
+    try:
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        client.chat.completions.create(
+            model=model_name,
+            messages=[{"role": "user", "content": "ping"}],
+            max_tokens=4,
+            temperature=0
+        )
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"LLM connectivity test failed: {e}")
+        return {"success": False}
 
 
 # ==================== 工具函数 ====================
@@ -268,7 +321,15 @@ async def call_dino_service(
     return results
 
 
-async def call_vlm_cleaning(detections: List[Dict[str, Any]], label_definitions: Dict[str, str]) -> List[Dict[str, Any]]:
+async def call_vlm_cleaning(
+    detections: List[Dict[str, Any]],
+    label_definitions: Dict[str, str],
+    vlm_api_key: Optional[str],
+    vlm_base_url: Optional[str],
+    vlm_model_name: Optional[str],
+    legacy_api_key: Optional[str],
+    legacy_endpoint: Optional[str]
+) -> List[Dict[str, Any]]:
     """
     调用阿里云 Qwen-VL 进行 VLM 清洗
     
@@ -283,9 +344,12 @@ async def call_vlm_cleaning(detections: List[Dict[str, Any]], label_definitions:
     
     # 初始化 Qwen-VL 客户端
     from openai import OpenAI
+    effective_api_key = vlm_api_key or legacy_api_key or "sk-644be34708ab44a38a0a28c82e37d6b6"
+    effective_base_url = vlm_base_url or legacy_endpoint or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    effective_model_name = vlm_model_name or "qwen-vl-plus"
     client = OpenAI(
-        api_key="sk-644be34708ab44a38a0a28c82e37d6b6",
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+        api_key=effective_api_key,
+        base_url=effective_base_url
     )
     
     for detection in detections:
@@ -326,7 +390,7 @@ async def call_vlm_cleaning(detections: List[Dict[str, Any]], label_definitions:
             
             # 调用 Qwen-VL
             response = client.chat.completions.create(
-                model="qwen-vl-max",
+                model=effective_model_name,
                 messages=[
                     {
                         "role": "user",
@@ -502,7 +566,12 @@ async def vlm_cleaning(request: VlmCleanRequest, background_tasks: BackgroundTas
         task_id,
         request.project_id,
         request.detections,
-        request.label_definitions
+        request.label_definitions,
+        request.vlm_api_key,
+        request.vlm_base_url,
+        request.vlm_model_name,
+        request.api_key,
+        request.endpoint
     )
     
     logger.info(f"Task {task_id}: VLM cleaning task started")
@@ -520,7 +589,12 @@ async def run_vlm_cleaning_task(
     task_id: str,
     project_id: int,
     detections: List[Dict[str, Any]],
-    label_definitions: Dict[str, str]
+    label_definitions: Dict[str, str],
+    vlm_api_key: Optional[str],
+    vlm_base_url: Optional[str],
+    vlm_model_name: Optional[str],
+    legacy_api_key: Optional[str],
+    legacy_endpoint: Optional[str]
 ):
     """
     VLM 清洗后台任务（真实实现）
@@ -534,7 +608,15 @@ async def run_vlm_cleaning_task(
         logger.info(f"Task {task_id}: Starting VLM cleaning (real mode)")
         
         # 调用 VLM 清洗
-        results = await call_vlm_cleaning(detections, label_definitions)
+        results = await call_vlm_cleaning(
+            detections=detections,
+            label_definitions=label_definitions,
+            vlm_api_key=vlm_api_key,
+            vlm_base_url=vlm_base_url,
+            vlm_model_name=vlm_model_name,
+            legacy_api_key=legacy_api_key,
+            legacy_endpoint=legacy_endpoint
+        )
         
         # 保存结果
         for result in results:

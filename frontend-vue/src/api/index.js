@@ -67,6 +67,35 @@ export const userAPI = {
       method: 'get',
       params
     })
+  },
+
+  getModelConfig() {
+    return request({
+      url: '/api/user/model-config',
+      method: 'get'
+    })
+  },
+
+  updateModelConfig(data) {
+    return request({
+      url: '/api/user/model-config',
+      method: 'put',
+      data
+    })
+  },
+
+  testVlmModelConfig() {
+    return request({
+      url: '/api/user/model-config/test-vlm',
+      method: 'post'
+    })
+  },
+
+  testLlmModelConfig() {
+    return request({
+      url: '/api/user/model-config/test-llm',
+      method: 'post'
+    })
   }
 }
 

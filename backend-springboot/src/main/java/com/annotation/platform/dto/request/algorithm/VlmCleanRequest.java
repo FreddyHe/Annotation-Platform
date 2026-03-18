@@ -14,6 +14,7 @@ import java.util.Map;
 @AllArgsConstructor
 public class VlmCleanRequest {
     private Long projectId;
+    private Long userId;
     private List<Map<String, Object>> detections;
     private Map<String, String> labelDefinitions;
     private String apiKey;

@@ -14,6 +14,47 @@
 | 算法服务 (FastAPI) | FastAPI + Uvicorn | 8001 | `algo_service` |
 | DINO 模型服务 | Python | 5003 | `groundingdino310` |
 
+## 启动方式（开发/联调）
+
+以 `.context/SETUP.md` 为准，这里给出最常用的启动命令与验证方式（日志统一落到 `/tmp/*.log`）。
+
+### Spring Boot 后端（8080）
+
+```bash
+cd /root/autodl-fs/Annotation-Platform/backend-springboot
+mvn clean package -DskipTests
+kill $(lsof -ti:8080) 2>/dev/null; sleep 3
+nohup java -jar target/platform-backend-1.0.0.jar --server.port=8080 > /tmp/springboot.log 2>&1 &
+sleep 12 && grep "Started" /tmp/springboot.log
+curl -s http://localhost:8080/api/v1/actuator/health | head -c 200
+```
+
+### 算法服务（FastAPI 8001 + DINO 5003）
+
+```bash
+source $(conda info --base)/etc/profile.d/conda.sh
+cd /root/autodl-fs/Annotation-Platform/algorithm-service
+
+conda activate groundingdino310
+export CUDA_VISIBLE_DEVICES=""
+nohup python dino_model_server.py > /tmp/dino.log 2>&1 &
+
+conda activate algo_service
+export CUDA_VISIBLE_DEVICES=""
+nohup uvicorn main:app --host 0.0.0.0 --port 8001 > /tmp/algorithm.log 2>&1 &
+
+curl -s http://localhost:8001/docs | head -c 120
+```
+
+### 前端（Vue3 6006）
+
+```bash
+pkill -f "vite" 2>/dev/null; sleep 2
+cd /root/autodl-fs/Annotation-Platform/frontend-vue
+nohup npx vite --host 0.0.0.0 --port 6006 > /tmp/frontend.log 2>&1 &
+curl -I http://localhost:6006 | head -n 5
+```
+
 ## 目录结构
 
 ```
@@ -75,9 +116,14 @@
 
 主要表：`users`、`organizations`、`projects`、`feasibility_assessments`、`category_assessments`、`ovd_test_results`、`vlm_quality_scores`、`dataset_search_results`、`resource_estimations`、`implementation_plans`
 
+用户模型配置表：
+- `user_model_configs`：每用户一条 VLM/LLM 配置（`user_id` 唯一），字段包含 `vlm_api_key/vlm_base_url/vlm_model_name` 与 `llm_api_key/llm_base_url/llm_model_name`
+
 可行性评估相关表：
 - `ovd_test_results`：GroundingDINO 示例图检测结果（含 `bbox_json`、`test_time`）
 - `vlm_quality_scores`：VLM 对检测结果的质量评分（外键 `ovd_test_result_id`）
+- `resource_estimations`：资源估算（外键 `assessment_id`，字段如 `estimated_images`、`gpu_hours`、`estimated_cost` 等）
+- `implementation_plans`：实施计划阶段（外键 `assessment_id`，字段如 `phase_order`、`phase_name`、`tasks`（TEXT 存 JSON 字符串）等）
 
 ### 接口概览（可行性评估模块补充）
 
@@ -88,6 +134,23 @@
   - `GET     .../datasets[?categoryName=&source=]`：查询评估下所有数据集（按 `relevanceScore` 降序），支持可选过滤
   - `GET     .../datasets/{id}`：查详情
   - `DELETE  .../datasets/{id}`：删除
+
+- 资源估算（ResourceEstimation）
+  - 基础路径：`/api/v1/feasibility/assessments/{assessmentId}/resource-estimations`
+  - `POST    .../resource-estimations`：创建单条
+  - `POST    .../resource-estimations/batch`：批量创建
+  - `GET     .../resource-estimations[?categoryName=]`：查询评估下所有资源估算，支持按类别过滤
+  - `GET     .../resource-estimations/{id}`：查详情
+  - `DELETE  .../resource-estimations/{id}`：删除
+
+- 实施计划（ImplementationPlan）
+  - 基础路径：`/api/v1/feasibility/assessments/{assessmentId}/implementation-plans`
+  - `POST    .../implementation-plans`：创建单条
+  - `POST    .../implementation-plans/batch`：批量创建（返回按 `phaseOrder` 升序）
+  - `GET     .../implementation-plans`：查询评估下所有阶段（按 `phaseOrder` 升序）
+  - `GET     .../implementation-plans/{id}`：查详情
+  - `PUT     .../implementation-plans/{id}`：更新
+  - `DELETE  .../implementation-plans/{id}`：删除
 
 ### LS SQLite 数据库
 
@@ -101,6 +164,18 @@
 2. **创建项目** → Spring Boot 创建项目 → 同步到 LS（用组织管理员 token 创建 LS 项目 + 生成 label_config XML）
 3. **自动标注** → 上传图片 → 调用 DINO/YOLO 检测 → VLM 清洗 → 同步预测结果到 LS
 4. **可行性评估** → 创建评估 → 解析需求 → 类别评估 → OVD 测试 → 资源估算 → 实施计划
+
+## 用户模型配置（VLM/LLM）
+
+Spring Boot 提供用户级别的模型配置管理接口（受 JWT 保护）：
+- `GET  /api/v1/api/user/model-config`：获取当前用户配置（不存在返回默认值，key 脱敏）
+- `PUT  /api/v1/api/user/model-config`：更新配置（不存在自动创建；脱敏 key 不覆盖真实 key）
+- `POST /api/v1/api/user/model-config/test-vlm`：测试 VLM 连通性（转发到算法服务）
+- `POST /api/v1/api/user/model-config/test-llm`：测试 LLM 连通性（转发到算法服务）
+
+算法服务提供连通性测试接口（供 Spring Boot 转发）：
+- `POST /api/v1/model-config/test-vlm`
+- `POST /api/v1/model-config/test-llm`
 
 ## 期望的架构设计
 

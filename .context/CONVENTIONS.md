@@ -56,6 +56,8 @@ git push origin master
 - `/feasibility/assessments/*/ovd-results/**`
 - `/feasibility/ovd-results/*/quality-scores/**`
 - `/feasibility/assessments/*/datasets/**`
+- `/feasibility/assessments/*/resource-estimations/**`
+- `/feasibility/assessments/*/implementation-plans/**`
 
 ### Vue（前端）
 

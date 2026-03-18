@@ -123,6 +123,7 @@ public class AutoAnnotationService {
             List<Map<String, Object>> detections = extractDetectionsFromResults(dinoResults);
             VlmCleanRequest vlmRequest = VlmCleanRequest.builder()
                     .projectId(projectId)
+                    .userId(userId)
                     .detections(detections)
                     .labelDefinitions(labelDefinitions)
                     .imagePaths(imagePaths)  // 添加 image_paths 列表

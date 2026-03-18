@@ -23,6 +23,11 @@
 - **方案**: 采用启动参数覆盖进行隔离验证：临时改用内存 H2（`--spring.datasource.url=jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1`）并切换端口（如 `--server.port=8090`）；确认功能通过后再在默认 8080 + 文件型 H2 上运行。
 - **教训**: 碰到数据库锁或端口冲突，优先使用运行参数进行环境隔离，避免影响现有服务。
 
+### 2026-03-18: VLM/LLM 连接信息写死导致无法按用户配置切换
+- **根因**: 算法服务 `auto_annotation.py` 在 VLM 清洗逻辑里硬编码了 `api_key/base_url/model`，Spring Boot 虽透传了字段但 Python 端没有使用；前端缺少设置入口，无法为不同用户保存模型配置。
+- **修复**: 新增 Spring Boot `user_model_configs`（每用户一条，包含 VLM/LLM 的 key/url/model）；提供 `/api/user/model-config` 的 GET/PUT 和 test-vlm/test-llm；算法服务新增 `/api/v1/model-config/test-vlm|test-llm` 并改造 VLM 清洗优先使用 `vlm_*` 字段（为空回退旧字段与默认值）；Spring Boot 转发 VLM 清洗时从用户配置取值并附加到请求体；前端设置页新增“模型配置”区域与测试/保存。
+- **教训**: 任何第三方模型连接信息都不能硬编码在算法侧；要么来自用户配置（DB），要么来自环境变量；并且需要提供连通性测试接口，避免上线后才发现 key/url/model 配错。
+
 ### 2026-03-17: /feasibility/ 路径全部 404
 - **根因**: 测试时用了 `/feasibility/assessments` 而不是 `/api/v1/feasibility/assessments`。context-path 是 `/api/v1`，Controller 上 `@RequestMapping("/feasibility")` 的实际路径是 `/api/v1/feasibility`。
 - **教训**: 新接口测试必须加 `/api/v1` 前缀。Tomcat 原生 404（不是 Spring JSON 错误）通常意味着路径根本没匹配到任何 Controller。

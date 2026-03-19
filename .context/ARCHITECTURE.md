@@ -152,6 +152,9 @@ curl -I http://localhost:6006 | head -n 5
   - `PUT     .../implementation-plans/{id}`：更新
   - `DELETE  .../implementation-plans/{id}`：删除
 
+- 需求解析（Requirement Parsing）
+  - `POST /api/v1/feasibility/assessments/{id}/parse`：后端串联需求解析（读取当前用户 UserModelConfig 并透传到算法服务，写入 CategoryAssessment，更新评估状态为 PARSED）
+
 ### LS SQLite 数据库
 
 路径：`/root/.local/share/label-studio/label_studio.sqlite3`。可以直接用 `sqlite3` 查询（查询命令见 SETUP.md）。写入需谨慎，LS 运行时可能有锁。
@@ -176,6 +179,10 @@ Spring Boot 提供用户级别的模型配置管理接口（受 JWT 保护）：
 算法服务提供连通性测试接口（供 Spring Boot 转发）：
 - `POST /api/v1/model-config/test-vlm`
 - `POST /api/v1/model-config/test-llm`
+
+算法服务（FastAPI）可行性评估相关接口：
+- `POST /api/v1/feasibility/parse-requirement`：LLM 需求解析（支持 `llm_api_key/llm_base_url/llm_model_name` 透传，为空回退默认值）
+- `POST /api/v1/feasibility/analyze-image`：VLM 图片场景分析（multipart，支持 `vlm_api_key/vlm_base_url/vlm_model_name` 透传，为空回退默认值）
 
 ## 期望的架构设计
 

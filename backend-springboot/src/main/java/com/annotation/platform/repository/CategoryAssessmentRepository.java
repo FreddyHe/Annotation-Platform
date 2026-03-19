@@ -16,4 +16,6 @@ public interface CategoryAssessmentRepository extends JpaRepository<CategoryAsse
     List<CategoryAssessment> findByAssessmentIdAndFeasibilityBucket(Long assessmentId, FeasibilityBucket bucket);
 
     Optional<CategoryAssessment> findByIdAndAssessmentId(Long id, Long assessmentId);
+
+    void deleteByAssessmentId(Long assessmentId);
 }

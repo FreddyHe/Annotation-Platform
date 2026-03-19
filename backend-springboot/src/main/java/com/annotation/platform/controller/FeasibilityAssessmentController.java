@@ -67,4 +67,15 @@ public class FeasibilityAssessmentController {
         feasibilityAssessmentService.deleteAssessment(id);
         return Result.success();
     }
+
+    @PostMapping("/assessments/{id}/parse")
+    public Result<FeasibilityAssessmentResponse> parseRequirement(
+            @PathVariable Long id,
+            HttpServletRequest httpRequest
+    ) {
+        Long userId = (Long) httpRequest.getAttribute("userId");
+        log.info("需求解析: assessmentId={}, userId={}", id, userId);
+        FeasibilityAssessmentResponse response = feasibilityAssessmentService.parseAssessment(id, userId);
+        return Result.success(response);
+    }
 }

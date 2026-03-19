@@ -6,7 +6,7 @@ from loguru import logger
 import sys
 
 from config import settings, BASE_DIR, LOG_DIR
-from routers import dino, vlm, yolo, health, train, test, auto_annotation, single_class_detection
+from routers import dino, vlm, yolo, health, train, test, auto_annotation, single_class_detection, feasibility
 
 
 @asynccontextmanager
@@ -57,6 +57,7 @@ app.include_router(train.router, prefix=settings.API_PREFIX, tags=["Training"])
 app.include_router(test.router, prefix=settings.API_PREFIX, tags=["Testing"])
 app.include_router(auto_annotation.router, prefix=settings.API_PREFIX, tags=["AutoAnnotation"])
 app.include_router(single_class_detection.router, prefix=settings.API_PREFIX, tags=["SingleClassDetection"])
+app.include_router(feasibility.router, prefix=settings.API_PREFIX, tags=["Feasibility"])
 
 
 @app.exception_handler(Exception)

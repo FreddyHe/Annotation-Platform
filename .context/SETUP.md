@@ -70,6 +70,25 @@ curl -s http://localhost:8080/api/v1/feasibility/ovd-results/1/quality-scores -X
 
 # 查询 OVD 结果下所有质量评分
 curl -s http://localhost:8080/api/v1/feasibility/ovd-results/1/quality-scores | head -c 200
+
+# 需求解析（LLM + VLM 透传由后端自动完成，需要 Authorization）
+token=$(curl -s -X POST http://localhost:8080/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"test","password":"test"}' | python -c "import sys,json; print(json.load(sys.stdin)['data']['token'])")
+
+# 创建可行性评估（替换 rawRequirement）
+assessmentId=$(curl -s -X POST http://localhost:8080/api/v1/feasibility/assessments \
+  -H "Authorization: Bearer $token" \
+  -H "Content-Type: application/json" \
+  -d '{"assessmentName":"解析测试","rawRequirement":"矿道内大型异物检测+销钉松动+线缆断裂"}' \
+  | python -c "import sys,json; print(json.load(sys.stdin)['data']['id'])")
+
+# 串联解析（状态应变为 PARSED，并自动写入 categories）
+curl -s -X POST http://localhost:8080/api/v1/feasibility/assessments/$assessmentId/parse \
+  -H "Authorization: Bearer $token" | head -c 300
+
+curl -s http://localhost:8080/api/v1/feasibility/assessments/$assessmentId/categories \
+  -H "Authorization: Bearer $token" | head -c 600
 ```
 
 ## Label Studio（端口 5001）

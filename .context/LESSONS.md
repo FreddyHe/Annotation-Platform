@@ -28,6 +28,11 @@
 - **修复**: 新增 Spring Boot `user_model_configs`（每用户一条，包含 VLM/LLM 的 key/url/model）；提供 `/api/user/model-config` 的 GET/PUT 和 test-vlm/test-llm；算法服务新增 `/api/v1/model-config/test-vlm|test-llm` 并改造 VLM 清洗优先使用 `vlm_*` 字段（为空回退旧字段与默认值）；Spring Boot 转发 VLM 清洗时从用户配置取值并附加到请求体；前端设置页新增“模型配置”区域与测试/保存。
 - **教训**: 任何第三方模型连接信息都不能硬编码在算法侧；要么来自用户配置（DB），要么来自环境变量；并且需要提供连通性测试接口，避免上线后才发现 key/url/model 配错。
 
+### 2026-03-18: 新增接口联调返回 “No static resource ...”（看似 500/404，实际是服务没重启）
+- **根因**: Spring Boot 已编译但运行中的还是旧 jar/旧进程，导致新加的 Controller 路由根本不存在；请求被当作静态资源路径处理，最终抛 `NoResourceFoundException: No static resource ...`。
+- **方案**: 每次新增/修改 Controller 后必须重启 Spring Boot（按 `.context/SETUP.md` 的 kill+nohup 流程），再用 curl 验证新路径是否已被 Spring MVC 路由匹配。
+- **教训**: 看到 `No static resource xxx` 优先怀疑“当前运行进程不是最新构建产物”或“路径没被任何 Controller 匹配”，不要在代码里盲猜问题。
+
 ### 2026-03-17: /feasibility/ 路径全部 404
 - **根因**: 测试时用了 `/feasibility/assessments` 而不是 `/api/v1/feasibility/assessments`。context-path 是 `/api/v1`，Controller 上 `@RequestMapping("/feasibility")` 的实际路径是 `/api/v1/feasibility`。
 - **教训**: 新接口测试必须加 `/api/v1` 前缀。Tomcat 原生 404（不是 Spring JSON 错误）通常意味着路径根本没匹配到任何 Controller。

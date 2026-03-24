@@ -1,60 +1,61 @@
 <template>
   <el-container class="layout-container">
-    <el-aside width="240px" class="layout-aside">
-      <div class="logo">
-        <h2>Annotation Platform</h2>
+    <el-aside :width="isCollapse ? '64px' : '232px'" class="layout-aside">
+      <div class="logo" :class="{ 'logo-collapsed': isCollapse }">
+        <div class="logo-icon">A</div>
+        <transition name="fade">
+          <span v-if="!isCollapse" class="logo-text">Annotation</span>
+        </transition>
       </div>
       <el-menu
         :default-active="activeMenu"
         class="layout-menu"
         router
-        background-color="#304156"
-        text-color="#bfcbd9"
-        active-text-color="#409eff"
+        :collapse="isCollapse"
+        :collapse-transition="false"
       >
         <el-menu-item index="/dashboard">
           <el-icon><Odometer /></el-icon>
-          <span>概览</span>
+          <template #title>概览</template>
         </el-menu-item>
         <el-menu-item index="/projects">
           <el-icon><FolderOpened /></el-icon>
-          <span>项目管理</span>
+          <template #title>项目管理</template>
         </el-menu-item>
         <el-menu-item index="/tasks">
           <el-icon><Timer /></el-icon>
-          <span>算法任务</span>
+          <template #title>算法任务</template>
         </el-menu-item>
         <el-menu-item index="/model-training">
           <el-icon><Cpu /></el-icon>
-          <span>单类别模型训练</span>
+          <template #title>单类别模型训练</template>
         </el-menu-item>
         <el-menu-item index="/single-class-detection">
           <el-icon><Monitor /></el-icon>
-          <span>单类别检测</span>
+          <template #title>单类别检测</template>
         </el-menu-item>
         <el-menu-item index="/feasibility">
           <el-icon><DataAnalysis /></el-icon>
-          <span>可行性评估</span>
+          <template #title>可行性评估</template>
         </el-menu-item>
       </el-menu>
     </el-aside>
     
     <el-container class="layout-main">
-      <el-header class="layout-header">
+      <el-header class="layout-header" height="56px">
         <div class="header-left">
-          <el-icon class="toggle-icon" @click="toggleSidebar">
-            <Fold v-if="!isCollapse" />
-            <Expand v-else />
-          </el-icon>
+          <button class="toggle-btn" @click="toggleSidebar">
+            <el-icon :size="18"><Fold v-if="!isCollapse" /><Expand v-else /></el-icon>
+          </button>
         </div>
         <div class="header-right">
-          <el-dropdown @command="handleCommand">
+          <el-dropdown @command="handleCommand" trigger="click">
             <div class="user-dropdown">
-              <el-avatar :size="32" :src="userAvatar">
+              <el-avatar :size="30" :src="userAvatar" class="user-avatar">
                 {{ displayName.charAt(0).toUpperCase() }}
               </el-avatar>
               <span class="username">{{ displayName }}</span>
-              <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+              <el-icon class="el-icon--right" :size="12"><ArrowDown /></el-icon>
             </div>
             <template #dropdown>
               <el-dropdown-menu>
@@ -143,35 +144,106 @@ onMounted(async () => {
 }
 
 .layout-aside {
-  background-color: #304156;
+  background-color: #fff;
+  border-right: 0.5px solid var(--gray-200);
   overflow-x: hidden;
+  overflow-y: auto;
+  transition: width 0.25s var(--ease-out);
+  display: flex;
+  flex-direction: column;
 }
 
 .logo {
-  height: 60px;
-  line-height: 60px;
-  text-align: center;
+  height: var(--header-height);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 20px;
+  border-bottom: 0.5px solid var(--gray-200);
+  flex-shrink: 0;
+}
+
+.logo-collapsed {
+  justify-content: center;
+  padding: 0;
+}
+
+.logo-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  background: var(--brand-600);
   color: #fff;
-  font-size: 20px;
-  font-weight: bold;
-  border-bottom: 1px solid #1f2d3d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.logo-text {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--gray-900);
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.15s;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 
 .layout-menu {
-  border-right: none;
+  border-right: none !important;
+  padding: 8px;
+  flex: 1;
+}
+
+.layout-menu .el-menu-item {
+  height: 40px;
+  line-height: 40px;
+  border-radius: var(--radius-md);
+  margin-bottom: 2px;
+  color: var(--gray-500);
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.15s var(--ease-out);
+}
+
+.layout-menu .el-menu-item:hover {
+  background-color: var(--gray-50);
+  color: var(--gray-700);
+}
+
+.layout-menu .el-menu-item.is-active {
+  background-color: var(--brand-50);
+  color: var(--brand-800);
+}
+
+.layout-menu .el-menu-item .el-icon {
+  font-size: 16px;
+  margin-right: 8px;
 }
 
 .layout-main {
-  background-color: #f5f7fa;
+  background-color: var(--gray-100);
 }
 
 .layout-header {
   background-color: #fff;
-  box-shadow: 0 1px 4px rgba(0, 21, 41, 0.08);
+  border-bottom: 0.5px solid var(--gray-200);
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 0 20px;
+  height: var(--header-height);
 }
 
 .header-left {
@@ -179,10 +251,23 @@ onMounted(async () => {
   align-items: center;
 }
 
-.toggle-icon {
-  font-size: 20px;
+.toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  border: none;
+  background: transparent;
+  color: var(--gray-500);
   cursor: pointer;
-  color: #606266;
+  transition: all 0.15s;
+}
+
+.toggle-btn:hover {
+  background-color: var(--gray-100);
+  color: var(--gray-700);
 }
 
 .header-right {
@@ -194,17 +279,31 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   cursor: pointer;
-  padding: 0 10px;
+  padding: 4px 8px;
+  border-radius: var(--radius-md);
+  transition: background-color 0.15s;
+}
+
+.user-dropdown:hover {
+  background-color: var(--gray-50);
+}
+
+.user-avatar {
+  background-color: var(--brand-50) !important;
+  color: var(--brand-800) !important;
+  font-weight: 500;
+  font-size: 12px;
 }
 
 .username {
-  margin: 0 8px 0 12px;
-  font-size: 14px;
-  color: #606266;
+  margin: 0 6px 0 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--gray-700);
 }
 
 .layout-content {
-  padding: 20px;
+  padding: 24px;
   overflow-y: auto;
 }
 </style>

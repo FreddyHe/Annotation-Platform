@@ -1,87 +1,77 @@
 <template>
   <div class="dashboard">
-    <el-row :gutter="20">
-      <el-col :span="6">
-        <el-card class="stat-card">
-          <div class="stat-content">
-            <el-icon class="stat-icon" color="#409eff"><FolderOpened /></el-icon>
-            <div class="stat-info">
-              <div class="stat-value">{{ stats.totalProjects }}</div>
-              <div class="stat-label">总项目数</div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
+    <div class="page-title">概览</div>
+
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-icon" style="background: var(--brand-50); color: var(--brand-600);">
+          <el-icon><FolderOpened /></el-icon>
+        </div>
+        <div class="stat-body">
+          <div class="stat-value">{{ stats.totalProjects }}</div>
+          <div class="stat-label">总项目数</div>
+        </div>
+      </div>
       
-      <el-col :span="6">
-        <el-card class="stat-card">
-          <div class="stat-content">
-            <el-icon class="stat-icon" color="#67c23a"><Picture /></el-icon>
-            <div class="stat-info">
-              <div class="stat-value">{{ stats.totalImages }}</div>
-              <div class="stat-label">总图片数</div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
+      <div class="stat-card">
+        <div class="stat-icon" style="background: var(--success-bg); color: var(--success-text);">
+          <el-icon><Picture /></el-icon>
+        </div>
+        <div class="stat-body">
+          <div class="stat-value">{{ stats.totalImages }}</div>
+          <div class="stat-label">总图片数</div>
+        </div>
+      </div>
       
-      <el-col :span="6">
-        <el-card class="stat-card">
-          <div class="stat-content">
-            <el-icon class="stat-icon" color="#e6a23c"><Timer /></el-icon>
-            <div class="stat-info">
-              <div class="stat-value">{{ stats.runningTasks }}</div>
-              <div class="stat-label">运行中任务</div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
+      <div class="stat-card">
+        <div class="stat-icon" style="background: var(--warning-bg); color: var(--warning-text);">
+          <el-icon><Timer /></el-icon>
+        </div>
+        <div class="stat-body">
+          <div class="stat-value">{{ stats.runningTasks }}</div>
+          <div class="stat-label">运行中任务</div>
+        </div>
+      </div>
       
-      <el-col :span="6">
-        <el-card class="stat-card">
-          <div class="stat-content">
-            <el-icon class="stat-icon" color="#f56c6c"><CircleCheck /></el-icon>
-            <div class="stat-info">
-              <div class="stat-value">{{ stats.completedTasks }}</div>
-              <div class="stat-label">已完成任务</div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
+      <div class="stat-card">
+        <div class="stat-icon" style="background: var(--danger-bg); color: var(--danger-text);">
+          <el-icon><CircleCheck /></el-icon>
+        </div>
+        <div class="stat-body">
+          <div class="stat-value">{{ stats.completedTasks }}</div>
+          <div class="stat-label">已完成任务</div>
+        </div>
+      </div>
+    </div>
     
-    <el-row :gutter="20" style="margin-top: 20px;">
-      <el-col :span="24">
-        <el-card>
-          <template #header>
-            <div class="card-header">
-              <span>最近项目</span>
-              <el-button type="primary" link @click="goToProjects">查看全部</el-button>
-            </div>
+    <el-card class="table-card">
+      <template #header>
+        <div class="card-header">
+          <span>最近项目</span>
+          <el-button type="primary" link @click="goToProjects">查看全部</el-button>
+        </div>
+      </template>
+      <el-table :data="recentProjects" style="width: 100%">
+        <el-table-column prop="name" label="项目名称" />
+        <el-table-column prop="status" label="状态">
+          <template #default="{ row }">
+            <el-tag :type="getStatusType(row.status)" size="small">
+              {{ getStatusText(row.status) }}
+            </el-tag>
           </template>
-          <el-table :data="recentProjects" style="width: 100%">
-            <el-table-column prop="name" label="项目名称" />
-            <el-table-column prop="status" label="状态">
-              <template #default="{ row }">
-                <el-tag :type="getStatusType(row.status)">
-                  {{ getStatusText(row.status) }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="totalImages" label="图片数" />
-            <el-table-column prop="processedImages" label="已处理" />
-            <el-table-column prop="createdAt" label="创建时间" />
-            <el-table-column label="操作" width="200">
-              <template #default="{ row }">
-                <el-button type="primary" link size="small" @click="viewProject(row.id)">
-                  查看
-                </el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-card>
-      </el-col>
-    </el-row>
+        </el-table-column>
+        <el-table-column prop="totalImages" label="图片数" />
+        <el-table-column prop="processedImages" label="已处理" />
+        <el-table-column prop="createdAt" label="创建时间" />
+        <el-table-column label="操作" width="120">
+          <template #default="{ row }">
+            <el-button type="primary" link size="small" @click="viewProject(row.id)">
+              查看
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
   </div>
 </template>
 
@@ -175,43 +165,80 @@ onMounted(() => {
 
 <style scoped>
 .dashboard {
-  padding: 20px;
+  max-width: 1200px;
+}
+
+.page-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--gray-900);
+  letter-spacing: -0.02em;
+  margin-bottom: 24px;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
 }
 
 .stat-card {
-  margin-bottom: 20px;
-}
-
-.stat-content {
+  background: #fff;
+  border: 0.5px solid var(--gray-200);
+  border-radius: var(--radius-lg);
+  padding: 20px;
   display: flex;
   align-items: center;
-  padding: 10px;
+  gap: 16px;
+  transition: border-color 0.15s;
+}
+
+.stat-card:hover {
+  border-color: var(--gray-300);
 }
 
 .stat-icon {
-  font-size: 48px;
-  margin-right: 20px;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  flex-shrink: 0;
 }
 
-.stat-info {
+.stat-body {
   flex: 1;
+  min-width: 0;
 }
 
 .stat-value {
-  font-size: 28px;
-  font-weight: bold;
-  color: #303133;
-  margin-bottom: 5px;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--gray-900);
+  line-height: 1.2;
+  letter-spacing: -0.02em;
 }
 
 .stat-label {
-  font-size: 14px;
-  color: #909399;
+  font-size: 12px;
+  color: var(--gray-500);
+  margin-top: 2px;
+  font-weight: 500;
+}
+
+.table-card {
+  margin-bottom: 20px;
 }
 
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--gray-900);
 }
 </style>

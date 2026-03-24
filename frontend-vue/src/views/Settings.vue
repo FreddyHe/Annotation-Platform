@@ -1,80 +1,73 @@
 <template>
   <div class="settings-container">
-    <el-card>
-      <template #header>
-        <div class="card-header">
-          <span>设置</span>
-        </div>
-      </template>
-      <div class="settings-content">
-        <el-row :gutter="20">
-          <el-col :xs="24" :sm="24" :md="12">
-            <el-card class="config-card">
-              <template #header>
-                <div class="section-header">
-                  <span>VLM 模型配置</span>
-                  <el-button
-                    type="primary"
-                    plain
-                    size="small"
-                    :loading="testingVlm"
-                    @click="handleTestVlm"
-                  >
-                    测试连通性
-                  </el-button>
-                </div>
-              </template>
-              <el-form :model="form" label-width="110px">
-                <el-form-item label="API Key">
-                  <el-input v-model="form.vlmApiKey" type="password" show-password />
-                </el-form-item>
-                <el-form-item label="Base URL">
-                  <el-input v-model="form.vlmBaseUrl" />
-                </el-form-item>
-                <el-form-item label="模型名">
-                  <el-input v-model="form.vlmModelName" />
-                </el-form-item>
-              </el-form>
-            </el-card>
-          </el-col>
+    <div class="page-title">设置</div>
 
-          <el-col :xs="24" :sm="24" :md="12">
-            <el-card class="config-card">
-              <template #header>
-                <div class="section-header">
-                  <span>LLM 模型配置</span>
-                  <el-button
-                    type="primary"
-                    plain
-                    size="small"
-                    :loading="testingLlm"
-                    @click="handleTestLlm"
-                  >
-                    测试连通性
-                  </el-button>
-                </div>
-              </template>
-              <el-form :model="form" label-width="110px">
-                <el-form-item label="API Key">
-                  <el-input v-model="form.llmApiKey" type="password" show-password />
-                </el-form-item>
-                <el-form-item label="Base URL">
-                  <el-input v-model="form.llmBaseUrl" />
-                </el-form-item>
-                <el-form-item label="模型名">
-                  <el-input v-model="form.llmModelName" />
-                </el-form-item>
-              </el-form>
-            </el-card>
-          </el-col>
-        </el-row>
+    <el-row :gutter="20">
+      <el-col :xs="24" :sm="24" :md="12">
+        <el-card class="config-card">
+          <template #header>
+            <div class="section-header">
+              <span class="card-title">VLM 模型配置</span>
+              <el-button
+                type="primary"
+                plain
+                size="small"
+                :loading="testingVlm"
+                @click="handleTestVlm"
+              >
+                测试连通性
+              </el-button>
+            </div>
+          </template>
+          <el-form :model="form" label-width="110px">
+            <el-form-item label="API Key">
+              <el-input v-model="form.vlmApiKey" type="password" show-password />
+            </el-form-item>
+            <el-form-item label="Base URL">
+              <el-input v-model="form.vlmBaseUrl" />
+            </el-form-item>
+            <el-form-item label="模型名">
+              <el-input v-model="form.vlmModelName" />
+            </el-form-item>
+          </el-form>
+        </el-card>
+      </el-col>
 
-        <div class="actions">
-          <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
-          <el-button :loading="loading" @click="loadConfig">刷新</el-button>
-        </div>
-      </div>
-    </el-card>
+      <el-col :xs="24" :sm="24" :md="12">
+        <el-card class="config-card">
+          <template #header>
+            <div class="section-header">
+              <span class="card-title">LLM 模型配置</span>
+              <el-button
+                type="primary"
+                plain
+                size="small"
+                :loading="testingLlm"
+                @click="handleTestLlm"
+              >
+                测试连通性
+              </el-button>
+            </div>
+          </template>
+          <el-form :model="form" label-width="110px">
+            <el-form-item label="API Key">
+              <el-input v-model="form.llmApiKey" type="password" show-password />
+            </el-form-item>
+            <el-form-item label="Base URL">
+              <el-input v-model="form.llmBaseUrl" />
+            </el-form-item>
+            <el-form-item label="模型名">
+              <el-input v-model="form.llmModelName" />
+            </el-form-item>
+          </el-form>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <div class="actions">
+      <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
+      <el-button :loading="loading" @click="loadConfig">刷新</el-button>
+    </div>
   </div>
 </template>
 
@@ -167,16 +160,15 @@ onMounted(() => {
 
 <style scoped>
 .settings-container {
-  padding: 20px;
+  max-width: 1000px;
 }
 
-.card-header {
-  font-size: 18px;
-  font-weight: bold;
-}
-
-.settings-content {
-  padding: 20px 0;
+.page-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--gray-900);
+  letter-spacing: -0.02em;
+  margin-bottom: 24px;
 }
 
 .config-card {
@@ -189,10 +181,16 @@ onMounted(() => {
   justify-content: space-between;
 }
 
+.card-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--gray-900);
+}
+
 .actions {
   display: flex;
   gap: 12px;
   justify-content: flex-end;
-  margin-top: 10px;
+  margin-top: 8px;
 }
 </style>

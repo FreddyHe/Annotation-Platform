@@ -2,10 +2,7 @@
   <div class="single-class-detection">
     <el-page-header @back="goBack" content="单类别检测">
       <template #extra>
-        <el-tag type="info" size="large">
-          <el-icon><Monitor /></el-icon>
-          YOLO Detection
-        </el-tag>
+        <el-tag type="info" size="default">YOLO Detection</el-tag>
       </template>
     </el-page-header>
 
@@ -14,7 +11,7 @@
         <el-card class="control-panel">
           <template #header>
             <div class="card-header">
-              <span>检测参数</span>
+              <span class="card-title">检测参数</span>
             </div>
           </template>
 
@@ -36,7 +33,7 @@
                     :value="m.id"
                   >
                     <span>{{ m.modelName }}</span>
-                    <span style="float: right; color: #8492a6; font-size: 12px;">
+                    <span style="float: right; color: var(--gray-400); font-size: 12px;">
                       {{ m.classes.length }}类
                     </span>
                   </el-option>
@@ -53,7 +50,7 @@
                   :value="cls.classId"
                 >
                   <span style="float: left">{{ cls.cnName || cls.className }}</span>
-                  <span style="float: right; color: #8492a6; font-size: 13px">{{ cls.className }}</span>
+                  <span style="float: right; color: var(--gray-400); font-size: 13px">{{ cls.className }}</span>
                 </el-option>
               </el-select>
             </el-form-item>
@@ -109,6 +106,7 @@
                 :loading="detecting"
                 @click="handleDetect"
                 style="width: 100%;"
+                size="large"
               >
                 <el-icon><Search /></el-icon>
                 开始检测
@@ -122,8 +120,8 @@
         <el-card class="result-panel">
           <template #header>
             <div class="card-header">
-              <span>检测结果</span>
-              <el-tag v-if="detectionResult" type="success">
+              <span class="card-title">检测结果</span>
+              <el-tag v-if="detectionResult" type="success" size="small">
                 检测到 {{ detectionResult.detections?.length || 0 }} 个目标
               </el-tag>
             </div>
@@ -143,13 +141,13 @@
             </div>
 
             <div v-if="detectionResult.detections && detectionResult.detections.length > 0" class="detections-table">
-              <el-divider content-position="left">检测详情</el-divider>
+              <div class="section-label">检测详情</div>
               <el-table :data="detectionResult.detections" border stripe style="width: 100%;">
                 <el-table-column type="index" label="序号" width="60" />
                 <el-table-column prop="class" label="类别" width="120" />
                 <el-table-column prop="confidence" label="置信度" width="100">
                   <template #default="{ row }">
-                    <el-tag :type="getConfidenceType(row.confidence)">
+                    <el-tag :type="getConfidenceType(row.confidence)" size="small">
                       {{ (row.confidence * 100).toFixed(1) }}%
                     </el-tag>
                   </template>
@@ -340,22 +338,19 @@ onMounted(() => {
 
 <style scoped>
 .single-class-detection {
-  padding: 20px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  min-height: 100vh;
+  max-width: 1400px;
 }
 
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-weight: 600;
 }
 
-.control-panel,
-.result-panel {
-  border-radius: 12px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+.card-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--gray-900);
 }
 
 .empty-state {
@@ -369,36 +364,24 @@ onMounted(() => {
 }
 
 .image-container {
-  background: #f5f7fa;
-  border-radius: 8px;
-  padding: 10px;
+  background: var(--gray-50);
+  border-radius: var(--radius-md);
+  padding: 12px;
   display: flex;
   justify-content: center;
   align-items: center;
 }
 
+.section-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--gray-600);
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 0.5px solid var(--gray-200);
+}
+
 .detections-table {
-  margin-top: 10px;
-}
-
-:deep(.el-upload-dragger) {
-  padding: 20px;
-}
-
-:deep(.el-icon--upload) {
-  font-size: 48px;
-  color: #667eea;
-}
-
-:deep(.el-slider__runway) {
-  background-color: #e4e7ed;
-}
-
-:deep(.el-slider__bar) {
-  background-color: #667eea;
-}
-
-:deep(.el-slider__button) {
-  border-color: #667eea;
+  margin-top: 8px;
 }
 </style>

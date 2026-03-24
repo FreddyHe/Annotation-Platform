@@ -2,6 +2,7 @@
   <div class="login-container">
     <div class="login-card">
       <div class="login-header">
+        <div class="brand-mark">A</div>
         <h1>Annotation Platform</h1>
         <p>智能标注平台</p>
       </div>
@@ -231,43 +232,62 @@ const handleRegister = async () => {
   display: flex;
   justify-content: center;
   align-items: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background-color: var(--gray-50);
 }
 
 .login-card {
-  width: 480px;
+  width: 420px;
   background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
-  padding: 40px;
+  border-radius: var(--radius-xl);
+  border: 0.5px solid var(--gray-200);
+  padding: 40px 36px;
 }
 
 .login-header {
   text-align: center;
-  margin-bottom: 30px;
+  margin-bottom: 32px;
+}
+
+.brand-mark {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-lg);
+  background: var(--brand-600);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 18px;
+  margin-bottom: 16px;
 }
 
 .login-header h1 {
-  font-size: 28px;
-  color: #303133;
-  margin-bottom: 10px;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--gray-900);
+  margin-bottom: 6px;
+  letter-spacing: -0.02em;
 }
 
 .login-header p {
-  font-size: 14px;
-  color: #909399;
+  font-size: 13px;
+  color: var(--gray-400);
 }
 
 .login-tabs {
-  margin-bottom: 30px;
+  margin-bottom: 0;
 }
 
 .login-form {
-  padding: 0 10px;
+  padding: 8px 0 0;
 }
 
 .login-button {
   width: 100%;
-  margin-top: 10px;
+  height: 44px;
+  font-size: 15px;
+  font-weight: 500;
+  margin-top: 4px;
 }
 </style>

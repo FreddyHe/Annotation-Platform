@@ -1,23 +1,19 @@
 <template>
   <div class="profile-container">
+    <div class="page-title">个人中心</div>
+
     <el-card class="profile-card">
-      <template #header>
-        <div class="card-header">
-          <span>基础信息与组织</span>
-        </div>
-      </template>
       <div class="basic-org-info">
         <div class="avatar-section">
-          <el-avatar :size="80" :src="userInfo.avatarUrl || userStore.avatarUrl">
+          <el-avatar :size="72" :src="userInfo.avatarUrl || userStore.avatarUrl" class="profile-avatar">
             {{ userInfo.username?.charAt(0)?.toUpperCase() || 'U' }}
           </el-avatar>
         </div>
         <div class="info-section">
           <div class="user-names">
             <div class="display-name">{{ userInfo.displayName || '未设置' }}</div>
-            <div class="username">@{{ userInfo.username || 'unknown' }}</div>
+            <div class="username-text">@{{ userInfo.username || 'unknown' }}</div>
           </div>
-          <el-divider />
           <div class="info-list">
             <div class="info-item">
               <span class="label">邮箱</span>
@@ -31,19 +27,15 @@
               <span class="label">最后登录</span>
               <span class="value">{{ formatDate(userInfo.lastLoginAt) }}</span>
             </div>
-            <el-divider />
+            <div class="info-divider"></div>
             <div class="info-item">
               <span class="label">组织名称</span>
               <span class="value">{{ userInfo.orgDisplayName || userInfo.orgName || '暂无' }}</span>
             </div>
             <div class="info-item">
-              <span class="label">组织 ID</span>
-              <span class="value">{{ userInfo.orgId || '暂无' }}</span>
-            </div>
-            <div class="info-item">
               <span class="label">身份标识</span>
-              <el-tag v-if="userInfo.isOrgCreator" type="success" effect="dark">组织创建者</el-tag>
-              <el-tag v-else type="info" effect="dark">普通成员</el-tag>
+              <el-tag v-if="userInfo.isOrgCreator" type="success" size="small">组织创建者</el-tag>
+              <el-tag v-else type="info" size="small">普通成员</el-tag>
             </div>
           </div>
         </div>
@@ -52,84 +44,63 @@
 
     <el-card class="profile-card">
       <template #header>
-        <div class="card-header">
-          <span>系统状态与快捷操作</span>
-        </div>
+        <span class="card-title">系统状态</span>
       </template>
-      <div class="system-actions">
-        <div class="system-info">
-          <div class="info-item">
-            <span class="label">账户状态</span>
-            <el-tag v-if="userInfo.isActive" type="success" effect="dark">正常</el-tag>
-            <el-tag v-else type="danger" effect="dark">禁用</el-tag>
-          </div>
-          <div class="info-item">
-            <span class="label">LS 同步状态</span>
-            <el-tag v-if="userInfo.lsSyncStatus" type="success" effect="dark">已同步</el-tag>
-            <el-tag v-else type="warning" effect="dark">未同步</el-tag>
-          </div>
-          <div class="info-item">
-            <span class="label">LS 用户 ID</span>
-            <span class="value">{{ userInfo.lsUserId || '暂无' }}</span>
-          </div>
+      <div class="info-list">
+        <div class="info-item">
+          <span class="label">账户状态</span>
+          <el-tag v-if="userInfo.isActive" type="success" size="small">正常</el-tag>
+          <el-tag v-else type="danger" size="small">禁用</el-tag>
         </div>
-        <el-divider />
-        <div class="actions">
-          <el-button type="primary" size="large" @click="jumpToLabelStudio" style="width: 100%; margin-bottom: 15px">
-            <el-icon style="margin-right: 8px"><Monitor /></el-icon>
-            进入 Label Studio 工作台
-          </el-button>
-          <el-button size="large" @click="router.push('/settings')" style="width: 100%">
-            <el-icon style="margin-right: 8px"><Edit /></el-icon>
-            编辑资料
-          </el-button>
+        <div class="info-item">
+          <span class="label">LS 同步状态</span>
+          <el-tag v-if="userInfo.lsSyncStatus" type="success" size="small">已同步</el-tag>
+          <el-tag v-else type="warning" size="small">未同步</el-tag>
         </div>
+        <div class="info-item">
+          <span class="label">LS 用户 ID</span>
+          <span class="value">{{ userInfo.lsUserId || '暂无' }}</span>
+        </div>
+      </div>
+      <div class="actions-row">
+        <el-button type="primary" @click="jumpToLabelStudio" style="flex: 1;">
+          <el-icon style="margin-right: 6px;"><Monitor /></el-icon>
+          进入 Label Studio
+        </el-button>
+        <el-button @click="router.push('/settings')" style="flex: 1;">
+          <el-icon style="margin-right: 6px;"><Edit /></el-icon>
+          编辑资料
+        </el-button>
       </div>
     </el-card>
 
     <el-card class="profile-card">
       <template #header>
-        <div class="card-header">
-          <span>数据统计</span>
-        </div>
+        <span class="card-title">数据统计</span>
       </template>
-      <div class="statistics-row">
-        <div class="stat-item">
-          <el-statistic title="总项目数" :value="userInfo.totalProjects || 0">
-            <template #suffix>
-              <span style="font-size: 14px">个</span>
-            </template>
-          </el-statistic>
+      <div class="stat-grid">
+        <div class="stat-box">
+          <div class="stat-num">{{ userInfo.totalProjects || 0 }}</div>
+          <div class="stat-label">总项目数</div>
         </div>
-        <div class="stat-item">
-          <el-statistic title="总图片数" :value="userInfo.totalImages || 0">
-            <template #suffix>
-              <span style="font-size: 14px">张</span>
-            </template>
-          </el-statistic>
+        <div class="stat-box">
+          <div class="stat-num">{{ userInfo.totalImages || 0 }}</div>
+          <div class="stat-label">总图片数</div>
         </div>
-        <div class="stat-item">
-          <el-statistic title="进行中任务" :value="userInfo.processingTasks || 0">
-            <template #suffix>
-              <span style="font-size: 14px">个</span>
-            </template>
-          </el-statistic>
+        <div class="stat-box">
+          <div class="stat-num">{{ userInfo.processingTasks || 0 }}</div>
+          <div class="stat-label">进行中任务</div>
         </div>
-        <div class="stat-item">
-          <el-statistic title="已完成任务" :value="userInfo.completedTasks || 0">
-            <template #suffix>
-              <span style="font-size: 14px">个</span>
-            </template>
-          </el-statistic>
+        <div class="stat-box">
+          <div class="stat-num">{{ userInfo.completedTasks || 0 }}</div>
+          <div class="stat-label">已完成任务</div>
         </div>
       </div>
     </el-card>
 
     <el-card class="profile-card" v-if="userInfo.recentProjects && userInfo.recentProjects.length > 0">
       <template #header>
-        <div class="card-header">
-          <span>最近项目</span>
-        </div>
+        <span class="card-title">最近项目</span>
       </template>
       <el-table :data="userInfo.recentProjects" stripe style="width: 100%">
         <el-table-column prop="name" label="项目名称" min-width="180" />
@@ -182,24 +153,15 @@ const formatDate = (dateString) => {
   if (!dateString) return '暂无'
   const date = new Date(dateString)
   return date.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
   })
 }
 
 const getStatusType = (status) => {
   const statusMap = {
-    'DRAFT': 'info',
-    'UPLOADING': 'warning',
-    'DETECTING': 'primary',
-    'CLEANING': 'primary',
-    'SYNCING': 'primary',
-    'COMPLETED': 'success',
-    'FAILED': 'danger'
+    'DRAFT': 'info', 'UPLOADING': 'warning', 'DETECTING': 'primary',
+    'CLEANING': 'primary', 'SYNCING': 'primary', 'COMPLETED': 'success', 'FAILED': 'danger'
   }
   return statusMap[status] || 'info'
 }
@@ -212,56 +174,27 @@ const jumpToLabelStudio = async () => {
 
   try {
     ElMessage.info('正在跳转到 Label Studio...')
-    
     const lsLoginUrl = 'http://122.51.47.91:28450/user/login/'
-    
     const fetchCsrfToken = async () => {
-      const response = await fetch(lsLoginUrl, {
-        method: 'GET',
-        credentials: 'include'
-      })
-      
+      const response = await fetch(lsLoginUrl, { method: 'GET', credentials: 'include' })
       const cookies = response.headers.get('set-cookie') || document.cookie
       const csrfMatch = cookies.match(/csrftoken=([^;]+)/)
       return csrfMatch ? csrfMatch[1] : null
     }
-    
     const csrfToken = await fetchCsrfToken()
-    
     if (!csrfToken) {
       ElMessage.warning('未能获取 CSRF Token，请手动登录')
       window.open(lsLoginUrl, '_blank')
       return
     }
-    
     const form = document.createElement('form')
-    form.action = lsLoginUrl
-    form.method = 'POST'
-    form.target = '_blank'
-    form.style.display = 'none'
-
-    const emailInput = document.createElement('input')
-    emailInput.name = 'email'
-    emailInput.value = userInfo.value.lsEmail
-    
-    const passwordInput = document.createElement('input')
-    passwordInput.name = 'password'
-    passwordInput.value = userInfo.value.lsPassword
-    
-    const csrfInput = document.createElement('input')
-    csrfInput.name = 'csrfmiddlewaretoken'
-    csrfInput.value = csrfToken
-
-    form.appendChild(emailInput)
-    form.appendChild(passwordInput)
-    form.appendChild(csrfInput)
-    document.body.appendChild(form)
-    
-    form.submit()
-    
-    setTimeout(() => {
-      document.body.removeChild(form)
-    }, 100)
+    form.action = lsLoginUrl; form.method = 'POST'; form.target = '_blank'; form.style.display = 'none'
+    const emailInput = document.createElement('input'); emailInput.name = 'email'; emailInput.value = userInfo.value.lsEmail
+    const passwordInput = document.createElement('input'); passwordInput.name = 'password'; passwordInput.value = userInfo.value.lsPassword
+    const csrfInput = document.createElement('input'); csrfInput.name = 'csrfmiddlewaretoken'; csrfInput.value = csrfToken
+    form.appendChild(emailInput); form.appendChild(passwordInput); form.appendChild(csrfInput)
+    document.body.appendChild(form); form.submit()
+    setTimeout(() => { document.body.removeChild(form) }, 100)
   } catch (error) {
     console.error('跳转到 Label Studio 失败:', error)
     ElMessage.error('跳转失败，请稍后重试')
@@ -271,141 +204,118 @@ const jumpToLabelStudio = async () => {
 
 <style scoped>
 .profile-container {
-  padding: 20px;
-  max-width: 1200px;
-  margin: 0 auto;
-  background-color: #f5f7fa;
-  min-height: calc(100vh - 60px);
+  max-width: 800px;
 }
 
-.card-header {
-  font-size: 18px;
-  font-weight: bold;
-  color: #303133;
+.page-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--gray-900);
+  letter-spacing: -0.02em;
+  margin-bottom: 24px;
 }
 
 .profile-card {
-  margin-bottom: 20px;
-  width: 100%;
-  border-radius: 8px;
-  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+  margin-bottom: 16px;
+}
+
+.card-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--gray-900);
 }
 
 .basic-org-info {
   display: flex;
-  gap: 20px;
-  padding: 10px 0;
+  gap: 24px;
+  align-items: flex-start;
 }
 
-.avatar-section {
-  flex-shrink: 0;
-}
-
-.info-section {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
+.profile-avatar {
+  background-color: var(--brand-50) !important;
+  color: var(--brand-800) !important;
+  font-weight: 600;
+  font-size: 24px;
 }
 
 .user-names {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  margin-bottom: 15px;
+  margin-bottom: 20px;
 }
 
 .display-name {
   font-size: 20px;
-  font-weight: bold;
-  color: #303133;
+  font-weight: 600;
+  color: var(--gray-900);
+  letter-spacing: -0.02em;
 }
 
-.username {
-  font-size: 14px;
-  color: #909399;
+.username-text {
+  font-size: 13px;
+  color: var(--gray-400);
+  margin-top: 2px;
 }
 
 .info-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .info-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 0;
-  border-bottom: 1px solid #ebeef5;
-}
-
-.info-item:last-child {
-  border-bottom: none;
+  padding: 6px 0;
 }
 
 .info-item .label {
-  font-size: 14px;
-  color: #606266;
-  font-weight: 500;
+  font-size: 13px;
+  color: var(--gray-500);
 }
 
 .info-item .value {
-  font-size: 14px;
-  color: #303133;
+  font-size: 13px;
+  color: var(--gray-900);
   font-weight: 500;
 }
 
-.system-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 15px;
+.info-divider {
+  height: 0.5px;
+  background: var(--gray-200);
+  margin: 4px 0;
 }
 
-.system-info {
+.actions-row {
   display: flex;
-  flex-direction: column;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
   gap: 12px;
 }
 
-.actions {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 10px 0;
+.stat-box {
+  background: var(--gray-50);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  text-align: center;
 }
 
-.statistics-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 10px 0;
-}
-
-.stat-item {
-  flex: 1;
-  min-width: 0;
-}
-
-:deep(.el-statistic__head) {
-  font-size: 14px;
-  color: #909399;
-  margin-bottom: 8px;
-}
-
-:deep(.el-statistic__content) {
-  font-size: 28px;
-  font-weight: bold;
-  color: #303133;
-}
-
-:deep(.el-table) {
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-:deep(.el-table th) {
-  background-color: #fafafa;
+.stat-num {
+  font-size: 24px;
   font-weight: 600;
+  color: var(--gray-900);
+  letter-spacing: -0.02em;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: var(--gray-500);
+  margin-top: 4px;
+  font-weight: 500;
 }
 
 @media (max-width: 768px) {
@@ -413,19 +323,8 @@ const jumpToLabelStudio = async () => {
     flex-direction: column;
     align-items: center;
   }
-
-  .info-item {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 5px;
-  }
-
-  .statistics-row {
-    flex-direction: column;
-  }
-
-  .stat-item {
-    width: 100%;
+  .stat-grid {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 </style>

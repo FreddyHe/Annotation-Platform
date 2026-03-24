@@ -3,7 +3,7 @@
     <el-card>
       <template #header>
         <div class="card-header">
-          <span>项目管理</span>
+          <span class="card-title">项目管理</span>
           <el-button type="primary" @click="handleCreate">
             <el-icon><Plus /></el-icon>
             创建项目
@@ -15,7 +15,7 @@
         <el-table-column prop="name" label="项目名称" />
         <el-table-column prop="status" label="状态">
           <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)">
+            <el-tag :type="getStatusType(row.status)" size="small">
               {{ getStatusText(row.status) }}
             </el-tag>
           </template>
@@ -46,11 +46,10 @@
         layout="total, sizes, prev, pager, next, jumper"
         @size-change="handleSizeChange"
         @current-change="handlePageChange"
-        style="margin-top: 20px; text-align: right;"
+        style="margin-top: 20px; justify-content: flex-end; display: flex;"
       />
     </el-card>
 
-    <!-- 创建项目对话框 -->
     <el-dialog
       v-model="showCreateDialog"
       title="创建新项目"
@@ -63,33 +62,33 @@
         </el-form-item>
         
         <el-form-item label="标签" prop="labels">
-          <el-tag
-            v-for="(tag, index) in projectForm.labels"
-            :key="index"
-            closable
-            @close="removeLabel(index)"
-            type="info"
-            style="margin-right: 8px; margin-bottom: 8px;"
-          >
-            {{ tag }}
-          </el-tag>
-          <el-input
-            v-if="labelInputVisible"
-            ref="labelInputRef"
-            v-model="labelInputValue"
-            class="tag-input"
-            size="small"
-            @keyup.enter="addLabel"
-            @blur="addLabel"
-          />
-          <el-button
-            v-else
-            size="small"
-            type="primary"
-            @click="showLabelInput"
-          >
-            + 添加标签
-          </el-button>
+          <div class="tag-group">
+            <el-tag
+              v-for="(tag, index) in projectForm.labels"
+              :key="index"
+              closable
+              @close="removeLabel(index)"
+              size="default"
+            >
+              {{ tag }}
+            </el-tag>
+            <el-input
+              v-if="labelInputVisible"
+              ref="labelInputRef"
+              v-model="labelInputValue"
+              class="tag-input"
+              size="small"
+              @keyup.enter="addLabel"
+              @blur="addLabel"
+            />
+            <el-button
+              v-else
+              size="small"
+              @click="showLabelInput"
+            >
+              + 添加标签
+            </el-button>
+          </div>
         </el-form-item>
       </el-form>
       
@@ -285,7 +284,7 @@ onMounted(() => {
 
 <style scoped>
 .project-list {
-  padding: 20px;
+  max-width: 1200px;
 }
 
 .card-header {
@@ -294,7 +293,20 @@ onMounted(() => {
   align-items: center;
 }
 
+.card-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--gray-900);
+}
+
+.tag-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
 .tag-input {
-  --el-input-width: 100px;
+  width: 120px;
 }
 </style>

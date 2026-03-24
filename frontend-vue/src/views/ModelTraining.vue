@@ -1,18 +1,13 @@
 <template>
   <div class="model-training-page">
-    <div class="page-header">
-      <h2>单类别模型训练</h2>
-      <p style="color: #909399; margin: 4px 0 0;">
-        从 Roboflow 下载数据集，自动训练 YOLO 检测模型，训练完成后可在"单类别检测"页面使用
-      </p>
-    </div>
+    <div class="page-title">单类别模型训练</div>
+    <p class="page-desc">从 Roboflow 下载数据集，自动训练 YOLO 检测模型，训练完成后可在"单类别检测"页面使用</p>
 
     <el-row :gutter="24">
-      <!-- ========== 左栏：新建训练任务 ========== -->
       <el-col :span="10">
-        <el-card shadow="hover">
+        <el-card>
           <template #header>
-            <span style="font-weight: 600;">新建训练任务</span>
+            <span class="card-title">新建训练任务</span>
           </template>
 
           <el-form :model="form" :rules="rules" ref="formRef" label-position="top">
@@ -41,9 +36,8 @@ project = rf.workspace(&quot;...&quot;).project(&quot;...&quot;)
 version = project.version(2)
 dataset = version.download(&quot;coco&quot;)"
               />
-              <div style="margin-top: 6px; font-size: 12px; color: #909399; line-height: 1.6;">
-                在 Roboflow Universe 项目页面点击 "Download Dataset"，选择格式后复制下载代码粘贴到此处。
-                推荐选择 YOLO 或 COCO 格式。
+              <div class="form-tip">
+                在 Roboflow Universe 项目页面点击 "Download Dataset"，选择格式后复制下载代码粘贴到此处。推荐选择 YOLO 或 COCO 格式。
               </div>
             </el-form-item>
 
@@ -74,12 +68,11 @@ dataset = version.download(&quot;coco&quot;)"
         </el-card>
       </el-col>
 
-      <!-- ========== 右栏：训练任务列表 ========== -->
       <el-col :span="14">
-        <el-card shadow="hover">
+        <el-card>
           <template #header>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="font-weight: 600;">训练任务列表</span>
+            <div class="card-header">
+              <span class="card-title">训练任务列表</span>
               <el-button text @click="refreshTasks">刷新</el-button>
             </div>
           </template>
@@ -89,7 +82,7 @@ dataset = version.download(&quot;coco&quot;)"
             <el-table-column prop="modelName" label="模型名称" min-width="130" />
             <el-table-column label="状态" width="130">
               <template #default="{ row }">
-                <el-tag :type="statusTagType(row.status)" size="small" effect="plain">
+                <el-tag :type="statusTagType(row.status)" size="small">
                   {{ statusText(row.status) }}
                 </el-tag>
               </template>
@@ -98,7 +91,7 @@ dataset = version.download(&quot;coco&quot;)"
             <el-table-column label="mAP50" width="80" align="center">
               <template #default="{ row }">
                 <span v-if="row.mapScore != null">{{ (row.mapScore * 100).toFixed(1) }}%</span>
-                <span v-else style="color:#c0c4cc;">-</span>
+                <span v-else style="color: var(--gray-400);">-</span>
               </template>
             </el-table-column>
             <el-table-column label="类别数" width="72" align="center">
@@ -117,26 +110,23 @@ dataset = version.download(&quot;coco&quot;)"
                            @click.stop="goToDetection(row)">
                   去检测
                 </el-button>
-                <span v-else-if="isInProgress(row.status)" style="color: #909399; font-size: 12px;">
+                <span v-else-if="isInProgress(row.status)" style="color: var(--gray-400); font-size: 12px;">
                   进行中...
                 </span>
-                <el-tag v-else-if="row.status === 'FAILED'" type="danger" size="small" effect="plain">
+                <el-tag v-else-if="row.status === 'FAILED'" type="danger" size="small">
                   失败
                 </el-tag>
               </template>
             </el-table-column>
           </el-table>
 
-          <!-- 选中行的详情展示 -->
-          <div v-if="selectedTask" style="margin-top: 16px; padding: 12px; background: #f5f7fa; border-radius: 8px;">
-            <p style="margin: 0 0 8px; font-weight: 600;">{{ selectedTask.modelName }}</p>
-            <p style="margin: 0 0 8px; font-size: 13px; color: #606266;">
-              状态信息：{{ selectedTask.statusMessage || '-' }}
-            </p>
+          <div v-if="selectedTask" class="selected-detail">
+            <p class="detail-name">{{ selectedTask.modelName }}</p>
+            <p class="detail-status">状态信息：{{ selectedTask.statusMessage || '-' }}</p>
             <div v-if="selectedTask.classes && selectedTask.classes.length">
-              <span style="font-size: 13px; color: #606266;">可检测类别：</span>
+              <span class="detail-label">可检测类别：</span>
               <el-tag v-for="cls in selectedTask.classes" :key="cls.classId"
-                      size="small" style="margin: 2px 4px 2px 0;" effect="plain">
+                      size="small" style="margin: 2px 4px 2px 0;">
                 {{ cls.cnName || cls.className }}
               </el-tag>
             </div>
@@ -267,7 +257,63 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.model-training-page { padding: 20px; }
-.page-header { margin-bottom: 20px; }
-.page-header h2 { margin: 0; font-size: 20px; }
+.model-training-page {
+  max-width: 1400px;
+}
+
+.page-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--gray-900);
+  letter-spacing: -0.02em;
+}
+
+.page-desc {
+  color: var(--gray-500);
+  margin: 4px 0 24px;
+  font-size: 13px;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.card-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--gray-900);
+}
+
+.form-tip {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--gray-400);
+  line-height: 1.5;
+}
+
+.selected-detail {
+  margin-top: 16px;
+  padding: 14px;
+  background: var(--gray-50);
+  border-radius: var(--radius-md);
+}
+
+.detail-name {
+  margin: 0 0 6px;
+  font-weight: 500;
+  color: var(--gray-900);
+}
+
+.detail-status {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--gray-600);
+}
+
+.detail-label {
+  font-size: 13px;
+  color: var(--gray-600);
+}
 </style>

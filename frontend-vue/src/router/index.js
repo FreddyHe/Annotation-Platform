@@ -40,10 +40,10 @@ const routes = [
         meta: { title: '算法任务', icon: 'Timer' }
       },
       {
-        path: 'training',
+        path: 'model-training',
         name: 'ModelTraining',
         component: () => import('@/views/ModelTraining.vue'),
-        meta: { title: '模型训练', icon: 'Cpu' }
+        meta: { title: '单类别模型训练', icon: 'Cpu' }
       },
       {
         path: 'single-class-detection',

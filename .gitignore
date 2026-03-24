@@ -24,3 +24,5 @@ training_runs/
 
 backend-springboot/target/
 *.jar
+frontend-vue/dist/
+frontend-vue/.vite/

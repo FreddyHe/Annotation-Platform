@@ -19,16 +19,41 @@
           </template>
 
           <el-form :model="form" label-width="100px">
-            <el-form-item label="模型选择">
-              <el-select v-model="form.classId" placeholder="请选择模型" style="width: 100%;">
+            <el-form-item label="检测模型">
+              <el-select v-model="selectedModelId" placeholder="选择检测模型" style="width: 100%;">
+                <el-option-group label="内置模型">
+                  <el-option
+                    v-for="m in allModels.filter(x => x.id === 'builtin')"
+                    :key="m.id"
+                    :label="m.modelName"
+                    :value="m.id"
+                  />
+                </el-option-group>
+                <el-option-group v-if="allModels.filter(x => x.id !== 'builtin').length > 0" label="自定义训练模型">
+                  <el-option
+                    v-for="m in allModels.filter(x => x.id !== 'builtin')"
+                    :key="m.id"
+                    :value="m.id"
+                  >
+                    <span>{{ m.modelName }}</span>
+                    <span style="float: right; color: #8492a6; font-size: 12px;">
+                      {{ m.classes.length }}类
+                    </span>
+                  </el-option>
+                </el-option-group>
+              </el-select>
+            </el-form-item>
+
+            <el-form-item label="检测类别">
+              <el-select v-model="form.classId" placeholder="选择检测类别" style="width: 100%;">
                 <el-option
-                  v-for="cls in classList"
-                  :key="cls.class_id"
-                  :label="cls.cn_name"
-                  :value="cls.class_id"
+                  v-for="cls in currentClasses"
+                  :key="cls.classId"
+                  :label="cls.cnName || cls.className"
+                  :value="cls.classId"
                 >
-                  <span style="float: left">{{ cls.cn_name }}</span>
-                  <span style="float: right; color: #8492a6; font-size: 13px">{{ cls.name }}</span>
+                  <span style="float: left">{{ cls.cnName || cls.className }}</span>
+                  <span style="float: right; color: #8492a6; font-size: 13px">{{ cls.className }}</span>
                 </el-option>
               </el-select>
             </el-form-item>
@@ -149,13 +174,15 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Monitor, Search, UploadFilled } from '@element-plus/icons-vue'
 import axios from 'axios'
+import { getAvailableModels } from '@/api/customModel'
 
 const router = useRouter()
+const route = useRoute()
 
 const form = reactive({
   classId: 3,
@@ -163,10 +190,21 @@ const form = reactive({
   iouThreshold: 0.45
 })
 
-const classList = ref([])
+const allModels = ref([])
+const selectedModelId = ref('builtin')
 const detecting = ref(false)
 const detectionResult = ref(null)
 const selectedFile = ref(null)
+
+const currentClasses = computed(() => {
+  const model = allModels.value.find(m => m.id === selectedModelId.value)
+  return model ? model.classes : []
+})
+
+const currentModelPath = computed(() => {
+  const model = allModels.value.find(m => m.id === selectedModelId.value)
+  return model ? model.modelPath : ''
+})
 
 const formatTooltip = (val) => {
   return (val * 100).toFixed(0) + '%'
@@ -192,6 +230,11 @@ const handleDetect = async () => {
     return
   }
 
+  if (!currentModelPath.value) {
+    ElMessage.warning('请先选择检测模型')
+    return
+  }
+
   detecting.value = true
   detectionResult.value = null
 
@@ -199,7 +242,7 @@ const handleDetect = async () => {
     const formData = new FormData()
     formData.append('image', selectedFile.value)
     formData.append('class_id', form.classId)
-    formData.append('model_path', '/root/autodl-fs/xingmu_jiancepingtai/runs/detect/train7/weights/best.pt')
+    formData.append('model_path', currentModelPath.value)
     formData.append('confidence_threshold', form.confidenceThreshold)
     formData.append('iou_threshold', form.iouThreshold)
 
@@ -223,23 +266,75 @@ const handleDetect = async () => {
   }
 }
 
-const fetchModelInfo = async () => {
+const loadAllModels = async () => {
+  allModels.value = []
+
   try {
-    const response = await axios.get('/api/v1/detection/model-info')
-    if (response.data.success) {
-      classList.value = response.data.data.classes
+    const res = await axios.get('/api/v1/detection/model-info')
+    const data = res.data?.data || res.data
+    if (data && data.classes) {
+      allModels.value.push({
+        id: 'builtin',
+        modelName: '内置 VisDrone 检测模型（10类）',
+        modelPath: data.model_path || '/root/autodl-fs/xingmu_jiancepingtai/runs/detect/train7/weights/best.pt',
+        classes: data.classes.map(c => ({
+          classId: c.class_id,
+          className: c.name,
+          cnName: c.cn_name || c.name
+        }))
+      })
     }
-  } catch (error) {
-    console.error('Failed to fetch model info:', error)
+  } catch (e) {
+    console.warn('加载内置模型信息失败:', e)
+    allModels.value.push({
+      id: 'builtin',
+      modelName: '内置 VisDrone 检测模型',
+      modelPath: '/root/autodl-fs/xingmu_jiancepingtai/runs/detect/train7/weights/best.pt',
+      classes: []
+    })
+  }
+
+  try {
+    const res = await getAvailableModels()
+    const customList = res.data?.data || res.data || []
+    for (const m of customList) {
+      allModels.value.push({
+        id: `custom_${m.id}`,
+        modelName: m.modelName,
+        modelPath: m.modelPath,
+        classes: (m.classes || []).map(c => ({
+          classId: c.classId,
+          className: c.className,
+          cnName: c.cnName || c.className
+        }))
+      })
+    }
+  } catch (e) {
+    console.warn('加载自定义模型失败:', e)
+  }
+
+  if (route.query.modelId) {
+    const targetId = `custom_${route.query.modelId}`
+    if (allModels.value.find(m => m.id === targetId)) {
+      selectedModelId.value = targetId
+    }
+  } else {
+    selectedModelId.value = 'builtin'
   }
 }
+
+watch(selectedModelId, () => {
+  if (currentClasses.value.length > 0) {
+    form.classId = currentClasses.value[0].classId
+  }
+})
 
 const goBack = () => {
   router.back()
 }
 
 onMounted(() => {
-  fetchModelInfo()
+  loadAllModels()
 })
 </script>
 

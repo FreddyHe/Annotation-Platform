@@ -240,3 +240,32 @@
   2. 前端按钮的禁用条件必须考虑所有合法状态，特别是"已完成"状态
   3. Markdown渲染可以先用简单的正则替换实现MVP，后续再考虑引入专业库（如marked.js）
   4. AI生成内容的接口调用时间较长（10-30秒），必须有loading状态提示用户等待
+
+### 2026-03-24: 阶段6 前端单类别模型训练页面开发完成
+- **任务**: 新建"单类别模型训练"页面 + 改造"单类别检测"页面支持多模型选择（内置VisDrone + 用户自定义训练模型）
+- **实施过程**:
+  1. **API封装**: 创建 `src/api/customModel.js`，包含4个函数（createTrainingTask、listTrainingTasks、getModelStatus、getAvailableModels）
+  2. **ModelTraining.vue**: 左右分栏布局
+     - 左栏：新建训练任务表单（模型名称、Roboflow下载命令、Epochs、Batch Size）
+     - 右栏：训练任务列表表格（状态、mAP、类别数、操作）+ 选中行详情展示
+     - 实现5秒轮询机制，自动更新进行中任务状态
+  3. **SingleClassDetection.vue改造**: 
+     - 新增"检测模型"下拉框（el-option-group分组：内置模型 + 自定义训练模型）
+     - 原"模型选择"改名为"检测类别"
+     - 使用 `computed` 计算 `currentClasses` 和 `currentModelPath`
+     - 使用 `watch` 监听模型切换，自动选中第一个类别
+     - 支持 `?modelId=X` 参数自动选中模型
+  4. **路由和菜单**: 
+     - 更新路由从 `/training` → `/model-training`
+     - 更新侧边栏菜单项标题为"单类别模型训练"
+- **关键设计**:
+  1. **统一模型数据结构**: `{ id, modelName, modelPath, classes[] }`，内置模型id为'builtin'，自定义模型id为'custom_${modelId}'
+  2. **向后兼容**: 内置VisDrone模型行为完全不变，即使API失败也有兜底数据
+  3. **轮询优化**: 只在有进行中任务时启动轮询，所有任务完成后自动停止，组件卸载时清除定时器
+  4. **用户体验**: 训练完成后点击"去检测"按钮，自动跳转并选中对应模型
+- **教训**:
+  1. 改造现有页面时，必须保证向后兼容，原有功能行为不能改变
+  2. 使用 `computed` + `watch` 组合实现响应式数据联动，比手动更新更可靠
+  3. 轮询机制必须有明确的启动和停止条件，避免内存泄漏
+  4. 路由参数传递（query）可以实现页面间的上下文传递，提升用户体验
+  5. 前端编译成功但有chunk size警告是正常的，不影响功能，可后续优化

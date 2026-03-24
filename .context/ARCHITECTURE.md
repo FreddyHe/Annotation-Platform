@@ -268,6 +268,27 @@ Spring Boot可行性评估工作流接口（全部需JWT认证）：
 - 流程：`EVALUATED` → 点击"资源估算" → `DATASET_SEARCHED` → 用户判断 → `AWAITING_USER_JUDGMENT` → 资源估算 → `COMPLETED`
 - 特点：执行数据集检索，等待用户判断数据集匹配度后再进行资源估算
 
+## 单类别模型训练（阶段6，2026-03-24新增）
+
+Spring Boot 自定义模型训练接口（需JWT认证）：
+- `POST /api/v1/custom-models/train` - 创建训练任务（从Roboflow下载数据集并训练）
+- `GET  /api/v1/custom-models` - 获取当前用户所有训练任务
+- `GET  /api/v1/custom-models/{id}/status` - 获取训练状态（触发后端同步算法服务最新状态）
+- `GET  /api/v1/custom-models/available` - 获取所有已完成的自定义模型（供检测页面使用）
+
+训练任务状态流转：
+```
+PENDING → DOWNLOADING → CONVERTING → TRAINING → COMPLETED
+                                              ↘ FAILED
+```
+
+前端页面：
+- `/model-training` - 单类别模型训练页面（新建任务 + 任务列表）
+- `/single-class-detection` - 单类别检测页面（已改造支持多模型选择）
+  - 支持内置VisDrone模型（10类）
+  - 支持用户自定义训练模型
+  - 通过 `?modelId=X` 参数可自动选中指定模型
+
 ## 期望的架构设计
 
 1. 用户注册时在 LS 中创建对应账户

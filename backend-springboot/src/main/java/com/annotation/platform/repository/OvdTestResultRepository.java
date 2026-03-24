@@ -12,4 +12,6 @@ public interface OvdTestResultRepository extends JpaRepository<OvdTestResult, Lo
     List<OvdTestResult> findByAssessmentIdOrderByTestTimeDesc(Long assessmentId);
 
     List<OvdTestResult> findByAssessmentIdAndCategoryName(Long assessmentId, String categoryName);
+
+    void deleteByAssessmentId(Long assessmentId);
 }

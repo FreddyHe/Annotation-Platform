@@ -52,6 +52,9 @@ public class DatasetSearchResult {
     @Column(name = "relevance_score")
     private Double relevanceScore;
 
+    @Column(name = "search_url", length = 500)
+    private String searchUrl;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

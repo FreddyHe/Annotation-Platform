@@ -330,6 +330,45 @@ public class FileUploadServiceImpl implements FileUploadService {
                lowerName.endsWith(".webp");
     }
 
+    @Override
+    public String uploadSingleImage(MultipartFile file) {
+        if (file.isEmpty()) {
+            throw new BusinessException(ErrorCode.FILE_002, "文件为空");
+        }
+
+        String originalFilename = file.getOriginalFilename();
+        if (originalFilename == null || !isImageFile(originalFilename)) {
+            throw new BusinessException(ErrorCode.FILE_004, "只支持图片文件");
+        }
+
+        if (file.getSize() > 5 * 1024 * 1024) {
+            throw new BusinessException(ErrorCode.FILE_003, "图片大小不能超过5MB");
+        }
+
+        try {
+            String timestamp = String.valueOf(System.currentTimeMillis());
+            String extension = originalFilename.substring(originalFilename.lastIndexOf("."));
+            String newFilename = timestamp + "_" + UUID.randomUUID().toString().substring(0, 8) + extension;
+
+            File uploadDir = new File(basePath, "feasibility");
+            if (!uploadDir.exists()) {
+                uploadDir.mkdirs();
+            }
+
+            File destFile = new File(uploadDir, newFilename);
+            file.transferTo(destFile);
+
+            String relativePath = "feasibility/" + newFilename;
+            log.info("单文件上传成功: {}", relativePath);
+
+            return relativePath;
+
+        } catch (IOException e) {
+            log.error("单文件上传失败: {}", e.getMessage(), e);
+            throw new BusinessException(ErrorCode.FILE_005, "文件上传失败: " + e.getMessage());
+        }
+    }
+
     @lombok.Builder
     @lombok.Data
     private static class UploadProgress {

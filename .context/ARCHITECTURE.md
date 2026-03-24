@@ -105,8 +105,16 @@ curl -I http://localhost:6006 | head -n 5
 
 ### 前端
 
-- **端口**: 6006（AutoDL 自定义服务默认暴露端口）
+- **端口**: 5173（Vite开发服务器）/ 6006（AutoDL 自定义服务默认暴露端口）
 - **公网地址**: `http://122.51.47.91:24379/`
+- **技术栈**: Vue 3 + Element Plus + Vite + Vue Router + Pinia
+- **API Base URL**: `/api/v1`（通过axios配置，自动添加Authorization头）
+- **主要页面**:
+  - `/dashboard` - 概览
+  - `/projects` - 项目管理
+  - `/feasibility` - 可行性评估列表
+  - `/feasibility/create` - 新建评估
+  - `/feasibility/:id` - 评估详情（5步骤流程）
 
 ## 数据库说明
 
@@ -122,8 +130,37 @@ curl -I http://localhost:6006 | head -n 5
 可行性评估相关表：
 - `ovd_test_results`：GroundingDINO 示例图检测结果（含 `bbox_json`、`test_time`）
 - `vlm_quality_scores`：VLM 对检测结果的质量评分（外键 `ovd_test_result_id`）
-- `resource_estimations`：资源估算（外键 `assessment_id`，字段如 `estimated_images`、`gpu_hours`、`estimated_cost` 等）
-- `implementation_plans`：实施计划阶段（外键 `assessment_id`，字段如 `phase_order`、`phase_name`、`tasks`（TEXT 存 JSON 字符串）等）
+- `resource_estimations`：资源估算（外键 `assessment_id`，字段如 `estimated_images`、`gpu_hours`、`estimated_cost`、**`public_dataset_images` INT**、**`training_approach` TEXT**）
+- `implementation_plans`：实施计划阶段（外键 `assessment_id`，字段如 `phase_order`、`phase_name`、`tasks`（TEXT 存 JSON 字符串）、`status` VARCHAR(50) NOT NULL DEFAULT 'PENDING'）
+- `feasibility_assessments`：可行性评估主表（新增字段：`dataset_match_level` ENUM, `user_judgment_notes` TEXT）
+
+### 枚举类型（2026-03-20更新）
+
+**FeasibilityBucket**（可行性桶分类，从3桶改为4桶）：
+- `PENDING` - 待定（初始状态）
+- `OVD_AVAILABLE` - 桶A：OVD可用（precision > 70%）
+- `CUSTOM_LOW` - 桶B：定制训练-低成本（数据集几乎一致）
+- `CUSTOM_MEDIUM` - 桶B+：定制训练-中成本（数据集部分相关）
+- `CUSTOM_HIGH` - 桶C：定制训练-高成本（数据集几乎不可用）
+
+**DatasetMatchLevel**（数据集匹配度，新增）：
+- `ALMOST_MATCH` - 几乎一致 → 对应桶B (CUSTOM_LOW)
+- `PARTIAL_MATCH` - 部分相关 → 对应桶B+ (CUSTOM_MEDIUM)
+- `NOT_USABLE` - 几乎不可用 → 对应桶C (CUSTOM_HIGH)
+
+**AssessmentStatus**（评估状态，新增2个中间状态）：
+- `CREATED` - 刚创建
+- `PARSING` - 需求解析中
+- `PARSED` - 需求已解析
+- `OVD_TESTING` - OVD测试中
+- `OVD_TESTED` - OVD测试完成
+- `EVALUATING` - VLM评估中
+- `EVALUATED` - VLM评估完成
+- `DATASET_SEARCHED` - 数据集检索完成（仅非桶A，新增）
+- `AWAITING_USER_JUDGMENT` - 等待用户判断数据集匹配度（仅非桶A，新增）
+- `ESTIMATING` - 资源估算中
+- `COMPLETED` - 全部完成
+- `FAILED` - 失败
 
 ### 接口概览（可行性评估模块补充）
 
@@ -166,7 +203,16 @@ curl -I http://localhost:6006 | head -n 5
 1. **用户注册** → Spring Boot 创建用户 → 同步到 LS（创建 LS 用户 + 加入组织 + 从默认组织移除）
 2. **创建项目** → Spring Boot 创建项目 → 同步到 LS（用组织管理员 token 创建 LS 项目 + 生成 label_config XML）
 3. **自动标注** → 上传图片 → 调用 DINO/YOLO 检测 → VLM 清洗 → 同步预测结果到 LS
-4. **可行性评估** → 创建评估 → 解析需求 → 类别评估 → OVD 测试 → 资源估算 → 实施计划
+4. **可行性评估完整流程**（阶段9-17）：
+   - **阶段9**: 创建评估 → LLM解析需求 → 生成类别（CategoryAssessment）
+   - **阶段10**: 生成Prompt变体（LLM）
+   - **阶段11**: OVD批量测试（DINO服务）→ 保存OvdTestResult
+   - **阶段12**: VLM质量评估 → 保存VlmQualityScore
+   - **阶段13**: 三桶分类（OVD_AVAILABLE/CUSTOM_TRAINING/VLM_ONLY）
+   - **阶段14**: 数据集检索（Roboflow/HuggingFace）→ 保存DatasetSearchResult
+   - **阶段15**: 资源估算（人天/GPU时/成本）→ 保存ResourceEstimation
+   - **阶段16**: 生成实施计划（根据桶分类动态生成阶段）→ 保存ImplementationPlan
+   - **阶段17**: 生成完整报告（聚合所有数据）→ 更新状态为COMPLETED
 
 ## 用户模型配置（VLM/LLM）
 
@@ -183,6 +229,44 @@ Spring Boot 提供用户级别的模型配置管理接口（受 JWT 保护）：
 算法服务（FastAPI）可行性评估相关接口：
 - `POST /api/v1/feasibility/parse-requirement`：LLM 需求解析（支持 `llm_api_key/llm_base_url/llm_model_name` 透传，为空回退默认值）
 - `POST /api/v1/feasibility/analyze-image`：VLM 图片场景分析（multipart，支持 `vlm_api_key/vlm_base_url/vlm_model_name` 透传，为空回退默认值）
+- `POST /api/v1/feasibility/generate-prompts`：生成Prompt变体（阶段10）
+- `POST /api/v1/feasibility/batch-ovd-test`：OVD批量测试（阶段11）
+- `POST /api/v1/feasibility/evaluate-quality`：VLM质量评估（阶段12）
+- `POST /api/v1/feasibility/search-datasets`：数据集检索（阶段14）
+- `POST /api/v1/feasibility/estimate-resources`：资源估算（阶段15，支持 `datasetMatchLevel` 和 `availablePublicSamples` 参数，返回 `publicDatasetImages` 和 `trainingApproach`）
+- `POST /api/v1/feasibility/generate-report`：AI可行性报告生成（阶段17，调用LLM生成Markdown格式报告）
+
+Spring Boot可行性评估工作流接口（全部需JWT认证）：
+- `POST /api/v1/feasibility/assessments` - 创建评估
+- `GET  /api/v1/feasibility/assessments` - 列表查询
+- `GET  /api/v1/feasibility/assessments/{id}` - 获取详情
+- `DELETE /api/v1/feasibility/assessments/{id}` - 删除评估
+- `POST /api/v1/feasibility/assessments/{id}/parse` - 需求解析（阶段9）
+- `POST /api/v1/feasibility/assessments/{id}/run-ovd-test` - OVD测试编排（阶段10-11）
+- `POST /api/v1/feasibility/assessments/{id}/evaluate` - VLM评估编排（阶段12-13）
+- `POST /api/v1/feasibility/assessments/{id}/search-datasets` - 数据集检索（阶段14，新增独立接口）
+- `POST /api/v1/feasibility/assessments/{id}/user-judgment` - 提交用户判断（数据集匹配度，仅非桶A）
+- `POST /api/v1/feasibility/assessments/{id}/estimate` - 资源估算编排（阶段15，调用算法服务动态计算）
+- `POST /api/v1/feasibility/assessments/{id}/generate-plan` - 生成实施计划（阶段16）
+- `POST /api/v1/feasibility/assessments/{id}/ai-report` - 生成AI可行性报告（阶段17，调用算法服务LLM生成）
+- `GET  /api/v1/feasibility/assessments/{id}/report` - 获取完整报告（阶段17，数据汇总）
+- `GET  /api/v1/feasibility/assessments/{id}/categories` - 获取类别列表
+- `PUT  /api/v1/feasibility/categories/{id}` - 更新类别
+- `DELETE /api/v1/feasibility/categories/{id}` - 删除类别
+- `GET  /api/v1/feasibility/assessments/{id}/ovd-results` - 获取OVD测试结果
+- `GET  /api/v1/feasibility/assessments/{id}/datasets` - 获取数据集检索结果
+- `GET  /api/v1/feasibility/assessments/{id}/resource-estimations` - 获取资源估算
+- `GET  /api/v1/feasibility/assessments/{id}/implementation-plans` - 获取实施计划
+
+### 工作流分叉说明（2026-03-20新增）
+
+**桶A路径（OVD_AVAILABLE）**：
+- 流程：`EVALUATED` → 点击"资源估算" → `COMPLETED`
+- 特点：跳过数据集检索和资源估算，直接完成
+
+**非桶A路径（CUSTOM_LOW/MEDIUM/HIGH）**：
+- 流程：`EVALUATED` → 点击"资源估算" → `DATASET_SEARCHED` → 用户判断 → `AWAITING_USER_JUDGMENT` → 资源估算 → `COMPLETED`
+- 特点：执行数据集检索，等待用户判断数据集匹配度后再进行资源估算
 
 ## 期望的架构设计
 

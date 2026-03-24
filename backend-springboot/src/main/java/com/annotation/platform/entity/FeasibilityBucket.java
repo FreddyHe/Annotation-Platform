@@ -3,6 +3,7 @@ package com.annotation.platform.entity;
 public enum FeasibilityBucket {
     PENDING,
     OVD_AVAILABLE,
-    CUSTOM_TRAINING,
-    VLM_ONLY
+    CUSTOM_LOW,
+    CUSTOM_MEDIUM,
+    CUSTOM_HIGH
 }

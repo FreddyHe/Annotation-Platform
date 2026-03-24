@@ -12,4 +12,6 @@ public interface ResourceEstimationRepository extends JpaRepository<ResourceEsti
     List<ResourceEstimation> findByAssessmentId(Long assessmentId);
 
     List<ResourceEstimation> findByAssessmentIdAndCategoryName(Long assessmentId, String categoryName);
+    
+    void deleteByAssessmentId(Long assessmentId);
 }

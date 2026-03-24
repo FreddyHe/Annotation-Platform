@@ -64,6 +64,22 @@ public class VlmQualityScoreService {
     }
 
     private VlmQualityScoreResponse toResponse(VlmQualityScore score) {
+        java.util.List<com.annotation.platform.dto.response.feasibility.VlmEvaluationDetailResponse> detailResponses = 
+            score.getEvaluationDetails() != null 
+            ? score.getEvaluationDetails().stream()
+                .map(detail -> com.annotation.platform.dto.response.feasibility.VlmEvaluationDetailResponse.builder()
+                    .id(detail.getId())
+                    .bboxIdx(detail.getBboxIdx())
+                    .isCorrect(detail.getIsCorrect())
+                    .croppedImagePath(detail.getCroppedImagePath())
+                    .question(detail.getQuestion())
+                    .vlmAnswer(detail.getVlmAnswer())
+                    .bboxJson(detail.getBboxJson())
+                    .errorReason(detail.getErrorReason())
+                    .build())
+                .collect(Collectors.toList())
+            : new java.util.ArrayList<>();
+        
         return VlmQualityScoreResponse.builder()
                 .id(score.getId())
                 .ovdTestResultId(score.getOvdTestResult() != null ? score.getOvdTestResult().getId() : null)
@@ -76,6 +92,7 @@ public class VlmQualityScoreService {
                 .overallVerdict(score.getOverallVerdict())
                 .notes(score.getNotes())
                 .createdAt(score.getCreatedAt())
+                .evaluationDetails(detailResponses)
                 .build();
     }
 }

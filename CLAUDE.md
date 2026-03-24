@@ -17,6 +17,16 @@
 5. **操作数据库前先备份**。H2 数据库在 Spring Boot 运行时被锁定，不能直接读写；LS SQLite 可以直接查询但写入要小心。
 6. **使用正确的 conda 环境**。算法服务有两个不同的 conda 环境（`groundingdino310` 和 `algo_service`），不要用系统 Python 直接运行。
 7. **修改完成后**，把问题记录补充到 `.context/LESSONS.md`，然后按 `.context/CONVENTIONS.md` 的规范提交 git。
+8. **禁止直接执行长期运行的命令**。以下类型的命令会阻塞终端、卡住对话，**绝对不要在 Agent 终端中直接执行**：
+   - `nohup ... &`（后台启动服务）
+   - `python xxx_server.py`、`uvicorn`、`gunicorn`（启动 Web 服务）
+   - `java -jar ...`（启动 Spring Boot）
+   - `docker-compose up`、`docker run`
+   - `npm start`、`npm run dev`
+   - `tail -f`（持续跟踪日志）
+   - 任何不会自动退出的进程
+
+   **正确做法**：把需要执行的命令完整地输出给用户，说明在哪个目录、用哪个终端执行，然后询问用户「请在外部终端中执行以上命令，完成后告诉我，我再继续下一步。」等用户确认后再继续后续操作。
 
 ## 上下文文件索引
 

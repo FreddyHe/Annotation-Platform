@@ -53,6 +53,8 @@ public class SecurityConfig {
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/actuator/**").permitAll()
                         .requestMatchers("/files/**").permitAll()
+                        .requestMatchers("/upload/image").permitAll()
+                        .requestMatchers("/upload/view").permitAll()
                         .requestMatchers("/detection/**").permitAll()
                         .requestMatchers("/feasibility/assessments/*/ovd-results/**").permitAll()
                         .requestMatchers("/feasibility/assessments/*/datasets/**").permitAll()

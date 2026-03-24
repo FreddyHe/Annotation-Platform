@@ -32,6 +32,10 @@
           <el-icon><Monitor /></el-icon>
           <span>单类别检测</span>
         </el-menu-item>
+        <el-menu-item index="/feasibility">
+          <el-icon><DataAnalysis /></el-icon>
+          <span>可行性评估</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     

@@ -61,12 +61,104 @@ git push origin master
 
 ### Vue（前端）
 
-- **API 封装**: 所有后端调用写在 `src/api/index.js`，不在组件里直接写 fetch
-- **路由**: 在 `src/router/index.js` 注册，侧边栏菜单在 `src/layout/index.vue` 添加
-- **请求前缀**: 前端 API 调用路径以 `/api/v1` 开头
-- **Token**: 存在 `localStorage.getItem('token')`，请求头加 `Authorization: Bearer ${token}`
+- **组件风格**: 使用 Vue 3 Composition API（`<script setup>`），不使用 Options API
+- **API 封装**: 
+  - 按模块分文件：`src/api/feasibility.js`、`src/api/index.js` 等
+  - 统一使用 `import request from '@/utils/request'`
+  - 导出对象形式：`export const feasibilityAPI = { method1, method2 }`
+- **路由规范**: 
+  - 在 `src/router/index.js` 注册，所有路由都是 Layout 的 children
+  - 添加 `meta: { title, icon, requiresAuth: true }`
+  - 侧边栏菜单在 `src/layout/index.vue` 的 `<el-menu>` 中添加 `<el-menu-item>`
+- **请求配置**: 
+  - baseURL 统一为 `/api/v1`（在 `utils/request.js` 配置）
+  - Token 自动从 localStorage 读取并添加到 Authorization 头
+  - 响应拦截器统一处理错误（401跳转登录，其他显示 ElMessage）
+- **状态管理**: 使用 Pinia store，不使用 Vuex
+- **样式规范**: 
+  - 使用 `<style scoped>` 避免样式污染
+  - 优先使用 Element Plus 组件，保持 UI 一致性
+  - 响应式布局使用 CSS Grid 或 Flexbox
+- **命名规范**:
+  - 组件文件：PascalCase（如 `AssessmentList.vue`）
+  - 变量/函数：camelCase（如 `loadAssessments`）
+  - 常量：UPPER_SNAKE_CASE（如 `API_BASE_URL`）
 
 ### Python（算法服务）
 
 - **路由模块化**: 新功能在 `routers/` 下新建文件，在 `main.py` 中 `include_router` 注册
 - **参数传递**: MultipartFile 转发时数值参数必须用 `String.valueOf()` 转字符串，不能直接传 Integer
+
+## 可行性评估模块约定
+
+### 状态流转规则（2026-03-20更新）
+
+评估状态（`AssessmentStatus`）有两条分支路径：
+
+**桶A路径（OVD_AVAILABLE）**：
+```
+CREATED → PARSING → PARSED → OVD_TESTING → OVD_TESTED → 
+EVALUATING → EVALUATED → COMPLETED
+```
+
+**非桶A路径（CUSTOM_LOW/MEDIUM/HIGH）**：
+```
+CREATED → PARSING → PARSED → OVD_TESTING → OVD_TESTED → 
+EVALUATING → EVALUATED → DATASET_SEARCHED → AWAITING_USER_JUDGMENT → 
+ESTIMATING → COMPLETED
+```
+
+任何阶段失败都应设置为 `FAILED`，不允许跳过中间状态。
+
+### 四桶分类标准（2026-03-20更新）
+
+从3桶改为4桶系统：
+
+- **桶A (OVD_AVAILABLE)**: Precision > 0.7（OVD可直接使用）
+- **桶B (CUSTOM_LOW)**: 数据集几乎一致，需少量微调（500张图片）
+- **桶B+ (CUSTOM_MEDIUM)**: 数据集部分相关，需中等标注（1000张图片）
+- **桶C (CUSTOM_HIGH)**: 数据集几乎不可用，需大量标注（2000张图片）
+- **PENDING**: 初始状态，等待VLM评估后确定
+
+**桶判定逻辑**：
+- VLM评估后：`avgPrecision > 0.7` → `OVD_AVAILABLE`，否则 → `PENDING`
+- 用户判断数据集匹配度后：
+  - `ALMOST_MATCH` → `CUSTOM_LOW`
+  - `PARTIAL_MATCH` → `CUSTOM_MEDIUM`
+  - `NOT_USABLE` → `CUSTOM_HIGH`
+
+### 实施计划生成规则（2026-03-20更新）
+
+根据四桶分类动态生成阶段：
+- **定制训练桶存在（CUSTOM_LOW/MEDIUM/HIGH）**: 生成"数据采集方案设计"、"数据标注"、"模型训练与调优"三个阶段
+  - 数据标注天数 = max(各类别人天) + 7天缓冲
+  - 模型训练天数 = max(各类别GPU时) / 8 + 5天缓冲
+- **桶A存在**: 生成"OVD配置与校验"阶段（固定4天）
+- **始终生成**: "系统集成测试"（7天）、"部署上线"（4天）、"持续运维"（0天）
+
+### 数据存储约定
+
+- **tasks字段**: 存储为JSON字符串数组，如 `["任务1", "任务2"]`
+- **dependencies字段**: 存储为逗号分隔的阶段名称，如 `"数据采集方案设计,数据标注"`
+- **bboxJson字段**: 存储为JSON字符串，如 `"[{\"x\":10,\"y\":20,\"width\":100,\"height\":50}]"`
+
+### 前端步骤映射
+
+前端详情页步骤条（el-steps）的 active 状态根据后端 status 映射：
+```javascript
+const stepMap = {
+  CREATED: 0, PARSING: 0, PARSED: 1,
+  OVD_TESTING: 1, OVD_TESTED: 2,
+  EVALUATING: 2, EVALUATED: 3,
+  ESTIMATING: 3, COMPLETED: 5, FAILED: -1
+}
+```
+
+### 按钮禁用逻辑
+
+前端操作按钮的禁用状态必须严格按照状态流转：
+- 解析按钮：仅在 `CREATED` 时可用
+- OVD测试按钮：仅在 `PARSED` 时可用
+- 评估按钮：仅在 `OVD_TESTED` 时可用
+- 估算按钮：仅在 `EVALUATED` 时可用
+- 生成计划按钮：在 `EVALUATED` 或 `ESTIMATING` 时可用

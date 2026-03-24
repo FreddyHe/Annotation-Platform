@@ -31,6 +31,10 @@ public class ImplementationPlan {
     @Column(name = "phase_name", nullable = false, length = 100)
     private String phaseName;
 
+    @Column(name = "status", nullable = false, length = 50)
+    @Builder.Default
+    private String status = "PENDING";
+
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
 

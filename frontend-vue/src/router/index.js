@@ -62,6 +62,24 @@ const routes = [
         name: 'Settings',
         component: () => import('@/views/Settings.vue'),
         meta: { title: '设置', icon: 'Setting' }
+      },
+      {
+        path: 'feasibility',
+        name: 'AssessmentList',
+        component: () => import('@/views/feasibility/AssessmentList.vue'),
+        meta: { title: '可行性评估', icon: 'DataAnalysis' }
+      },
+      {
+        path: 'feasibility/create',
+        name: 'CreateAssessment',
+        component: () => import('@/views/feasibility/CreateAssessment.vue'),
+        meta: { title: '新建评估', icon: 'Plus' }
+      },
+      {
+        path: 'feasibility/:id',
+        name: 'AssessmentDetail',
+        component: () => import('@/views/feasibility/AssessmentDetail.vue'),
+        meta: { title: '评估详情', icon: 'Document' }
       }
     ]
   }

@@ -16,4 +16,6 @@ public interface FileUploadService {
     boolean deleteFile(String filePath);
 
     void cleanupExpiredChunks();
+
+    String uploadSingleImage(MultipartFile file);
 }

@@ -109,6 +109,17 @@ nohup label-studio start --port 5001 --no-browser --log-level INFO > /tmp/labels
 
 ## 算法服务（两个进程，两个 conda 环境）
 
+### 依赖安装（首次或更新时）
+
+```bash
+source $(conda info --base)/etc/profile.d/conda.sh
+conda activate algo_service
+# 安装Roboflow搜索所需的HTML解析库
+pip install beautifulsoup4 lxml -q
+```
+
+### 启动服务
+
 ```bash
 source $(conda info --base)/etc/profile.d/conda.sh
 
@@ -161,11 +172,79 @@ sqlite3 ~/.local/share/label-studio/label_studio.sqlite3 \
   "SELECT t.key, t.user_id, u.email, u.active_organization_id FROM authtoken_token t JOIN htx_user u ON t.user_id = u.id;"
 ```
 
+## 可行性评估完整流程验证（阶段4-5）
+
+### 动态资源估算验证
+
+```bash
+# 获取token
+token=$(curl -s -X POST http://localhost:8080/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"test","password":"test"}' | python -c "import sys,json; print(json.load(sys.stdin)['data']['token'])")
+
+# 提交用户判断（数据集匹配度）
+curl -s -X POST http://localhost:8080/api/v1/feasibility/assessments/1/user-judgment \
+  -H "Authorization: Bearer $token" \
+  -H "Content-Type: application/json" \
+  -d '{"datasetMatchLevel":"PARTIAL_MATCH","userNotes":"数据集部分相关，需要补充标注"}' | head -c 300
+
+# 资源估算（调用算法服务动态计算）
+curl -s -X POST http://localhost:8080/api/v1/feasibility/assessments/1/estimate \
+  -H "Authorization: Bearer $token" | head -c 300
+
+# 查询资源估算结果（包含publicDatasetImages和trainingApproach）
+curl -s http://localhost:8080/api/v1/feasibility/assessments/1/resource-estimations \
+  -H "Authorization: Bearer $token" | python -m json.tool | head -c 500
+```
+
+### AI可行性报告生成验证
+
+```bash
+# 生成AI报告（调用LLM，耗时10-30秒）
+curl -s -X POST http://localhost:8080/api/v1/feasibility/assessments/1/ai-report \
+  -H "Authorization: Bearer $token" | python -m json.tool | head -c 1000
+
+# 验证报告包含Markdown格式内容
+curl -s -X POST http://localhost:8080/api/v1/feasibility/assessments/1/ai-report \
+  -H "Authorization: Bearer $token" | python -c "import sys,json; print(json.load(sys.stdin)['data']['report'][:500])"
+```
+
+### 算法服务直接验证
+
+```bash
+# 测试动态资源估算（算法服务）
+curl -s -X POST http://localhost:8001/api/v1/feasibility/estimate-resources \
+  -H "Content-Type: application/json" \
+  -d '{
+    "categories": [
+      {
+        "categoryName": "大型石块",
+        "feasibilityBucket": "CUSTOM_MEDIUM",
+        "sceneComplexity": "medium",
+        "sceneDiversity": "medium",
+        "datasetMatchLevel": "PARTIAL_MATCH",
+        "availablePublicSamples": 3390
+      }
+    ]
+  }' | python -m json.tool | head -c 800
+
+# 测试AI报告生成（算法服务）
+curl -s -X POST http://localhost:8001/api/v1/feasibility/generate-report \
+  -H "Content-Type: application/json" \
+  -d '{
+    "assessmentName": "测试评估",
+    "rawRequirement": "矿道异物检测",
+    "categories": [{"categoryName": "石块", "feasibilityBucket": "CUSTOM_LOW"}],
+    "resourceEstimations": [{"categoryName": "石块", "estimatedImages": 240, "trainingApproach": "微调"}]
+  }' | python -c "import sys,json; print(json.load(sys.stdin)['report'][:300])"
+```
+
 ## 杀进程备忘
 
 ```bash
 # 按端口杀
 kill $(lsof -ti:8080) 2>/dev/null
+lsof -ti:8001 | xargs kill -9 2>/dev/null
 
 # 按进程名杀
 pkill -f "vite"
@@ -173,3 +252,4 @@ pkill -f "label-studio"
 pkill -f "dino_model_server"
 pkill -f "uvicorn"
 ```
+

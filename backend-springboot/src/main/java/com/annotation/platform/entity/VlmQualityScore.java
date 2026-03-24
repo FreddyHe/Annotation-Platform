@@ -49,6 +49,10 @@ public class VlmQualityScore {
     @Column(name = "notes", columnDefinition = "TEXT")
     private String notes;
 
+    @OneToMany(mappedBy = "qualityScore", cascade = CascadeType.ALL, orphanRemoval = true)
+    @lombok.Builder.Default
+    private java.util.List<VlmEvaluationDetail> evaluationDetails = new java.util.ArrayList<>();
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

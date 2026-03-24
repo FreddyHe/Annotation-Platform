@@ -113,6 +113,7 @@ public class DatasetSearchResultService {
                 .id(r.getId())
                 .assessmentId(r.getAssessment() != null ? r.getAssessment().getId() : null)
                 .categoryName(r.getCategoryName())
+                .searchUrl(r.getSearchUrl())
                 .source(r.getSource())
                 .datasetName(r.getDatasetName())
                 .datasetUrl(r.getDatasetUrl())

@@ -33,8 +33,11 @@ public class FeasibilityAssessment {
     @Column(name = "structured_requirement", columnDefinition = "TEXT")
     private String structuredRequirement;
 
+    @Column(name = "image_urls", columnDefinition = "TEXT")
+    private String imageUrls;
+
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false, length = 20)
+    @Column(name = "status", nullable = false, length = 50)
     @Builder.Default
     private AssessmentStatus status = AssessmentStatus.CREATED;
 
@@ -48,6 +51,13 @@ public class FeasibilityAssessment {
 
     @Column(name = "completed_at")
     private LocalDateTime completedAt;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "dataset_match_level")
+    private DatasetMatchLevel datasetMatchLevel;
+
+    @Column(name = "user_judgment_notes", columnDefinition = "TEXT")
+    private String userJudgmentNotes;
 
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "created_by", foreignKey = @ForeignKey(name = "fk_assessment_creator"))

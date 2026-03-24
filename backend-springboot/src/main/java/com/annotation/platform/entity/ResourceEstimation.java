@@ -28,6 +28,10 @@ public class ResourceEstimation {
     @Column(name = "category_name", nullable = false, length = 200)
     private String categoryName;
 
+    @Column(name = "resource_type", nullable = false, length = 50)
+    @Builder.Default
+    private String resourceType = "ANNOTATION_AND_TRAINING";
+
     @Enumerated(EnumType.STRING)
     @Column(name = "feasibility_bucket", length = 50)
     private FeasibilityBucket feasibilityBucket;
@@ -49,6 +53,12 @@ public class ResourceEstimation {
 
     @Column(name = "estimated_cost")
     private Double estimatedCost;
+
+    @Column(name = "public_dataset_images")
+    private Integer publicDatasetImages;
+
+    @Column(name = "training_approach", columnDefinition = "TEXT")
+    private String trainingApproach;
 
     @Column(name = "notes", columnDefinition = "TEXT")
     private String notes;

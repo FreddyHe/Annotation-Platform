@@ -17,6 +17,7 @@ public class DatasetSearchResultResponse {
     private Long id;
     private Long assessmentId;
     private String categoryName;
+    private String searchUrl;
     private String source;
     private String datasetName;
     private String datasetUrl;

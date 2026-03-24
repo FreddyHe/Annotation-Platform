@@ -24,4 +24,5 @@ public class VlmQualityScoreResponse {
     private String overallVerdict;
     private String notes;
     private LocalDateTime createdAt;
+    private java.util.List<VlmEvaluationDetailResponse> evaluationDetails;
 }

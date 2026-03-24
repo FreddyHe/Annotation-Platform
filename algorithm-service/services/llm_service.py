@@ -188,3 +188,28 @@ raw_requirement:
             logger.error(f"LLM parse_requirement failed: {e}")
             raise
 
+    def chat(self, messages: list, temperature: float = 0.7, max_tokens: int = 4000) -> str:
+        """
+        General-purpose chat method for LLM interactions
+        
+        Args:
+            messages: List of message dicts with 'role' and 'content'
+            temperature: Sampling temperature (0-1)
+            max_tokens: Maximum tokens to generate
+            
+        Returns:
+            str: The LLM response content
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            content = response.choices[0].message.content or ""
+            return content
+        except Exception as e:
+            logger.error(f"LLM chat failed: {e}")
+            raise
+

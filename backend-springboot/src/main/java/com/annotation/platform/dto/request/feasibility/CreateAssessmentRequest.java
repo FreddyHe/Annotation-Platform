@@ -4,6 +4,8 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import java.util.List;
+
 @Data
 public class CreateAssessmentRequest {
 
@@ -13,4 +15,6 @@ public class CreateAssessmentRequest {
 
     @NotBlank(message = "原始需求不能为空")
     private String rawRequirement;
+
+    private List<String> imageUrls;
 }

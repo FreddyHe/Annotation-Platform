@@ -40,10 +40,10 @@ transform = T.Compose(
 )
 
 # --- 推理函数 ---
-def get_grounding_output(model, image, caption, box_threshold=0.05, text_threshold=0.25):
+def get_grounding_output(model, image, caption, box_threshold=0.4, text_threshold=0.25):
     """
     【已修改】
-    1. box_threshold 默认值改为 0.3
+    1. box_threshold 默认值改为 0.4
     2. 返回 max_logits_filt (最高分) 而不是 logits_filt (完整向量)
     """
     caption = caption.lower().strip()
@@ -61,7 +61,7 @@ def get_grounding_output(model, image, caption, box_threshold=0.05, text_thresho
     # 获取每个框的最高分
     all_max_logits = logits.max(dim=1)[0]
     
-    # 使用 box_threshold (现在是 0.3) 进行过滤
+    # 使用 box_threshold (默认0.4) 进行过滤
     filt_mask = all_max_logits > box_threshold
     
     boxes_filt = boxes[filt_mask]
@@ -94,14 +94,17 @@ def predict():
     try:
         image_file = request.files['image']
         text_prompt = request.form['text_prompt']
+        box_threshold = float(request.form.get('box_threshold', 0.4))
+        text_threshold = float(request.form.get('text_threshold', 0.25))
         image_pil = Image.open(image_file.stream).convert("RGB")
 
         # 【已修改】这里接收的是 max_scores (最高分列表)
         boxes, max_scores, labels = get_grounding_output(
             model=grounding_dino_model,
             image=image_pil,
-            caption=text_prompt
-            # box_threshold=0.3 将使用函数默认值
+            caption=text_prompt,
+            box_threshold=box_threshold,
+            text_threshold=text_threshold
         )
         
         detections = []

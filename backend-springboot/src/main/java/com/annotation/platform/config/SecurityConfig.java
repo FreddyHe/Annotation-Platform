@@ -56,6 +56,7 @@ public class SecurityConfig {
                         .requestMatchers("/upload/image").permitAll()
                         .requestMatchers("/upload/view").permitAll()
                         .requestMatchers("/detection/**").permitAll()
+                        .requestMatchers("/custom-models/callback").permitAll()
                         .requestMatchers("/feasibility/assessments/*/ovd-results/**").permitAll()
                         .requestMatchers("/feasibility/assessments/*/datasets/**").permitAll()
                         .requestMatchers("/feasibility/assessments/*/resource-estimations/**").permitAll()

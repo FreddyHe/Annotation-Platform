@@ -101,4 +101,13 @@ public interface LabelStudioProxyService {
      * @return 审核结果列表
      */
     Map<String, Object> getProjectReviewResults(Long lsProjectId, Long userId);
+
+    /**
+     * 导出项目标注结果
+     * @param lsProjectId Label Studio项目ID
+     * @param userId 用户ID
+     * @param format 导出格式 (coco, yolo, voc, csv, json)
+     * @return 导出的标注数据
+     */
+    List<Map<String, Object>> exportAnnotations(Long lsProjectId, Long userId, String format);
 }

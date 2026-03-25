@@ -1201,4 +1201,107 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
         }
         return null;
     }
+
+    @Override
+    public List<Map<String, Object>> exportAnnotations(Long lsProjectId, Long userId, String format) {
+        try {
+            String lsToken = getUserLsTokenWithFallback(userId);
+            if (lsToken == null) {
+                log.warn("无法获取用户 Token，跳过导出: userId={}", userId);
+                return new ArrayList<>();
+            }
+
+            // 获取项目的所有任务及其标注
+            String url = String.format("%s/api/projects/%d/export?exportType=JSON", labelStudioUrl, lsProjectId);
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Authorization", "Token " + lsToken);
+
+            HttpEntity<String> entity = new HttpEntity<>(headers);
+            ResponseEntity<String> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.GET,
+                    entity,
+                    String.class
+            );
+
+            if (response.getStatusCode() == HttpStatus.OK) {
+                String body = response.getBody();
+                com.alibaba.fastjson2.JSONArray tasks = JSON.parseArray(body);
+                
+                List<Map<String, Object>> annotations = new ArrayList<>();
+                
+                if (tasks != null) {
+                    for (int i = 0; i < tasks.size(); i++) {
+                        JSONObject task = tasks.getJSONObject(i);
+                        
+                        // 只导出已审核的任务
+                        com.alibaba.fastjson2.JSONArray taskAnnotations = task.getJSONArray("annotations");
+                        if (taskAnnotations == null || taskAnnotations.isEmpty()) {
+                            continue;
+                        }
+                        
+                        JSONObject annotation = taskAnnotations.getJSONObject(0);
+                        com.alibaba.fastjson2.JSONArray results = annotation.getJSONArray("result");
+                        
+                        if (results == null || results.isEmpty()) {
+                            continue;
+                        }
+                        
+                        // 获取图片信息
+                        JSONObject data = task.getJSONObject("data");
+                        String imagePath = data != null ? data.getString("image") : "";
+                        String imageName = imagePath.substring(imagePath.lastIndexOf("/") + 1);
+                        
+                        // 获取图片尺寸
+                        Integer imageWidth = null;
+                        Integer imageHeight = null;
+                        if (results.size() > 0) {
+                            JSONObject firstResult = results.getJSONObject(0);
+                            JSONObject originalWidth = firstResult.getJSONObject("original_width");
+                            JSONObject originalHeight = firstResult.getJSONObject("original_height");
+                            if (originalWidth != null) imageWidth = originalWidth.getInteger("value");
+                            if (originalHeight != null) imageHeight = originalHeight.getInteger("value");
+                        }
+                        
+                        Map<String, Object> annotationData = new HashMap<>();
+                        annotationData.put("image_name", imageName);
+                        annotationData.put("image_width", imageWidth);
+                        annotationData.put("image_height", imageHeight);
+                        annotationData.put("task_id", task.getLong("id"));
+                        
+                        List<Map<String, Object>> boxes = new ArrayList<>();
+                        for (int j = 0; j < results.size(); j++) {
+                            JSONObject result = results.getJSONObject(j);
+                            JSONObject value = result.getJSONObject("value");
+                            
+                            if (value != null && value.containsKey("rectanglelabels")) {
+                                com.alibaba.fastjson2.JSONArray labels = value.getJSONArray("rectanglelabels");
+                                if (labels != null && !labels.isEmpty()) {
+                                    Map<String, Object> box = new HashMap<>();
+                                    box.put("label", labels.getString(0));
+                                    box.put("x", value.getDouble("x"));
+                                    box.put("y", value.getDouble("y"));
+                                    box.put("width", value.getDouble("width"));
+                                    box.put("height", value.getDouble("height"));
+                                    boxes.add(box);
+                                }
+                            }
+                        }
+                        
+                        annotationData.put("annotations", boxes);
+                        annotations.add(annotationData);
+                    }
+                }
+                
+                log.info("导出标注成功: lsProjectId={}, format={}, count={}", lsProjectId, format, annotations.size());
+                return annotations;
+            } else {
+                log.warn("导出标注失败: lsProjectId={}, status={}", lsProjectId, response.getStatusCode());
+                return new ArrayList<>();
+            }
+        } catch (Exception e) {
+            log.error("导出标注失败: lsProjectId={}, error={}", lsProjectId, e.getMessage(), e);
+            return new ArrayList<>();
+        }
+    }
 }

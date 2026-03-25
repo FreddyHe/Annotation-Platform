@@ -30,7 +30,7 @@ import java.util.Map;
 public class UserModelConfigController {
 
     private final UserModelConfigService userModelConfigService;
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
 
     @Value("${app.algorithm.url:${algorithm.url:http://localhost:8001}}")
     private String algorithmServiceUrl;

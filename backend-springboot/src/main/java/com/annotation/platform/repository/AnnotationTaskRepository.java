@@ -4,6 +4,7 @@ import com.annotation.platform.entity.AnnotationTask;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -27,4 +28,13 @@ public interface AnnotationTaskRepository extends JpaRepository<AnnotationTask, 
 
     @Query("SELECT COUNT(t) FROM AnnotationTask t WHERE t.project.id = :projectId AND t.status = :status")
     long countByProjectIdAndStatus(@Param("projectId") Long projectId, @Param("status") AnnotationTask.TaskStatus status);
+
+    // 查询项目下所有任务的 ID
+    @Query("SELECT t.id FROM AnnotationTask t WHERE t.project.id = :projectId")
+    List<Long> findIdsByProjectId(@Param("projectId") Long projectId);
+
+    // 根据项目 ID 删除所有任务
+    @Modifying
+    @Query("DELETE FROM AnnotationTask t WHERE t.project.id = :projectId")
+    void deleteByProjectId(@Param("projectId") Long projectId);
 }

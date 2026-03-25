@@ -134,6 +134,7 @@ body {
 .el-button--primary {
   background-color: var(--brand-600) !important;
   border-color: var(--brand-600) !important;
+  color: #ffffff !important;
   border-radius: var(--radius-md) !important;
   font-weight: 500;
   letter-spacing: -0.01em;
@@ -144,6 +145,7 @@ body {
 .el-button--primary:focus {
   background-color: var(--brand-800) !important;
   border-color: var(--brand-800) !important;
+  color: #ffffff !important;
 }
 
 .el-button--default {

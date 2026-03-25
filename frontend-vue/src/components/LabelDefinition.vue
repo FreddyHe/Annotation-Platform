@@ -1,7 +1,7 @@
 <template>
   <div class="label-definition">
     <p class="section-desc">定义检测目标的类别，用于算法标注和 Label Studio 标签配置</p>
-    <el-form :model="form" label-width="120px">
+    <el-form label-width="120px">
       <el-form-item label="类别数量">
         <el-input-number v-model="labelCount" :min="1" :max="20" @change="handleLabelCountChange" />
       </el-form-item>

@@ -69,7 +69,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { projectAPI, labelStudioAPI, userAPI } from '@/api'
 import { ElMessage } from 'element-plus'
@@ -102,8 +102,26 @@ const userProfile = ref({
 })
 
 const isProcessing = computed(() => {
-  return ['DETECTING', 'CLEANING', 'SYNCING'].includes(project.value.status)
+  return ['DETECTING', 'CLEANING', 'SYNCING', 'UPLOADING'].includes(project.value.status)
 })
+
+let pollInterval = null
+
+// 当项目处于处理状态时，定时刷新项目数据
+watch(() => project.value?.status, (status) => {
+  const processingStatuses = ['DETECTING', 'CLEANING', 'SYNCING', 'UPLOADING']
+  
+  if (processingStatuses.includes(status) && !pollInterval) {
+    // 启动轮询
+    pollInterval = setInterval(() => {
+      loadProject()
+    }, 3000)
+  } else if (!processingStatuses.includes(status) && pollInterval) {
+    // 停止轮询
+    clearInterval(pollInterval)
+    pollInterval = null
+  }
+}, { immediate: true })
 
 const buttonText = computed(() => {
   if (isProcessing.value) {
@@ -176,6 +194,13 @@ const goBack = () => {
 onMounted(() => {
   loadProject()
   loadUserProfile()
+})
+
+onUnmounted(() => {
+  if (pollInterval) {
+    clearInterval(pollInterval)
+    pollInterval = null
+  }
 })
 </script>
 

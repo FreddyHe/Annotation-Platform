@@ -204,10 +204,15 @@ public class UserServiceImpl implements UserService {
         try {
             if (user.getLsSynced() != null && user.getLsSynced() && user.getLsPlainPassword() != null) {
                 lsPassword = user.getLsPlainPassword();
+            } else if (user.getLsSynced() != null && user.getLsSynced()) {
+                lsPassword = "请重新登录以保存密码";
             }
         } catch (Exception e) {
             log.warn("解析 LS 密码失败: userId={}, error={}", userId, e.getMessage());
         }
+
+        log.info("获取用户资料: userId={}, lsSynced={}, lsPlainPassword={}, lsPassword={}", 
+                 userId, user.getLsSynced(), user.getLsPlainPassword() != null ? "存在" : "null", lsPassword != null ? "存在" : "null");
 
         return UserProfileResponse.builder()
             .id(user.getId())

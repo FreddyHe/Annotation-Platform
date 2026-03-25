@@ -49,8 +49,13 @@ public class TrainingService {
     @Value("${training.output-base-path:/root/autodl-fs/Annotation-Platform/training_runs}")
     private String trainingOutputBasePath;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Autowired
+    public TrainingService(RestTemplate restTemplate) {
+        this.restTemplate = restTemplate;
+    }
 
     public ModelTrainingRecord startTraining(
             Long userId,

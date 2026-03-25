@@ -1,9 +1,10 @@
 <template>
   <div class="result-viewer">
-    <p class="section-desc">查看算法检测结果和清洗后的标注数据</p>
+    <p class="section-desc">查看算法检测结果、清洗后的标注数据和人工审核情况</p>
     <el-tabs v-model="activeTab">
       <el-tab-pane label="检测结果" name="detections"><DetectionResults :project="project" /></el-tab-pane>
       <el-tab-pane label="清洗结果" name="cleaning"><CleaningResults :project="project" /></el-tab-pane>
+      <el-tab-pane label="审核结果" name="review"><ReviewResults :project="project" /></el-tab-pane>
       <el-tab-pane label="统计分析" name="stats"><ResultStats :project="project" /></el-tab-pane>
     </el-tabs>
   </div>
@@ -13,6 +14,7 @@
 import { ref } from 'vue'
 import DetectionResults from '@/components/DetectionResults.vue'
 import CleaningResults from '@/components/CleaningResults.vue'
+import ReviewResults from '@/components/ReviewResults.vue'
 import ResultStats from '@/components/ResultStats.vue'
 const props = defineProps({ project: { type: Object, required: true } })
 const activeTab = ref('detections')

@@ -153,6 +153,20 @@ export const projectAPI = {
     })
   },
 
+  getReviewStats(id) {
+    return request({
+      url: `/projects/${id}/review-stats`,
+      method: 'get'
+    })
+  },
+
+  getReviewResults(id) {
+    return request({
+      url: `/projects/${id}/review-results`,
+      method: 'get'
+    })
+  },
+
   exportResults(data) {
     return request({
       url: `/projects/${data.projectId}/export`,
@@ -308,10 +322,11 @@ export const algorithmAPI = {
 }
 
 export const autoAnnotationAPI = {
-  startAutoAnnotation(projectId) {
+  startAutoAnnotation(projectId, params = {}) {
     return request({
       url: `/auto-annotation/start/${projectId}`,
-      method: 'post'
+      method: 'post',
+      data: params
     })
   },
 

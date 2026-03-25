@@ -269,3 +269,69 @@
   3. 轮询机制必须有明确的启动和停止条件，避免内存泄漏
   4. 路由参数传递（query）可以实现页面间的上下文传递，提升用户体验
   5. 前端编译成功但有chunk size警告是正常的，不影响功能，可后续优化
+
+### 2026-03-25: Label Studio本地文件挂载失败 + 自动标注进度未显示
+- **问题1 - LS挂载失败**: 后端日志显示"挂载本地存储失败，跳过预测同步"，导致自动标注结果无法同步到Label Studio。
+- **根因**: Label Studio启动时未设置必需的环境变量 `LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true` 和 `LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=/root/autodl-fs`，导致本地文件存储功能不可用。
+- **修复**: 
+  1. 停止Label Studio进程：`pkill -f "label-studio"`
+  2. 使用正确的启动命令（必须包含两个环境变量）：
+     ```bash
+     source $(conda info --base)/etc/profile.d/conda.sh
+     conda activate web_annotation
+     export LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true
+     export LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=/root/autodl-fs
+     nohup label-studio start --port 5001 --no-browser --log-level INFO > /tmp/labelstudio.log 2>&1 &
+     ```
+- **问题2 - 前端进度未显示**: 自动标注页面点击启动后，进度条一直停留在5%"任务已启动..."，无法显示实际进度（DETECTING、CLEANING、SYNCING等状态）。
+- **根因**: `AutoAnnotationController.getTaskStatus()` 接口返回"Task status query not implemented yet"，前端轮询无法获取真实任务状态。
+- **修复**:
+  1. 在 `AutoAnnotationController` 中注入 `ProjectRepository`
+  2. 修改 `startAutoAnnotation()` 返回包含 `taskId: "project-{projectId}"` 的Map
+  3. 重写 `getTaskStatus()` 方法：
+     - 从taskId提取projectId
+     - 查询Project实体获取当前状态
+     - 将Project.ProjectStatus映射到前端期望的状态字符串（DRAFT→PENDING, DETECTING→DETECTING, CLEANING→CLEANING, SYNCING→SYNCING, COMPLETED→COMPLETED, FAILED→FAILED）
+     - 返回包含status字段的Map
+  4. 重新编译并重启Spring Boot
+- **教训**:
+  1. **Label Studio环境变量是必需的**：每次重启LS都必须设置这两个环境变量，否则本地文件存储不可用。这是置顶第5条的核心原因。
+  2. **接口实现不能留空**：Controller中的"not implemented yet"会导致前端功能完全不可用，必须在开发时立即实现或至少返回有意义的默认值。
+  3. **状态轮询依赖后端真实数据**：前端进度条依赖后端返回的状态字段，后端必须查询数据库获取真实状态，不能返回mock数据。
+  4. **枚举值映射要准确**：Project.ProjectStatus的枚举值是DRAFT/UPLOADING/DETECTING/CLEANING/SYNCING/COMPLETED/FAILED，不是CREATED，映射时要使用正确的枚举值。
+  5. **修改Controller后必须重启**：新增或修改Controller方法后，必须重新编译（mvn clean package）并重启Spring Boot，否则运行的还是旧代码。
+
+### 2026-03-25: 自动标注重复数据 + Label Studio图片加载失败 + 审核结果字段名不匹配
+- **问题1 - 重新执行自动标注时清洗结果显示重复数据**：
+  - **根因**: `AutoAnnotationService.startAutoAnnotation()` 方法没有清理旧数据逻辑，每次执行都会创建新的 `AnnotationTask` 和 `DetectionResult` 记录，导致同一张图片的清洗结果出现多次。前端传递的 `processRange` 参数虽然被接收，但方法体内没有使用。
+  - **修复**:
+    1. 在 `DetectionResultRepository` 添加 `deleteByTaskIdIn(List<Long>)` 和 `@Modifying @Query deleteByProjectId(Long)` 方法
+    2. 在 `AnnotationTaskRepository` 添加 `findIdsByProjectId(Long)` 和 `@Modifying @Query deleteByProjectId(Long)` 方法
+    3. 在 `AutoAnnotationService.startAutoAnnotation()` 方法中，获取项目信息后、获取图片列表前，添加清理逻辑：如果 `processRange = "all"`，先删除 `DetectionResult`（外键依赖），再删除 `AnnotationTask`
+    4. 删除顺序很重要：必须先删 `DetectionResult` 再删 `AnnotationTask`，否则会报外键约束错误
+- **问题2 - Label Studio 图片 URL 加载失败（500错误）**：
+  - **根因**: Label Studio 数据库中存在孤立的 storage 记录（`io_storages_localfilesimportstorage` 表中的记录关联的 `project_id` 对应的项目已被删除）。当访问 `/data/local-files/?d=...` 时，Label Studio 查找所有路径匹配的 storage，在权限检查时 `storage.project` 查询失败导致 500 错误。
+  - **临时修复**: 直接操作 Label Studio SQLite 数据库，删除孤立的 storage 记录：
+    ```sql
+    DELETE FROM io_storages_localfilesimportstorage WHERE localfilesmixin_ptr_id IN (1, 2, 12, 13, 14);
+    DELETE FROM io_storages_localfilesmixin WHERE id IN (1, 2, 12, 13, 14);
+    ```
+  - **预防性修复**: 在后端删除项目时同步清理 Label Studio 的 local storage，避免产生孤立记录：
+    1. 在 `LabelStudioProxyService` 接口添加 `deleteLocalStorageByProject(Long lsProjectId, Long userId)` 方法
+    2. 在 `LabelStudioProxyServiceImpl` 实现该方法：先调用 `/api/storages/localfiles?project={id}` 获取项目的所有 storage，再逐个调用 `DELETE /api/storages/localfiles/{storageId}` 删除
+    3. 在 `ProjectController.deleteProject()` 中，**必须先删除 storage 再删除 project**（删除顺序：DetectionResult → ProjectImage → Local Storage → LS Project → Project 实体）
+  - **验证**: 环境变量 `LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true` 和 `LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=/root/autodl-fs` 已正确设置，文件权限正常。
+- **问题3 - 审核结果显示"项目尚未同步到 Label Studio"**：
+  - **根因**: `ProjectDetailResponse` DTO 缺少 `lsProjectId` 字段，前端检查 `props.project.labelStudioProjectId` 时始终为 `undefined`，导致误判为未同步。
+  - **修复**:
+    1. 在 `ProjectDetailResponse.java` 添加字段 `@JsonProperty("labelStudioProjectId") private Long lsProjectId;`（使用 `@JsonProperty` 注解将后端字段名 `lsProjectId` 映射为前端期望的 `labelStudioProjectId`）
+    2. 在 `ProjectController.convertToDetailResponse()` 方法中添加 `.lsProjectId(project.getLsProjectId())` 映射
+- **教训**:
+  1. **数据清理逻辑必须完整实现**：接收参数后必须在方法体内使用，不能只改方法签名让编译通过
+  2. **外键删除顺序**：删除有外键依赖的数据时，必须先删子表（`DetectionResult`）再删父表（`AnnotationTask`）
+  3. **@Modifying 注解必需**：JPQL 的 `DELETE`/`UPDATE` 语句必须配合 `@Modifying` 注解，否则 Spring Data JPA 会报错
+  4. **Label Studio 数据库清理**：当 Label Studio 出现 500 错误且日志显示 "Project matching query does not exist" 时，检查是否有孤立的 storage 记录（关联的项目已删除）
+  5. **Label Studio 删除顺序**：删除 LS 项目时，必须先删除 local storage 再删除 project，否则删除 project 后 API 查不到关联的 storage，会再次产生孤立记录
+  6. **预防性编程**：在删除操作中添加完整的清理逻辑，避免产生孤立数据。删除项目的正确顺序：DetectionResult → ProjectImage → LS Local Storage → LS Project → Project 实体
+  7. **DTO 字段映射**：实体新增字段后，必须同步更新 Response DTO 和转换方法，使用 `@JsonProperty` 可以解决前后端字段名不一致问题
+  8. **前后端字段名统一**：优先使用 `@JsonProperty` 注解映射字段名，而不是要求前端修改代码，减少联调成本

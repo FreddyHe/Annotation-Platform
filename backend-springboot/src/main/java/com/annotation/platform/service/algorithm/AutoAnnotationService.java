@@ -50,13 +50,43 @@ public class AutoAnnotationService {
      */
     @Async("taskExecutor")
     @Transactional
-    public void startAutoAnnotation(Long projectId, Long userId) {
-        log.info("Starting auto annotation for project: {}, userId: {}", projectId, userId);
+    public void startAutoAnnotation(Long projectId, Long userId, String processRange) {
+        log.info("Starting auto annotation for project: {}, userId: {}, processRange: {}", projectId, userId, processRange);
         
         try {
             // 获取项目信息
             Project project = projectRepository.findById(projectId)
                     .orElseThrow(() -> new RuntimeException("Project not found: " + projectId));
+            
+            // ===== 重新执行时清理旧数据 =====
+            if ("all".equals(processRange)) {
+                log.info("processRange=all, 清理项目旧数据: projectId={}", projectId);
+                
+                // 1. 先删除 DetectionResult（因为它外键引用了 AnnotationTask）
+                long deletedResults = detectionResultRepository.countByProjectId(projectId);
+                if (deletedResults > 0) {
+                    detectionResultRepository.deleteByProjectId(projectId);
+                    log.info("已删除旧检测结果: count={}", deletedResults);
+                }
+                
+                // 2. 再删除 AnnotationTask
+                long deletedTasks = annotationTaskRepository.countByProjectId(projectId);
+                if (deletedTasks > 0) {
+                    annotationTaskRepository.deleteByProjectId(projectId);
+                    log.info("已删除旧标注任务: count={}", deletedTasks);
+                }
+                
+                // 3. 清理 Label Studio 端的旧 tasks（避免 LS 端也重复）
+                Long lsProjectId = project.getLsProjectId();
+                if (lsProjectId != null) {
+                    try {
+                        // TODO: 实现 labelStudioProxyService.deleteAllTasks(lsProjectId, userId);
+                        log.info("Label Studio 旧 tasks 清理功能待实现: lsProjectId={}", lsProjectId);
+                    } catch (Exception e) {
+                        log.warn("清理 Label Studio 旧 tasks 失败（可忽略）: {}", e.getMessage());
+                    }
+                }
+            }
             
             // 获取项目图片列表
             List<ProjectImage> images = projectImageRepository.findByProjectId(projectId, org.springframework.data.domain.PageRequest.of(0, Integer.MAX_VALUE)).getContent();
@@ -111,6 +141,10 @@ public class AutoAnnotationService {
                 log.error("Failed to get DINO results for task: {}", dinoTaskId);
                 throw new RuntimeException("无法获取 DINO 结果: " + dinoTaskId);
             }
+            
+            // 保存 DINO 检测结果到数据库
+            log.info("Saving DINO detection results to database...");
+            saveDinoResults(project, dinoResults, dinoTaskId);
             
             // 步骤 2: 调用 VLM 清洗
             log.info("Step 2: Starting VLM cleaning...");
@@ -288,6 +322,116 @@ public class AutoAnnotationService {
         } catch (Exception e) {
             log.error("Error extracting detections: {}", e.getMessage(), e);
             return new ArrayList<>();
+        }
+    }
+
+    /**
+     * 保存 DINO 检测结果到数据库
+     */
+    @SuppressWarnings("unchecked")
+    private void saveDinoResults(Project project, Object dinoResults, String dinoTaskId) {
+        if (dinoResults == null) {
+            return;
+        }
+        
+        try {
+            // 将结果转换为 Map
+            Map<String, Object> resultsMap = objectMapper.convertValue(dinoResults, Map.class);
+            List<Map<String, Object>> resultsList = (List<Map<String, Object>>) resultsMap.get("results");
+            
+            if (resultsList == null) {
+                return;
+            }
+            
+            // 创建 DINO 检测任务记录
+            AnnotationTask dinoTask = new AnnotationTask();
+            dinoTask.setProject(project);
+            dinoTask.setType(AnnotationTask.TaskType.DINO_DETECTION);
+            dinoTask.setStatus(AnnotationTask.TaskStatus.COMPLETED);
+            dinoTask.setStartedAt(LocalDateTime.now());
+            dinoTask.setCompletedAt(LocalDateTime.now());
+            dinoTask.setParameters(Collections.singletonMap("task_id", dinoTaskId));
+            dinoTask = annotationTaskRepository.save(dinoTask);
+            
+            // 保存每个检测结果
+            for (Map<String, Object> result : resultsList) {
+                String imagePath = (String) result.get("image_path");
+                String fileName = new File(imagePath).getName();
+                
+                List<Map<String, Object>> detectionsList = (List<Map<String, Object>>) result.get("detections");
+                if (detectionsList == null || detectionsList.isEmpty()) {
+                    continue;
+                }
+                
+                // 查找对应的图片
+                ProjectImage image = projectImageRepository.findByProjectIdAndFilePath(
+                        project.getId(), imagePath
+                ).orElse(null);
+                
+                if (image == null) {
+                    // 如果完整路径匹配失败，尝试用文件名匹配
+                    List<ProjectImage> allImages = projectImageRepository.findByProjectId(
+                        project.getId(), 
+                        org.springframework.data.domain.PageRequest.of(0, Integer.MAX_VALUE)
+                    ).getContent();
+                    for (ProjectImage img : allImages) {
+                        if (img.getFileName().equals(fileName)) {
+                            image = img;
+                            break;
+                        }
+                    }
+                }
+                
+                if (image != null) {
+                    // 保存每个检测框
+                    for (Map<String, Object> detection : detectionsList) {
+                        String label = (String) detection.get("label");
+                        
+                        // 处理 bbox
+                        List<Double> bbox = new ArrayList<>();
+                        Object bboxObj = detection.get("bbox");
+                        if (bboxObj instanceof List) {
+                            for (Object item : (List<?>) bboxObj) {
+                                if (item instanceof Number) {
+                                    bbox.add(((Number) item).doubleValue());
+                                }
+                            }
+                        }
+                        
+                        Double score = null;
+                        Object scoreObj = detection.get("score");
+                        if (scoreObj instanceof Number) {
+                            score = ((Number) scoreObj).doubleValue();
+                        }
+                        
+                        Map<String, Object> detectionData = new HashMap<>();
+                        detectionData.put("label", label);
+                        detectionData.put("bbox", bbox);
+                        detectionData.put("score", score);
+                        detectionData.put("image_path", imagePath);
+                        detectionData.put("image_name", fileName);
+                        
+                        DetectionResult detectionResult = DetectionResult.builder()
+                                .image(image)
+                                .task(dinoTask)
+                                .type(DetectionResult.ResultType.DINO_DETECTION)
+                                .resultData(detectionData)
+                                .build();
+                        
+                        detectionResultRepository.save(detectionResult);
+                        
+                        log.info("Saved DINO detection: image={}, label={}, score={}", 
+                                fileName, label, score);
+                    }
+                } else {
+                    log.warn("找不到图片: {}", imagePath);
+                }
+            }
+            
+            log.info("DINO 检测结果保存完成");
+            
+        } catch (Exception e) {
+            log.error("保存 DINO 检测结果失败: {}", e.getMessage(), e);
         }
     }
 

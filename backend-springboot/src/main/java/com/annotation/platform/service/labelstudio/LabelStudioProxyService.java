@@ -49,6 +49,22 @@ public interface LabelStudioProxyService {
     void deleteProject(Long lsProjectId, Long userId);
 
     /**
+     * 删除LS项目关联的所有local storage
+     * 必须在删除项目之前调用，避免产生孤立的storage记录
+     * @param lsProjectId Label Studio项目ID
+     * @param userId 用户ID
+     */
+    void deleteLocalStorageByProject(Long lsProjectId, Long userId);
+
+    /**
+     * 更新LS项目的label_config配置
+     * @param lsProjectId Label Studio项目ID
+     * @param labels 新的标签列表
+     * @param userId 用户ID
+     */
+    void updateProjectLabelConfig(Long lsProjectId, List<String> labels, Long userId);
+
+    /**
      * 挂载本地存储
      */
     Long mountLocalStorage(Long lsProjectId, String localPath, Long userId);
@@ -69,4 +85,20 @@ public interface LabelStudioProxyService {
      * 获取项目 task 数量
      */
     int getProjectTaskCount(Long lsProjectId, Long userId);
+
+    /**
+     * 获取项目审核统计
+     * @param lsProjectId Label Studio项目ID
+     * @param userId 用户ID
+     * @return 审核统计信息
+     */
+    Map<String, Object> getProjectReviewStats(Long lsProjectId, Long userId);
+
+    /**
+     * 获取项目审核结果
+     * @param lsProjectId Label Studio项目ID
+     * @param userId 用户ID
+     * @return 审核结果列表
+     */
+    Map<String, Object> getProjectReviewResults(Long lsProjectId, Long userId);
 }

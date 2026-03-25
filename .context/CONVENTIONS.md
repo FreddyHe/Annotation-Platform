@@ -222,3 +222,112 @@ const stepMap = {
   ]
 }
 ```
+
+
+
+## 2026-03-25 新增规范
+
+### CGLIB 代理与异常捕获（重要）
+
+当 Spring 类被 CGLIB 代理（例如类中有方法带 `@Transactional`）时，异常可能在代理层被拦截，绕过 Service/Controller 内部的 catch 块。
+
+**规则：调用外部 API 时，在 `restTemplate.exchange()` 调用处直接捕获具体异常，不依赖外层 catch 兜底。**
+
+```java
+// ✅ 正确：在调用点直接捕获
+ResponseEntity<String> response;
+try {
+    response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+} catch (HttpClientErrorException.NotFound e404) {
+    log.warn("资源不存在: {}", url);
+    return createEmptyResult();
+}
+
+// ❌ 错误：依赖外层 catch（可能被 CGLIB 代理绕过）
+try {
+    ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+    // ... 处理 response
+} catch (Exception e) {
+    // 这个 catch 可能永远执行不到
+    return createEmptyResult();
+}
+```
+
+### 第三方 API JSON 响应解析
+
+不要假设第三方 API 返回格式固定。Label Studio 的 tasks API 在有数据时返回数组 `[...]`，无数据时返回 404。
+
+**规则：解析前判断响应体是数组还是对象。**
+
+```java
+String body = response.getBody();
+com.alibaba.fastjson2.JSONArray tasks;
+if (body != null && body.trim().startsWith("[")) {
+    tasks = JSON.parseArray(body);
+} else {
+    JSONObject responseData = JSON.parseObject(body);
+    tasks = responseData.getJSONArray("tasks");
+}
+```
+
+### 外键删除顺序
+
+删除有外键依赖的数据时，必须按子表→父表顺序。
+
+**删除项目的完整顺序：**
+```
+1. DetectionResult      (外键依赖 ProjectImage + AnnotationTask)
+2. ProjectImage         (外键依赖 Project)
+3. LS Local Storage     (外部系统，通过 API 删除)
+4. LS Project           (外部系统，通过 API 删除)
+5. Project 实体          (JPA delete，级联删除 AnnotationTask)
+```
+
+**重新执行自动标注的清理顺序：**
+```
+1. DetectionResult      (deleteByProjectId)
+2. AnnotationTask       (deleteByProjectId)
+```
+
+### JPQL DELETE/UPDATE 必须加 @Modifying
+
+```java
+// ✅ 正确
+@Modifying
+@Query("DELETE FROM DetectionResult dr WHERE dr.image.project.id = :projectId")
+void deleteByProjectId(@Param("projectId") Long projectId);
+
+// ❌ 错误：缺少 @Modifying，运行时会报错
+@Query("DELETE FROM DetectionResult dr WHERE dr.image.project.id = :projectId")
+void deleteByProjectId(@Param("projectId") Long projectId);
+```
+
+### DTO 字段映射
+
+实体新增字段后，必须同步更新 Response DTO 和转换方法。前后端字段名不一致时用 `@JsonProperty`：
+
+```java
+// 后端实体字段: lsProjectId
+// 前端期望字段: labelStudioProjectId
+@JsonProperty("labelStudioProjectId")
+private Long lsProjectId;
+```
+
+### 前端 URL 拼接空值防护
+
+```javascript
+// ✅ 正确：空值判断
+url: img.filePath ? `/api/v1/files/${img.filePath}` : ''
+
+// ❌ 错误：可能拼出 /api/v1/files/undefined
+url: `/api/v1/files/${img.filePath}`
+```
+
+### Label Studio API 注意事项
+
+| API | 行为 |
+|-----|------|
+| `GET /api/projects/{id}/tasks` | 空项目返回 **404**，有 tasks 返回 **JSON 数组**（非对象） |
+| `DELETE /api/projects/{id}` | **不会**自动删除关联的 local storage |
+| `GET /api/storages/localfiles?project={id}` | 获取项目 local storage 列表 |
+| `DELETE /api/storages/localfiles/{id}` | 删除单个 local storage |

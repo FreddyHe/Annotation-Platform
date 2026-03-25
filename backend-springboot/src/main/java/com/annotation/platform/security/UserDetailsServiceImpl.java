@@ -19,8 +19,19 @@ public class UserDetailsServiceImpl implements UserDetailsService {
 
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        User user = userRepository.findByUsernameAndIsActiveTrue(username)
-                .orElseThrow(() -> new UsernameNotFoundException("用户不存在: " + username));
+        User user;
+        
+        // 支持使用邮箱或用户名登录
+        if (username.contains("@")) {
+            // 如果包含@符号，当作邮箱处理
+            user = userRepository.findByEmail(username)
+                    .filter(User::getIsActive)
+                    .orElseThrow(() -> new UsernameNotFoundException("用户不存在或未激活: " + username));
+        } else {
+            // 否则当作用户名处理
+            user = userRepository.findByUsernameAndIsActiveTrue(username)
+                    .orElseThrow(() -> new UsernameNotFoundException("用户不存在或未激活: " + username));
+        }
 
         return org.springframework.security.core.userdetails.User.builder()
                 .username(user.getUsername())

@@ -27,11 +27,11 @@
     <el-card class="panel">
       <template #header><span class="card-title">参数配置</span></template>
       <div class="config-item">
-        <el-switch v-model="enableVlmCleaning" active-text="开启 VLM 智能清洗" inactive-text="关闭 VLM 智能清洗" />
+        <el-switch v-model="enableVlmCleaning" :disabled="isButtonDisabled" active-text="开启 VLM 智能清洗" inactive-text="关闭 VLM 智能清洗" />
         <span class="config-hint">开启后将使用 VLM 模型对 DINO 检测结果进行智能清洗和验证</span>
       </div>
       <div class="config-item" style="margin-top: 16px;">
-        <el-radio-group v-model="processRange">
+        <el-radio-group v-model="processRange" :disabled="isButtonDisabled">
           <el-radio label="all">全部图片</el-radio>
           <el-radio label="unprocessed">未处理图片</el-radio>
         </el-radio-group>
@@ -41,46 +41,167 @@
     <el-card class="panel">
       <template #header><span class="card-title">操作</span></template>
       <div class="action-center">
-        <el-button type="primary" size="large" :icon="VideoPlay" :loading="isStarting" @click="startAutoAnnotation">
-          启动一键自动标注
+        <el-button 
+          type="primary" 
+          size="large" 
+          :icon="VideoPlay" 
+          :loading="isStarting" 
+          :disabled="isButtonDisabled"
+          @click="startAutoAnnotation"
+        >
+          {{ buttonText }}
         </el-button>
-        <p class="action-hint">点击按钮开始全自动标注流程（DINO 检测 + VLM 清洗）</p>
+        <p class="action-hint">{{ actionHint }}</p>
       </div>
     </el-card>
 
-    <el-card class="panel">
-      <template #header><span class="card-title">任务列表</span></template>
-      <TaskList :project-id="project.id" />
+    <!-- Progress Section -->
+    <el-card v-if="showProgress" class="panel progress-panel">
+      <template #header>
+        <div class="progress-header">
+          <span class="card-title">标注进度</span>
+          <el-tag v-if="isCompleted" type="success" size="small">已完成</el-tag>
+          <el-tag v-else-if="isFailed" type="danger" size="small">失败</el-tag>
+          <el-tag v-else type="primary" size="small">进行中</el-tag>
+        </div>
+      </template>
+      
+      <div class="progress-content">
+        <div class="progress-info">
+          <span class="progress-label">{{ currentStepText }}</span>
+          <span class="progress-percent">{{ progressPercent }}%</span>
+        </div>
+        <el-progress 
+          :percentage="progressPercent" 
+          :status="isCompleted ? 'success' : (isFailed ? 'exception' : undefined)"
+          :stroke-width="12"
+        />
+        
+        <div v-if="isCompleted" class="completion-notice">
+          <el-alert 
+            title="自动标注已完成！" 
+            type="success" 
+            :closable="false"
+            description="请前往 Label Studio 查看标注结果。"
+          />
+        </div>
+
+        <div v-if="isFailed" class="error-notice">
+          <el-alert 
+            title="标注过程出现错误" 
+            type="error" 
+            :closable="false"
+            description="请查看后端日志获取详细错误信息。"
+          />
+        </div>
+      </div>
     </el-card>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { VideoPlay } from '@element-plus/icons-vue'
 import { autoAnnotationAPI } from '@/api'
-import TaskList from '@/components/TaskList.vue'
 
 const props = defineProps({ project: { type: Object, required: true } })
 const emit = defineEmits(['refresh'])
+
 const isStarting = ref(false)
 const enableVlmCleaning = ref(true)
 const processRange = ref('all')
+
+// 基于 project.status 计算按钮是否禁用
+const isButtonDisabled = computed(() => {
+  const processingStatuses = ['DETECTING', 'CLEANING', 'SYNCING', 'UPLOADING']
+  return processingStatuses.includes(props.project.status) || isStarting.value
+})
+
+// 基于 project.status 计算按钮文字
+const buttonText = computed(() => {
+  switch (props.project.status) {
+    case 'DETECTING': return 'DINO检测中...'
+    case 'CLEANING': return 'VLM清洗中...'
+    case 'SYNCING': return '同步到Label Studio中...'
+    case 'COMPLETED': return '重新执行自动标注'
+    case 'FAILED': return '重新执行自动标注'
+    default: return '启动一键自动标注'
+  }
+})
+
+// 基于 project.status 计算提示文字
+const actionHint = computed(() => {
+  const processingStatuses = ['DETECTING', 'CLEANING', 'SYNCING', 'UPLOADING']
+  if (processingStatuses.includes(props.project.status)) {
+    return '标注正在后台执行，请耐心等待...'
+  }
+  if (props.project.status === 'COMPLETED') {
+    return '上次标注已完成，可以重新执行'
+  }
+  return '点击按钮开始全自动标注流程（DINO 检测 + VLM 清洗）'
+})
+
+// 是否显示进度卡片
+const showProgress = computed(() => {
+  return ['DETECTING', 'CLEANING', 'SYNCING', 'COMPLETED', 'FAILED'].includes(props.project.status)
+})
+
+// 进度百分比
+const progressPercent = computed(() => {
+  const map = { 
+    'UPLOADING': 10,
+    'DETECTING': 30, 
+    'CLEANING': 60, 
+    'SYNCING': 85, 
+    'COMPLETED': 100, 
+    'FAILED': 0 
+  }
+  return map[props.project.status] || 0
+})
+
+// 当前步骤文字
+const currentStepText = computed(() => {
+  const map = {
+    'UPLOADING': '上传图片中...',
+    'DETECTING': 'DINO 检测中...',
+    'CLEANING': 'VLM 智能清洗中...',
+    'SYNCING': '同步到 Label Studio...',
+    'COMPLETED': '自动标注已完成！',
+    'FAILED': '标注失败'
+  }
+  return map[props.project.status] || ''
+})
+
+// 是否已完成
+const isCompleted = computed(() => props.project.status === 'COMPLETED')
+
+// 是否失败
+const isFailed = computed(() => props.project.status === 'FAILED')
 
 const startAutoAnnotation = async () => {
   try {
     isStarting.value = true
     await ElMessageBox.confirm(
-      `即将启动一键自动标注流程：\n- 项目：${props.project.name}\n- 类别数：${props.project.labels?.length || 0}\n- 范围：${processRange.value === 'all' ? '全部图片' : '未处理图片'}\n- VLM 清洗：${enableVlmCleaning.value ? '开启' : '关闭'}\n\n此操作将在后台异步执行，是否继续？`,
-      '确认启动', { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning', distinguishCancelAndClose: true }
+      `即将启动一键自动标注流程：\n- 项目：${props.project.name}\n- 类别数：${props.project.labels?.length || 0}\n- 范围：${processRange.value === 'all' ? '全部图片' : '未处理图片'}\n- VLM 清洗：${enableVlmCleaning.value ? '开启' : '关闭'}\n\n此操作将在后台执行，请勿关闭页面。`,
+      '确认启动', 
+      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning', distinguishCancelAndClose: true }
     )
-    const response = await autoAnnotationAPI.startAutoAnnotation(props.project.id)
-    ElMessage.success({ message: response.message || '自动标注已启动！', duration: 3000 })
+    
+    await autoAnnotationAPI.startAutoAnnotation(props.project.id, { processRange: processRange.value })
+    
+    ElMessage.success({ message: '自动标注已启动！', duration: 3000 })
+    
+    // 触发父组件刷新项目数据，这样 project.status 会更新
     emit('refresh')
+    
   } catch (error) {
-    if (error !== 'cancel' && error !== 'close') { ElMessage.error('启动自动标注失败：' + (error.message || '未知错误')) }
-  } finally { isStarting.value = false }
+    if (error !== 'cancel' && error !== 'close') {
+      ElMessage.error('启动自动标注失败：' + (error.message || '未知错误'))
+    }
+  } finally {
+    isStarting.value = false
+  }
 }
 </script>
 
@@ -99,4 +220,13 @@ const startAutoAnnotation = async () => {
 .config-hint { display: block; font-size: 12px; color: var(--gray-400); margin-top: 6px; }
 .action-center { text-align: center; padding: 12px 0; }
 .action-hint { margin: 12px 0 0; font-size: 12px; color: var(--gray-400); }
+
+.progress-panel { }
+.progress-header { display: flex; justify-content: space-between; align-items: center; }
+.progress-content { }
+.progress-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.progress-label { font-size: 14px; color: var(--gray-700); font-weight: 500; }
+.progress-percent { font-size: 18px; color: var(--brand-600); font-weight: 600; }
+.completion-notice { margin-top: 20px; }
+.error-notice { margin-top: 20px; }
 </style>

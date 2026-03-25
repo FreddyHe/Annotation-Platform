@@ -22,6 +22,7 @@ import org.springframework.web.client.RestTemplate;
 import java.sql.*;
 import java.io.File;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -49,8 +50,7 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
     private final UserRepository userRepository;
     private final ProjectRepository projectRepository;
     private final OrganizationRepository organizationRepository;
-
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
 
     @Override
     public String getLoginUrl(Long userId, String returnUrl) {
@@ -59,9 +59,11 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
 
         String lsToken = createLSToken(userId);
 
-        String loginUrl = String.format("%s/api/auth/login?token=%s", labelStudioPublicUrl, lsToken);
+        String loginUrl;
         if (returnUrl != null && !returnUrl.isBlank()) {
-            loginUrl += "&next=" + returnUrl;
+            loginUrl = String.format("%s%s?token=%s", labelStudioPublicUrl, returnUrl, lsToken);
+        } else {
+            loginUrl = String.format("%s/projects?token=%s", labelStudioPublicUrl, lsToken);
         }
 
         log.info("生成 Label Studio 登录链接: userId={}, loginUrl={}", userId, loginUrl);
@@ -262,7 +264,12 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
                 lsToken = adminToken;
             }
 
-            String labelConfig = generateLabelConfig(project.getLabels());
+            // 关键日志：检查项目标签列表
+            List<String> projectLabels = project.getLabels();
+            log.info("[DEBUG] syncProjectToLS - project.getLabels() 返回值: {}", projectLabels);
+            
+            String labelConfig = generateLabelConfig(projectLabels);
+            log.info("[DEBUG] syncProjectToLS - 生成的 label_config XML:\n{}", labelConfig);
 
             if (organization.getLsOrgId() != null && createdBy != null && createdBy.getLsUserId() != null) {
                 updateUserActiveOrganizationInLSDB(createdBy.getLsUserId(), organization.getLsOrgId());
@@ -279,6 +286,8 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
             projectData.put("title", project.getName());
             projectData.put("description", "Project from Annotation Platform");
             projectData.put("label_config", labelConfig);
+            
+            log.info("[DEBUG] syncProjectToLS - 发送到 Label Studio 的完整 projectData: {}", JSON.toJSONString(projectData));
             if (organization.getLsOrgId() != null) {
                 projectData.put("organization", organization.getLsOrgId());
             }
@@ -311,6 +320,48 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
     }
 
     @Override
+    public void deleteLocalStorageByProject(Long lsProjectId, Long userId) {
+        try {
+            String lsToken = getUserLsToken(userId);
+            if (lsToken == null) {
+                log.warn("无法获取用户 Token，跳过 storage 清理: userId={}", userId);
+                return;
+            }
+
+            // 1. 获取该项目的所有 local storage
+            String listUrl = String.format("%s/api/storages/localfiles?project=%d", labelStudioUrl, lsProjectId);
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Authorization", "Token " + lsToken);
+            HttpEntity<String> entity = new HttpEntity<>(headers);
+
+            ResponseEntity<List> response = restTemplate.exchange(listUrl, HttpMethod.GET, entity, List.class);
+            List<Map<String, Object>> storages = response.getBody();
+
+            if (storages == null || storages.isEmpty()) {
+                log.info("项目无 local storage 需要清理: lsProjectId={}", lsProjectId);
+                return;
+            }
+
+            // 2. 逐个删除 storage
+            for (Map<String, Object> storage : storages) {
+                Object storageIdObj = storage.get("id");
+                if (storageIdObj != null) {
+                    Long storageId = ((Number) storageIdObj).longValue();
+                    String deleteUrl = String.format("%s/api/storages/localfiles/%d", labelStudioUrl, storageId);
+                    try {
+                        restTemplate.exchange(deleteUrl, HttpMethod.DELETE, entity, String.class);
+                        log.info("已删除 local storage: storageId={}, lsProjectId={}", storageId, lsProjectId);
+                    } catch (Exception e) {
+                        log.warn("删除 local storage 失败: storageId={}, error={}", storageId, e.getMessage());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("清理 local storage 失败: lsProjectId={}, error={}", lsProjectId, e.getMessage());
+        }
+    }
+
+    @Override
     public void deleteProject(Long lsProjectId, Long userId) {
         try {
             String lsToken = getUserLsToken(userId);
@@ -335,6 +386,46 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
         } catch (Exception e) {
             log.warn("Label Studio 删除项目失败: lsProjectId={}, error={}", lsProjectId, e.getMessage());
             throw e;
+        }
+    }
+
+    @Override
+    public void updateProjectLabelConfig(Long lsProjectId, List<String> labels, Long userId) {
+        try {
+            String lsToken = getUserLsToken(userId);
+            if (lsToken == null) {
+                log.warn("无法获取用户 Token，跳过 label_config 更新: userId={}", userId);
+                return;
+            }
+
+            String labelConfig = generateLabelConfig(labels);
+            log.info("[DEBUG] updateProjectLabelConfig - lsProjectId={}, 新标签列表: {}", lsProjectId, labels);
+            log.info("[DEBUG] updateProjectLabelConfig - 生成的新 label_config:\n{}", labelConfig);
+
+            String url = String.format("%s/api/projects/%d", labelStudioUrl, lsProjectId);
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("Authorization", "Token " + lsToken);
+
+            Map<String, Object> updateData = new HashMap<>();
+            updateData.put("label_config", labelConfig);
+
+            HttpEntity<String> entity = new HttpEntity<>(JSON.toJSONString(updateData), headers);
+            ResponseEntity<String> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.PATCH,
+                    entity,
+                    String.class
+            );
+
+            if (response.getStatusCode() == HttpStatus.OK) {
+                log.info("Label Studio 项目 label_config 更新成功: lsProjectId={}", lsProjectId);
+            } else {
+                log.warn("Label Studio 项目 label_config 更新失败: lsProjectId={}, status={}", lsProjectId, response.getStatusCode());
+            }
+
+        } catch (Exception e) {
+            log.error("更新 Label Studio 项目 label_config 失败: lsProjectId={}, error={}", lsProjectId, e.getMessage(), e);
         }
     }
 
@@ -511,8 +602,18 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
                     payload.put("model_version", "vlm_cleaned_v1");
                     payload.put("score", avgScore);
 
-                    log.info("导入预测: taskId={}, imageName={}, resultCount={}, score={}", 
+                    log.info("[DEBUG] importPredictions - taskId={}, imageName={}, resultCount={}, score={}", 
                             task.get("id"), imageName, results.size(), avgScore);
+                    log.info("[DEBUG] importPredictions - 完整 payload: {}", JSON.toJSONString(payload));
+                    
+                    // 额外打印每个 result 的 rectanglelabels
+                    for (int i = 0; i < results.size(); i++) {
+                        Map<String, Object> result = results.get(i);
+                        Map<String, Object> value = (Map<String, Object>) result.get("value");
+                        if (value != null && value.containsKey("rectanglelabels")) {
+                            log.info("[DEBUG] importPredictions - result[{}].rectanglelabels: {}", i, value.get("rectanglelabels"));
+                        }
+                    }
 
                     HttpEntity<String> entity = new HttpEntity<>(JSON.toJSONString(payload), headers);
                     ResponseEntity<String> response = restTemplate.exchange(
@@ -746,7 +847,10 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
     }
 
     private String generateLabelConfig(List<String> labels) {
+        log.info("[DEBUG] generateLabelConfig - 输入 labels: {}", labels);
+        
         if (labels == null || labels.isEmpty()) {
+            log.warn("[DEBUG] generateLabelConfig - labels 为空，返回空配置");
             return "<View></View>";
         }
 
@@ -762,13 +866,17 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
 
         for (int i = 0; i < labels.size(); i++) {
             String color = colors[i % colors.length];
-            sb.append("    <Label value=\"").append(labels.get(i)).append("\" background=\"").append(color).append("\"/>\n");
+            String labelValue = labels.get(i);
+            log.info("[DEBUG] generateLabelConfig - 添加标签: value={}, color={}", labelValue, color);
+            sb.append("    <Label value=\"").append(labelValue).append("\" background=\"").append(color).append("\"/>\n");
         }
 
         sb.append("  </RectangleLabels>\n");
         sb.append("</View>");
-
-        return sb.toString();
+        
+        String result = sb.toString();
+        log.info("[DEBUG] generateLabelConfig - 生成的完整 XML:\n{}", result);
+        return result;
     }
 
     private void updateOrganizationCreatedByInLSDB(Long lsOrgId, Long lsUserId) {
@@ -895,5 +1003,202 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
             log.error("生成密码哈希失败: {}", e.getMessage());
             return null;
         }
+    }
+
+    @Override
+    public Map<String, Object> getProjectReviewStats(Long lsProjectId, Long userId) {
+        try {
+            String lsToken = getUserLsToken(userId);
+            if (lsToken == null) {
+                log.warn("无法获取用户 Token，跳过获取审核统计: userId={}", userId);
+                return createEmptyReviewStats();
+            }
+
+            // 获取项目的所有任务
+            String url = String.format("%s/api/projects/%d/tasks", labelStudioUrl, lsProjectId);
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Authorization", "Token " + lsToken);
+
+            HttpEntity<String> entity = new HttpEntity<>(headers);
+            ResponseEntity<String> response;
+            try {
+                response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+            } catch (org.springframework.web.client.HttpClientErrorException.NotFound e404) {
+                log.warn("LS项目尚无任务(404-stats): lsProjectId={}", lsProjectId);
+                return createEmptyReviewStats();
+            }
+
+
+            if (response.getStatusCode() == HttpStatus.OK) {
+                String body = response.getBody();
+                com.alibaba.fastjson2.JSONArray tasks;
+                if (body != null && body.trim().startsWith("[")) {
+                    tasks = JSON.parseArray(body);
+                } else {
+                    JSONObject responseData = JSON.parseObject(body);
+                    tasks = responseData.getJSONArray("tasks");
+                }
+                
+                int totalTasks = tasks != null ? tasks.size() : 0;
+                int reviewedTasks = 0;
+                int pendingTasks = 0;
+
+                if (tasks != null) {
+                    for (int i = 0; i < tasks.size(); i++) {
+                        JSONObject task = tasks.getJSONObject(i);
+                        // 检查是否有 annotations 且 annotations 不为空
+                        com.alibaba.fastjson2.JSONArray annotations = task.getJSONArray("annotations");
+                        if (annotations != null && !annotations.isEmpty()) {
+                            reviewedTasks++;
+                        } else {
+                            pendingTasks++;
+                        }
+                    }
+                }
+
+                Map<String, Object> stats = new HashMap<>();
+                stats.put("totalTasks", totalTasks);
+                stats.put("reviewedTasks", reviewedTasks);
+                stats.put("pendingTasks", pendingTasks);
+                
+                log.info("获取审核统计成功: lsProjectId={}, total={}, reviewed={}, pending={}", 
+                    lsProjectId, totalTasks, reviewedTasks, pendingTasks);
+                
+                return stats;
+            } else {
+                log.warn("获取审核统计失败: lsProjectId={}, status={}", lsProjectId, response.getStatusCode());
+                return createEmptyReviewStats();
+            }
+        } catch (Exception e) {
+            log.error("获取审核统计失败: lsProjectId={}, error={}", lsProjectId, e.getMessage(), e);
+            return createEmptyReviewStats();
+        }
+    }
+
+    @Override
+    public Map<String, Object> getProjectReviewResults(Long lsProjectId, Long userId) {
+        try {
+            String lsToken = getUserLsToken(userId);
+            if (lsToken == null) {
+                log.warn("无法获取用户 Token，跳过获取审核结果: userId={}", userId);
+                return createEmptyReviewResults();
+            }
+
+            // 获取项目的所有任务
+            String url = String.format("%s/api/projects/%d/tasks", labelStudioUrl, lsProjectId);
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Authorization", "Token " + lsToken);
+
+            HttpEntity<String> entity = new HttpEntity<>(headers);
+            ResponseEntity<String> response;
+            try {
+                response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+            } catch (org.springframework.web.client.HttpClientErrorException.NotFound e404) {
+                log.warn("LS项目尚无任务(404-results): lsProjectId={}", lsProjectId);
+                return createEmptyReviewResults();
+            }
+
+
+            if (response.getStatusCode() == HttpStatus.OK) {
+                String body = response.getBody();
+                com.alibaba.fastjson2.JSONArray tasks;
+                if (body != null && body.trim().startsWith("[")) {
+                    tasks = JSON.parseArray(body);
+                } else {
+                    JSONObject responseData = JSON.parseObject(body);
+                    tasks = responseData.getJSONArray("tasks");
+                }
+
+
+                List<Map<String, Object>> taskList = new ArrayList<>();
+                
+                if (tasks != null) {
+                    for (int i = 0; i < tasks.size(); i++) {
+                        JSONObject task = tasks.getJSONObject(i);
+                        
+                        Map<String, Object> taskInfo = new HashMap<>();
+                        taskInfo.put("taskId", task.getLong("id"));
+                        
+                        // 获取图片名称
+                        JSONObject data = task.getJSONObject("data");
+                        String imagePath = data != null ? data.getString("image") : "";
+                        String imageName = imagePath.substring(imagePath.lastIndexOf("/") + 1);
+                        taskInfo.put("imageName", imageName);
+                        
+                        // 检查是否已审核
+                        com.alibaba.fastjson2.JSONArray annotations = task.getJSONArray("annotations");
+                        boolean isReviewed = annotations != null && !annotations.isEmpty();
+                        taskInfo.put("isReviewed", isReviewed);
+                        
+                        // 获取标注数量
+                        int annotationCount = 0;
+                        String completedAt = null;
+                        String annotatedBy = null;
+                        
+                        if (isReviewed) {
+                            JSONObject annotation = annotations.getJSONObject(0);
+                            com.alibaba.fastjson2.JSONArray results = annotation.getJSONArray("result");
+                            annotationCount = results != null ? results.size() : 0;
+                            completedAt = annotation.getString("created_at");
+                            
+                            // 获取审核人信息
+                            Integer completedById = annotation.getInteger("completed_by");
+                            if (completedById != null) {
+                                annotatedBy = getUserEmailById(completedById.longValue());
+                            }
+                        }
+                        
+                        taskInfo.put("annotationCount", annotationCount);
+                        taskInfo.put("completedAt", completedAt);
+                        taskInfo.put("annotatedBy", annotatedBy);
+                        
+                        taskList.add(taskInfo);
+                    }
+                }
+
+                Map<String, Object> result = new HashMap<>();
+                result.put("tasks", taskList);
+                
+                log.info("获取审核结果成功: lsProjectId={}, taskCount={}", lsProjectId, taskList.size());
+                
+                return result;
+            } else {
+                log.warn("获取审核结果失败: lsProjectId={}, status={}", lsProjectId, response.getStatusCode());
+                return createEmptyReviewResults();
+            }
+        } catch (Exception e) {
+            log.error("获取审核结果失败: lsProjectId={}, error={}", lsProjectId, e.getMessage(), e);
+            return createEmptyReviewResults();
+        }
+    }
+
+    private Map<String, Object> createEmptyReviewStats() {
+        Map<String, Object> stats = new HashMap<>();
+        stats.put("totalTasks", 0);
+        stats.put("reviewedTasks", 0);
+        stats.put("pendingTasks", 0);
+        return stats;
+    }
+
+    private Map<String, Object> createEmptyReviewResults() {
+        Map<String, Object> result = new HashMap<>();
+        result.put("tasks", new ArrayList<>());
+        return result;
+    }
+
+    private String getUserEmailById(Long lsUserId) {
+        String sql = "SELECT email FROM htx_user WHERE id = ?";
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + labelStudioDbPath);
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setLong(1, lsUserId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getString("email");
+                }
+            }
+        } catch (SQLException e) {
+            log.error("从 Label Studio 数据库读取用户邮箱失败: lsUserId={}, error={}", lsUserId, e.getMessage(), e);
+        }
+        return null;
     }
 }

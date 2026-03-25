@@ -253,3 +253,50 @@ pkill -f "dino_model_server"
 pkill -f "uvicorn"
 ```
 
+
+## Label Studio 排查命令（2026-03-25 新增）
+
+### 查看 LS 日志错误
+```bash
+tail -100 /tmp/labelstudio.log | grep -E "ERROR|WARNING|500"
+```
+
+### 查找孤立的 storage 记录（关联项目已删除）
+```bash
+sqlite3 /root/.local/share/label-studio/label_studio.sqlite3 \
+  "SELECT m.id, m.path, i.project_id FROM io_storages_localfilesmixin m JOIN io_storages_localfilesimportstorage i ON m.id = i.localfilesmixin_ptr_id LEFT JOIN project p ON i.project_id = p.id WHERE p.id IS NULL;"
+```
+
+### 查看 local storage 与项目的关联关系
+```bash
+sqlite3 /root/.local/share/label-studio/label_studio.sqlite3 \
+  "SELECT m.id, m.path, i.project_id, p.title FROM io_storages_localfilesmixin m JOIN io_storages_localfilesimportstorage i ON m.id = i.localfilesmixin_ptr_id LEFT JOIN project p ON i.project_id = p.id ORDER BY m.id DESC LIMIT 10;"
+```
+
+### 手动测试 Label Studio API
+```bash
+# 获取 LS 用户 token（替换 user_id）
+sqlite3 /root/.local/share/label-studio/label_studio.sqlite3 "SELECT key FROM authtoken_token WHERE user_id=24;"
+
+# 测试项目是否存在
+curl -s -w "\n%{http_code}" -H "Authorization: Token <TOKEN>" "http://localhost:5001/api/projects/44/"
+
+# 测试 tasks API（空项目返回 404，有 tasks 返回 JSON 数组）
+curl -s -w "\n%{http_code}" -H "Authorization: Token <TOKEN>" "http://localhost:5001/api/projects/44/tasks"
+
+# 测试 local storage 列表
+curl -s -H "Authorization: Token <TOKEN>" "http://localhost:5001/api/storages/localfiles?project=44"
+```
+
+### 清理孤立 storage 记录（谨慎操作）
+```bash
+# 先查出孤立记录的 ID
+sqlite3 /root/.local/share/label-studio/label_studio.sqlite3 \
+  "SELECT m.id FROM io_storages_localfilesmixin m JOIN io_storages_localfilesimportstorage i ON m.id = i.localfilesmixin_ptr_id LEFT JOIN project p ON i.project_id = p.id WHERE p.id IS NULL;"
+
+# 删除（替换 ID 列表）
+sqlite3 /root/.local/share/label-studio/label_studio.sqlite3 \
+  "DELETE FROM io_storages_localfilesimportstorage WHERE localfilesmixin_ptr_id IN (1, 2, 12, 13, 14);"
+sqlite3 /root/.local/share/label-studio/label_studio.sqlite3 \
+  "DELETE FROM io_storages_localfilesmixin WHERE id IN (1, 2, 12, 13, 14);"
+```

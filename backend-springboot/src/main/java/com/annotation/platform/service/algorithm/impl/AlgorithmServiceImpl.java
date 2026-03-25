@@ -34,8 +34,7 @@ public class AlgorithmServiceImpl implements AlgorithmService {
     private String uploadBasePath;
 
     private final UserModelConfigService userModelConfigService;
-
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
 
     @Override
     @SuppressWarnings("unchecked")

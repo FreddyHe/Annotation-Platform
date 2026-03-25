@@ -36,7 +36,7 @@ const loadImages = async () => {
     const response = await projectAPI.getProjectImages(props.projectId, { page: currentPage.value, size: pageSize.value })
     console.log('【Debug】真实的图片接口返回:', response)
     const rawData = response.data?.images || []
-    images.value = rawData.map(img => ({ ...img, url: `/api/v1/files/${img.filePath}`, name: img.fileName, processed: img.status === 'COMPLETED' || img.status === 'PROCESSING' }))
+    images.value = rawData.map(img => ({ ...img, url: img.filePath ? `/api/v1/files/${img.filePath}` : '', name: img.fileName, processed: img.status === 'COMPLETED' || img.status === 'PROCESSING' }))
     total.value = response.data?.total || 0
   } catch (error) { ElMessage.error('加载图片列表失败') } finally { loading.value = false }
 }

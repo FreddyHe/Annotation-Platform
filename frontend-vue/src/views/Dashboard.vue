@@ -165,7 +165,6 @@ onMounted(() => {
 
 <style scoped>
 .dashboard {
-  max-width: 1200px;
 }
 
 .page-title {

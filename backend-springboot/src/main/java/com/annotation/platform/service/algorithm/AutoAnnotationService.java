@@ -109,6 +109,15 @@ public class AutoAnnotationService {
                 throw new RuntimeException("项目未定义标签: " + projectId);
             }
             
+            // 如果 labelDefinitions 为空，根据 labels 构建默认定义
+            if (labelDefinitions == null || labelDefinitions.isEmpty()) {
+                labelDefinitions = new java.util.HashMap<>();
+                for (String label : labels) {
+                    labelDefinitions.put(label, "标准定义的 " + label);
+                }
+                log.info("Auto-generated label definitions for project {}: {}", projectId, labelDefinitions);
+            }
+            
             log.info("Project: {}, Images: {}, Labels: {}", projectId, imagePaths.size(), labels);
             
             // 更新项目状态为 DETECTING

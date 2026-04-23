@@ -45,6 +45,9 @@ public class ProjectController {
     private final UserRepository userRepository;
     private final LabelStudioProxyService labelStudioProxyService;
     private final com.annotation.platform.repository.DetectionResultRepository detectionResultRepository;
+    private final com.annotation.platform.service.TrainingService trainingService;
+    private final com.annotation.platform.service.ModelTestService modelTestService;
+    private final com.annotation.platform.repository.ModelTrainingRecordRepository modelTrainingRecordRepository;
 
     @PostMapping
     public Result<ProjectDetailResponse> createProject(
@@ -703,19 +706,48 @@ public class ProjectController {
             );
         }
         
-        Long userId = (Long) httpRequest.getAttribute("userId");
+        User user = (User) httpRequest.getAttribute("user");
+        Long userId = user.getId();
         
-        // 返回模拟的训练状态
-        java.util.Map<String, Object> trainingStatus = new java.util.HashMap<>();
-        trainingStatus.put("status", "PREPARING");
-        trainingStatus.put("message", "训练任务已创建，正在准备数据...");
-        trainingStatus.put("modelName", config.get("modelName"));
-        trainingStatus.put("totalEpochs", config.get("epochs"));
-        trainingStatus.put("currentEpoch", 0);
-        
-        log.info("训练启动成功: projectId={}, modelName={}", id, config.get("modelName"));
-        
-        return Result.success(trainingStatus);
+        try {
+            Integer epochs = config.get("epochs") != null ? ((Number) config.get("epochs")).intValue() : 100;
+            Integer batchSize = config.get("batchSize") != null ? ((Number) config.get("batchSize")).intValue() : 16;
+            Integer imageSize = config.get("imageSize") != null ? ((Number) config.get("imageSize")).intValue() : 640;
+            String modelType = config.get("modelType") != null ? (String) config.get("modelType") : "yolov8n";
+            String device = config.get("device") != null ? (String) config.get("device") : "0";
+            
+            com.annotation.platform.entity.ModelTrainingRecord record = trainingService.startTraining(
+                    userId,
+                    id,
+                    String.valueOf(project.getLsProjectId()),
+                    user.getLsToken(),
+                    epochs,
+                    batchSize,
+                    imageSize,
+                    modelType,
+                    device
+            );
+            
+            java.util.Map<String, Object> trainingStatus = new java.util.HashMap<>();
+            trainingStatus.put("status", "PREPARING");
+            trainingStatus.put("message", "训练任务已创建，正在准备数据...");
+            trainingStatus.put("modelName", config.get("modelName"));
+            trainingStatus.put("totalEpochs", epochs);
+            trainingStatus.put("currentEpoch", 0);
+            trainingStatus.put("recordId", record.getId());
+            trainingStatus.put("taskId", record.getTaskId());
+            
+            log.info("训练启动成功: projectId={}, modelName={}, taskId={}", id, config.get("modelName"), record.getTaskId());
+            
+            return Result.success(trainingStatus);
+        } catch (Exception e) {
+            log.error("启动训练失败: projectId={}, error={}", id, e.getMessage(), e);
+            java.util.Map<String, Object> errorStatus = new java.util.HashMap<>();
+            errorStatus.put("status", "FAILED");
+            errorStatus.put("message", "启动训练失败: " + e.getMessage());
+            errorStatus.put("errorMessage", e.getMessage());
+            return Result.success(errorStatus);
+        }
     }
 
     @GetMapping("/{id}/training/status")
@@ -723,15 +755,79 @@ public class ProjectController {
             @PathVariable Long id,
             HttpServletRequest httpRequest) {
         
-        log.info("获取训练状态: projectId={}", id);
+        log.debug("获取训练状态: projectId={}", id);
         
         Project project = projectRepository.findById(id)
                 .orElseThrow(() -> new com.annotation.platform.exception.ResourceNotFoundException("Project", "id", id));
         
-        // 返回模拟的训练状态（实际应该从数据库或训练服务获取）
+        // 查询该项目最新的训练记录
+        java.util.List<com.annotation.platform.entity.ModelTrainingRecord> records = 
+                modelTrainingRecordRepository.findByProjectIdOrderByCreatedAtDesc(id);
+        
         java.util.Map<String, Object> trainingStatus = new java.util.HashMap<>();
-        trainingStatus.put("status", "IDLE");
-        trainingStatus.put("message", "暂无训练任务");
+        
+        if (records.isEmpty()) {
+            trainingStatus.put("status", "IDLE");
+            trainingStatus.put("message", "暂无训练任务");
+            return Result.success(trainingStatus);
+        }
+        
+        com.annotation.platform.entity.ModelTrainingRecord latest = trainingService.refreshTrainingRecord(records.get(0));
+        java.util.Map<String, Object> algorithmStatus = trainingService.getAlgorithmTrainingStatus(latest.getTaskId());
+        
+        switch (latest.getStatus()) {
+            case PENDING:
+                trainingStatus.put("status", "PREPARING");
+                trainingStatus.put("message", "正在准备训练数据...");
+                break;
+            case RUNNING:
+                trainingStatus.put("status", "TRAINING");
+                trainingStatus.put("message", "训练进行中...");
+                trainingStatus.put("currentEpoch", toInt(algorithmStatus.get("processed_images"), 0));
+                java.util.Map<String, Double> runningLoss = trainingService.getFinalLossSummary(latest);
+                if (runningLoss.get("finalTrainLoss") != null) {
+                    trainingStatus.put("trainLoss", runningLoss.get("finalTrainLoss"));
+                }
+                if (runningLoss.get("finalValLoss") != null) {
+                    trainingStatus.put("valLoss", runningLoss.get("finalValLoss"));
+                }
+                break;
+            case COMPLETED:
+                trainingStatus.put("status", "COMPLETED");
+                trainingStatus.put("message", "训练已完成");
+                trainingStatus.put("map50", latest.getMap50());
+                trainingStatus.put("map5095", latest.getMap50_95());
+                trainingStatus.put("precision", latest.getPrecision());
+                trainingStatus.put("recall", latest.getRecall());
+                trainingStatus.put("modelPath", latest.getBestModelPath());
+                trainingStatus.putAll(trainingService.getFinalLossSummary(latest));
+                if (latest.getStartedAt() != null && latest.getCompletedAt() != null) {
+                    long durationSeconds = java.time.Duration.between(latest.getStartedAt(), latest.getCompletedAt()).getSeconds();
+                    trainingStatus.put("trainingDuration", durationSeconds);
+                }
+                break;
+            case FAILED:
+                trainingStatus.put("status", "FAILED");
+                trainingStatus.put("message", "训练失败");
+                trainingStatus.put("errorMessage", latest.getErrorMessage());
+                break;
+            case CANCELLED:
+                trainingStatus.put("status", "IDLE");
+                trainingStatus.put("message", "训练已取消");
+                break;
+        }
+        
+        trainingStatus.put("recordId", latest.getId());
+        trainingStatus.put("taskId", latest.getTaskId());
+        trainingStatus.put("totalEpochs", latest.getEpochs());
+        if (!trainingStatus.containsKey("currentEpoch")) {
+            trainingStatus.put("currentEpoch", latest.getStatus() == com.annotation.platform.entity.ModelTrainingRecord.TrainingStatus.COMPLETED ? latest.getEpochs() : 0);
+        }
+        trainingStatus.put("totalImages", latest.getTotalImages());
+        trainingStatus.put("totalAnnotations", latest.getTotalAnnotations());
+        if (latest.getStartedAt() != null) {
+            trainingStatus.put("startedAt", latest.getStartedAt().toString());
+        }
         
         return Result.success(trainingStatus);
     }
@@ -741,6 +837,7 @@ public class ProjectController {
             @PathVariable Long id,
             @RequestParam("image") org.springframework.web.multipart.MultipartFile image,
             @RequestParam(value = "modelId", required = false) String modelId,
+            @RequestParam(value = "modelPath", required = false) String requestedModelPath,
             HttpServletRequest httpRequest) {
         
         log.info("使用训练模型检测: projectId={}, modelId={}", id, modelId);
@@ -749,19 +846,60 @@ public class ProjectController {
                 .orElseThrow(() -> new com.annotation.platform.exception.ResourceNotFoundException("Project", "id", id));
         
         try {
-            // 返回模拟的检测结果（实际应该调用训练好的模型）
+            String modelPath = requestedModelPath;
+            if (modelPath == null || modelPath.isBlank()) {
+                java.util.List<com.annotation.platform.entity.ModelTrainingRecord> records =
+                        modelTrainingRecordRepository.findByProjectIdOrderByCreatedAtDesc(id);
+                modelPath = records.stream()
+                        .filter(record -> record.getStatus() == com.annotation.platform.entity.ModelTrainingRecord.TrainingStatus.COMPLETED)
+                        .map(record -> trainingService.hydrateCompletedRecordFromOutput(record).getBestModelPath())
+                        .filter(path -> path != null && !path.isBlank())
+                        .findFirst()
+                        .orElse(null);
+            }
+            if (modelPath == null || modelPath.isBlank()) {
+                throw new com.annotation.platform.exception.BusinessException("没有找到可用的已训练模型，请先完成一次训练");
+            }
+
+            java.nio.file.Path uploadDir = java.nio.file.Paths.get("/root/autodl-fs/Annotation-Platform/temp_uploads");
+            java.nio.file.Files.createDirectories(uploadDir);
+            String originalName = image.getOriginalFilename() != null ? image.getOriginalFilename() : "test.jpg";
+            String suffix = originalName.contains(".") ? originalName.substring(originalName.lastIndexOf(".")) : ".jpg";
+            java.nio.file.Path tempFile = uploadDir.resolve(java.util.UUID.randomUUID() + suffix);
+            image.transferTo(tempFile.toFile());
+
+            String taskId = modelTestService.startTestWithUpload(
+                    modelPath,
+                    java.util.List.of(tempFile.toFile()),
+                    0.25,
+                    0.45,
+                    "cpu"
+            );
+
+            java.util.Map<String, Object> status = java.util.Map.of();
+            for (int i = 0; i < 60; i++) {
+                Thread.sleep(1000);
+                status = modelTestService.getTestStatus(taskId);
+                String statusText = String.valueOf(status.get("status"));
+                if ("completed".equalsIgnoreCase(statusText)) {
+                    break;
+                }
+                if ("failed".equalsIgnoreCase(statusText)) {
+                    throw new com.annotation.platform.exception.BusinessException("模型测试失败: " + status.get("error_message"));
+                }
+            }
+            if (!"completed".equalsIgnoreCase(String.valueOf(status.get("status")))) {
+                throw new com.annotation.platform.exception.BusinessException("模型测试超时，请稍后重试");
+            }
+
+            java.util.Map<String, Object> rawResults = modelTestService.getTestResults(taskId);
             java.util.Map<String, Object> result = new java.util.HashMap<>();
             List<java.util.Map<String, Object>> detections = new java.util.ArrayList<>();
-            
-            // 模拟检测结果
-            java.util.Map<String, Object> detection1 = new java.util.HashMap<>();
-            detection1.put("label", project.getLabels().get(0));
-            detection1.put("confidence", 0.85);
-            detection1.put("bbox", java.util.Arrays.asList(100, 100, 200, 200));
-            detections.add(detection1);
+            extractDetections(rawResults, detections);
             
             result.put("detections", detections);
-            result.put("imageSize", new int[]{640, 640});
+            result.put("modelPath", modelPath);
+            result.put("taskId", taskId);
             
             log.info("检测完成: projectId={}, detectionCount={}", id, detections.size());
             
@@ -769,6 +907,63 @@ public class ProjectController {
         } catch (Exception e) {
             log.error("检测失败: projectId={}, error={}", id, e.getMessage(), e);
             throw new com.annotation.platform.exception.BusinessException("检测失败: " + e.getMessage());
+        }
+    }
+
+    private int toInt(Object value, int defaultValue) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value != null) {
+            try {
+                return Integer.parseInt(value.toString());
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return defaultValue;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void extractDetections(java.util.Map<String, Object> rawResults, List<java.util.Map<String, Object>> detections) {
+        Object resultsObj = rawResults.get("results");
+        if (!(resultsObj instanceof List<?> taskResults) || taskResults.isEmpty()) {
+            return;
+        }
+        Object first = taskResults.get(0);
+        if (!(first instanceof java.util.Map<?, ?> firstResult)) {
+            return;
+        }
+        Object imageResultsObj = firstResult.get("results");
+        if (!(imageResultsObj instanceof List<?> imageResults) || imageResults.isEmpty()) {
+            return;
+        }
+        Object imageResult = imageResults.get(0);
+        if (!(imageResult instanceof java.util.Map<?, ?> imageResultMap)) {
+            return;
+        }
+        Object detectionsObj = imageResultMap.get("detections");
+        if (!(detectionsObj instanceof List<?> rawDetections)) {
+            return;
+        }
+        for (Object item : rawDetections) {
+            if (!(item instanceof java.util.Map<?, ?> rawDetection)) {
+                continue;
+            }
+            java.util.Map<String, Object> detection = new java.util.HashMap<>();
+            detection.put("label", rawDetection.get("label"));
+            detection.put("confidence", rawDetection.get("confidence"));
+            Object bbox = rawDetection.get("bbox");
+            if (bbox instanceof java.util.Map<?, ?> bboxMap) {
+                detection.put("bbox", java.util.Arrays.asList(
+                        bboxMap.get("x1"),
+                        bboxMap.get("y1"),
+                        bboxMap.get("x2"),
+                        bboxMap.get("y2")
+                ));
+            } else {
+                detection.put("bbox", bbox);
+            }
+            detections.add(detection);
         }
     }
 

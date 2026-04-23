@@ -331,3 +331,22 @@ url: `/api/v1/files/${img.filePath}`
 | `DELETE /api/projects/{id}` | **不会**自动删除关联的 local storage |
 | `GET /api/storages/localfiles?project={id}` | 获取项目 local storage 列表 |
 | `DELETE /api/storages/localfiles/{id}` | 删除单个 local storage |
+
+### 训练 API 路径约定（2026-03-25 新增）
+
+| API | 方法 | 路径 | 说明 |
+|-----|------|------|------|
+| 启动训练 | POST | `/api/v1/projects/{id}/training/start` | 创建训练任务，返回训练状态 |
+| 获取状态 | GET | `/api/v1/projects/{id}/training/status` | 获取当前训练状态和进度 |
+| 模型检测 | POST | `/api/v1/projects/{id}/training/detect` | 上传图片使用训练模型检测 |
+
+**训练状态枚举：**
+- `IDLE` - 空闲状态
+- `PREPARING` - 准备数据中
+- `TRAINING` - 训练中
+- `COMPLETED` - 训练完成
+- `FAILED` - 训练失败
+
+**文件下载处理：**
+- 导出接口返回 `data:` URL，前端需使用 `Blob` 下载
+- 根据格式设置正确的文件扩展名：`.json`、`.txt`、`.xml`、`.csv`

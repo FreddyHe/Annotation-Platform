@@ -24,6 +24,9 @@ public class FormatConverterService {
     @Autowired
     private ProjectLabelRepository projectLabelRepository;
 
+    @Autowired
+    private com.annotation.platform.repository.ProjectRepository projectRepository;
+
     @Value("${label.studio.url:http://localhost:5001}")
     private String labelStudioUrl;
 
@@ -56,36 +59,76 @@ public class FormatConverterService {
 
         List<ProjectLabel> labels = getProjectLabels(projectId);
         Map<String, Integer> labelMap = createLabelMap(labels);
+        
+        // 如果 project_labels 表为空，从 Project 实体的 labels JSON 字段构建
+        if (labelMap.isEmpty()) {
+            com.annotation.platform.entity.Project project = projectRepository.findById(projectId).orElse(null);
+            if (project != null && project.getLabels() != null) {
+                int classId = 0;
+                for (String labelName : project.getLabels()) {
+                    labelMap.put(labelName, classId++);
+                }
+                log.info("Built label map from project.labels: {}", labelMap);
+            }
+        }
 
         JsonNode annotations = fetchLabelStudioAnnotations(labelStudioProjectId, lsToken);
 
         int trainCount = 0;
         int valCount = 0;
         int totalAnnotations = 0;
+        List<Object[]> validTasks = new ArrayList<>();
 
         for (JsonNode task : annotations) {
-            JsonNode annotation = task.get("annotations");
-            if (annotation == null || annotation.size() == 0) {
+            // 优先使用 annotations，如果为空则使用 predictions（自动标注结果）
+            JsonNode annotationArray = task.get("annotations");
+            JsonNode predictionArray = task.get("predictions");
+            
+            JsonNode resultSource = null;
+            if (annotationArray != null && annotationArray.size() > 0) {
+                resultSource = annotationArray.get(0);
+            } else if (predictionArray != null && predictionArray.size() > 0) {
+                resultSource = predictionArray.get(0);
+            }
+            
+            if (resultSource == null) {
                 continue;
             }
-
-            JsonNode latestAnnotation = annotation.get(0);
-            JsonNode results = latestAnnotation.get("result");
+            
+            JsonNode results = resultSource.get("result");
             if (results == null || results.size() == 0) {
                 continue;
             }
 
             String imagePath = task.get("data").get("image").asText();
-            String fileName = Paths.get(imagePath).getFileName().toString();
-
-            Path sourceImage = Paths.get(imagePath);
-            if (!Files.exists(sourceImage)) {
-                log.warn("Image not found: {}", imagePath);
+            
+            // 解析 Label Studio 图片路径
+            // 格式: /data/local-files/?d=uploads/449/filename.jpg
+            Path sourceImage = resolveImagePath(imagePath);
+            if (sourceImage == null || !Files.exists(sourceImage)) {
+                log.warn("Image not found: {} (resolved: {})", imagePath, sourceImage);
                 continue;
             }
+            String fileName = sourceImage.getFileName().toString();
 
-            boolean isTrain = Math.random() < 0.8;
-            String split = isTrain ? "train" : "val";
+            validTasks.add(new Object[]{sourceImage, fileName, results});
+        }
+
+        // 确保至少有 1 张验证图片：取最后 max(1, 20%) 张作为 val
+        int totalValid = validTasks.size();
+        int valCount0 = Math.max(1, (int) Math.round(totalValid * 0.2));
+        if (valCount0 >= totalValid) valCount0 = Math.max(0, totalValid - 1);
+        int trainSplitEnd = totalValid - valCount0;
+
+        // 打乱顺序以保证随机性
+        java.util.Collections.shuffle(validTasks);
+
+        for (int idx = 0; idx < validTasks.size(); idx++) {
+            Object[] item = validTasks.get(idx);
+            Path sourceImage = (Path) item[0];
+            String fileName = (String) item[1];
+            JsonNode results = (JsonNode) item[2];
+            String split = idx < trainSplitEnd ? "train" : "val";
 
             Path targetImage = imagesDir.resolve(split).resolve(fileName);
             Files.copy(sourceImage, targetImage, StandardCopyOption.REPLACE_EXISTING);
@@ -136,7 +179,7 @@ public class FormatConverterService {
 
             Files.write(labelFile, yoloAnnotations);
 
-            if (isTrain) {
+            if ("train".equals(split)) {
                 trainCount++;
             } else {
                 valCount++;
@@ -170,6 +213,38 @@ public class FormatConverterService {
         return projectLabelRepository.findByProjectIdAndIsActive(projectId, true);
     }
 
+    /**
+     * 解析 Label Studio 图片路径为本地文件路径
+     * 支持格式: /data/local-files/?d=uploads/449/filename.jpg
+     */
+    private Path resolveImagePath(String lsImagePath) {
+        if (lsImagePath == null) return null;
+        
+        // 处理 /data/local-files/?d=xxx 格式
+        if (lsImagePath.contains("/data/local-files/")) {
+            int dIdx = lsImagePath.indexOf("?d=");
+            if (dIdx >= 0) {
+                String relativePath = lsImagePath.substring(dIdx + 3);
+                // relativePath = uploads/449/filename.jpg
+                // uploadBasePath = /root/autodl-fs/uploads
+                // 需要去掉 relativePath 中的 "uploads/" 前缀
+                if (relativePath.startsWith("uploads/")) {
+                    relativePath = relativePath.substring("uploads/".length());
+                }
+                return Paths.get(uploadBasePath, relativePath);
+            }
+        }
+        
+        // 处理绝对路径
+        Path absolutePath = Paths.get(lsImagePath);
+        if (absolutePath.isAbsolute()) {
+            return absolutePath;
+        }
+        
+        // 处理相对路径
+        return Paths.get(uploadBasePath, lsImagePath);
+    }
+
     private JsonNode fetchLabelStudioAnnotations(String projectId, String token) throws Exception {
         String url = String.format("%s/api/projects/%s/tasks", labelStudioUrl, projectId);
 
@@ -196,7 +271,14 @@ public class FormatConverterService {
             }
 
             JsonNode responseNode = objectMapper.readTree(response.toString());
-            JsonNode tasksNode = responseNode.get("tasks");
+            
+            // Label Studio API 可能返回直接数组 [...] 或分页对象 {"tasks": [...]}
+            JsonNode tasksNode;
+            if (responseNode.isArray()) {
+                tasksNode = responseNode;
+            } else {
+                tasksNode = responseNode.get("tasks");
+            }
 
             if (tasksNode == null || tasksNode.size() == 0) {
                 break;
@@ -213,6 +295,7 @@ public class FormatConverterService {
             page++;
         }
 
+        log.info("Fetched {} tasks from Label Studio project {}", allTasks.size(), projectId);
         return objectMapper.valueToTree(allTasks);
     }
 

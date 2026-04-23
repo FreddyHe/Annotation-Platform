@@ -78,8 +78,8 @@ public class ModelTestService {
         }
         
         body.add("model_path", modelPath);
-        body.add("conf_threshold", confThreshold);
-        body.add("iou_threshold", iouThreshold);
+        body.add("conf_threshold", String.valueOf(confThreshold));
+        body.add("iou_threshold", String.valueOf(iouThreshold));
         body.add("device", device);
 
         String testUrl = algorithmServiceUrl + "/api/v1/algo/test/yolo/upload";

@@ -13,10 +13,11 @@ import org.springframework.web.bind.annotation.*;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Slf4j
 @RestController
-@RequestMapping("/api/v1/training")
+@RequestMapping("/training")
 public class TrainingController {
 
     @Autowired
@@ -53,13 +54,13 @@ public class TrainingController {
     }
 
     @GetMapping("/record/{id}")
-    public Result<ModelTrainingRecord> getTrainingRecord(@PathVariable Long id) {
+    public Result<Map<String, Object>> getTrainingRecord(@PathVariable Long id) {
         try {
             ModelTrainingRecord record = trainingService.getTrainingRecord(id);
             if (record == null) {
                 return Result.error("404", "Training record not found");
             }
-            return Result.success(record);
+            return Result.success(toRecordResponse(record));
         } catch (Exception e) {
             log.error("Failed to get training record", e);
             return Result.error("500", "Failed to get training record: " + e.getMessage());
@@ -67,13 +68,13 @@ public class TrainingController {
     }
 
     @GetMapping("/record/task/{taskId}")
-    public Result<ModelTrainingRecord> getTrainingRecordByTaskId(@PathVariable String taskId) {
+    public Result<Map<String, Object>> getTrainingRecordByTaskId(@PathVariable String taskId) {
         try {
             ModelTrainingRecord record = trainingService.getTrainingRecordByTaskId(taskId);
             if (record == null) {
                 return Result.error("404", "Training record not found");
             }
-            return Result.success(record);
+            return Result.success(toRecordResponse(record));
         } catch (Exception e) {
             log.error("Failed to get training record", e);
             return Result.error("500", "Failed to get training record: " + e.getMessage());
@@ -81,10 +82,10 @@ public class TrainingController {
     }
 
     @GetMapping("/project/{projectId}")
-    public Result<List<ModelTrainingRecord>> getTrainingRecordsByProject(@PathVariable Long projectId) {
+    public Result<List<Map<String, Object>>> getTrainingRecordsByProject(@PathVariable Long projectId) {
         try {
             List<ModelTrainingRecord> records = trainingService.getTrainingRecordsByProject(projectId);
-            return Result.success(records);
+            return Result.success(records.stream().map(this::toRecordResponse).collect(Collectors.toList()));
         } catch (Exception e) {
             log.error("Failed to get training records", e);
             return Result.error("500", "Failed to get training records: " + e.getMessage());
@@ -92,7 +93,7 @@ public class TrainingController {
     }
 
     @GetMapping("/user")
-    public Result<List<ModelTrainingRecord>> getTrainingRecordsByUser(HttpServletRequest httpRequest) {
+    public Result<List<Map<String, Object>>> getTrainingRecordsByUser(HttpServletRequest httpRequest) {
         try {
             User user = (User) httpRequest.getAttribute("user");
             if (user == null) {
@@ -100,7 +101,7 @@ public class TrainingController {
             }
 
             List<ModelTrainingRecord> records = trainingService.getTrainingRecordsByUser(user.getId());
-            return Result.success(records);
+            return Result.success(records.stream().map(this::toRecordResponse).collect(Collectors.toList()));
         } catch (Exception e) {
             log.error("Failed to get training records", e);
             return Result.error("500", "Failed to get training records: " + e.getMessage());
@@ -135,10 +136,10 @@ public class TrainingController {
     }
 
     @GetMapping("/results/{taskId}")
-    public Result<ModelTrainingRecord> getTrainingResults(@PathVariable String taskId) {
+    public Result<Map<String, Object>> getTrainingResults(@PathVariable String taskId) {
         try {
             ModelTrainingRecord record = trainingService.getTrainingResults(taskId);
-            return Result.success(record);
+            return Result.success(toRecordResponse(record));
         } catch (Exception e) {
             log.error("Failed to get training results", e);
             return Result.error("500", "Failed to get training results: " + e.getMessage());
@@ -146,13 +147,45 @@ public class TrainingController {
     }
 
     @GetMapping("/completed")
-    public Result<List<ModelTrainingRecord>> getCompletedTrainings() {
+    public Result<List<Map<String, Object>>> getCompletedTrainings() {
         try {
             List<ModelTrainingRecord> records = trainingService.getCompletedTrainingsOrderByMap50Desc();
-            return Result.success(records);
+            return Result.success(records.stream().map(this::toRecordResponse).collect(Collectors.toList()));
         } catch (Exception e) {
             log.error("Failed to get completed trainings", e);
             return Result.error("500", "Failed to get completed trainings: " + e.getMessage());
         }
+    }
+
+    private Map<String, Object> toRecordResponse(ModelTrainingRecord record) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("id", record.getId());
+        response.put("projectId", record.getProjectId());
+        response.put("userId", record.getUserId());
+        response.put("taskId", record.getTaskId());
+        response.put("runName", record.getRunName());
+        response.put("status", record.getStatus() != null ? record.getStatus().name() : null);
+        response.put("epochs", record.getEpochs());
+        response.put("batchSize", record.getBatchSize());
+        response.put("imageSize", record.getImageSize());
+        response.put("modelType", record.getModelType());
+        response.put("datasetPath", record.getDatasetPath());
+        response.put("outputDir", record.getOutputDir());
+        response.put("bestModelPath", record.getBestModelPath());
+        response.put("lastModelPath", record.getLastModelPath());
+        response.put("logFilePath", record.getLogFilePath());
+        response.put("map50", record.getMap50());
+        response.put("map50_95", record.getMap50_95());
+        response.put("precision", record.getPrecision());
+        response.put("recall", record.getRecall());
+        response.put("totalImages", record.getTotalImages());
+        response.put("totalAnnotations", record.getTotalAnnotations());
+        response.put("startedAt", record.getStartedAt());
+        response.put("completedAt", record.getCompletedAt());
+        response.put("errorMessage", record.getErrorMessage());
+        response.put("testResults", record.getTestResults());
+        response.put("createdAt", record.getCreatedAt());
+        response.put("updatedAt", record.getUpdatedAt());
+        return response;
     }
 }

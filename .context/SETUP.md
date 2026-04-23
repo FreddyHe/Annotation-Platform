@@ -1,6 +1,32 @@
 # 服务启动与配置
 
-## 一键状态检查
+## 一键启动脚本（推荐）
+
+项目根目录提供了 `startup.sh`，可一键管理全部 5 个服务。脚本会自动跳过已运行的服务。
+
+```bash
+cd /root/autodl-fs/Annotation-Platform
+
+./startup.sh            # 启动所有未运行的服务（默认）
+./startup.sh status     # 检查所有服务状态
+./startup.sh stop       # 停止所有服务
+./startup.sh restart    # 重启所有服务
+./startup.sh build      # 重新编译后端 JAR 并启动所有服务
+```
+
+**服务端口一览：**
+
+| 端口 | 服务 | 日志文件 |
+|------|------|----------|
+| 8080 | Spring Boot 后端 | `/tmp/springboot.log` |
+| 5001 | Label Studio | `/tmp/labelstudio.log` |
+| 5003 | DINO 模型服务 | `/tmp/dino.log` |
+| 8001 | 算法服务 FastAPI | `/tmp/algorithm.log` |
+| 6006 | 前端 Vue | `/tmp/frontend.log` |
+
+> **注意**：DINO 模型约 662MB，CPU 模式加载需要 30~60 秒，脚本会自动等待。
+
+## 一键状态检查（手动）
 
 ```bash
 echo "=== 端口检查 ==="
@@ -146,7 +172,7 @@ cd /root/autodl-fs/Annotation-Platform/frontend-vue
 nohup npx vite --host 0.0.0.0 --port 6006 > /tmp/frontend.log 2>&1 &
 ```
 
-端口 6006 是 AutoDL 自定义服务默认暴露端口，公网可直接访问。
+端口 6006 是 AutoDL 自定义服务默认暴露端口，公网可直接访问。`vite.config.js` 默认端口已改为 6006（2026-04-13），无需再通过 `--port 6006` 覆盖，但保留命令行参数以明确意图。
 
 ## LS SQLite 常用查询
 
@@ -300,3 +326,32 @@ sqlite3 /root/.local/share/label-studio/label_studio.sqlite3 \
 sqlite3 /root/.local/share/label-studio/label_studio.sqlite3 \
   "DELETE FROM io_storages_localfilesmixin WHERE id IN (1, 2, 12, 13, 14);"
 ```
+
+## 训练功能验证（2026-03-25 新增）
+
+### 验证训练 API 接口
+```bash
+# 获取训练状态（替换 project_id 和 JWT token）
+curl -s -H "Authorization: Bearer <JWT_TOKEN>" \
+  "http://localhost:8080/api/v1/projects/354/training/status"
+
+# 启动训练（替换 project_id 和 JWT token）
+curl -s -X POST -H "Authorization: Bearer <JWT_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"modelName":"test-model","epochs":100,"batchSize":16,"imageSize":640,"trainRatio":70,"valRatio":20,"testRatio":10}' \
+  "http://localhost:8080/api/v1/projects/354/training/start"
+```
+
+### 验证导出功能（训练数据准备）
+```bash
+# 导出 COCO 格式（替换 project_id 和 JWT token）
+curl -s -X POST -H "Authorization: Bearer <JWT_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"projectId":354,"format":"coco"}' \
+  "http://localhost:8080/api/v1/projects/354/export"
+
+# 导出 YOLO 格式
+curl -s -X POST -H "Authorization: Bearer <JWT_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"projectId":354,"format":"yolo"}' \
+  "http://localhost:8080/api/v1/projects/354/export"

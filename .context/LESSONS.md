@@ -18,6 +18,11 @@
 
 ## 问题记录
 
+### 2026-04-23: 项目详情训练进度和指标未回显、测试模型仍是模拟结果
+- **根因**: 项目详情页 `/projects/{id}/training/status` 只读 `ModelTrainingRecord` 数据库记录，没有实时查询算法服务的 `processed_images/total_images`，也没有在训练完成后把 `results.csv`/算法结果中的 mAP、precision、recall、模型路径写回；`/projects/{id}/training/detect` 返回硬编码模拟检测框，没有调用训练出的 `best.pt`；算法测试上传路由还存在 `/api/v1` 前缀重复和 multipart 表单参数未声明为 `Form` 的问题。
+- **修复**: 后端状态接口主动同步算法服务任务状态，完成后保存/回填 `best.pt`、mAP、precision、recall；算法训练结果返回 `metrics/results_csv`；项目检测接口改为上传图片并调用真实 YOLO 测试服务；修正算法测试路由前缀、上传表单参数和 CPU 回退。
+- **教训**: 长任务前端展示不能只依赖启动时写入的数据库状态，必须有“算法任务状态 → 后端记录 → 前端轮询”的字段映射；所有测试按钮必须走真实推理路径，不能保留 mock 返回。
+
 ### 2026-03-18: Spring Boot 启动失败（H2 文件锁 / 端口占用）
 - **根因**: 后端使用文件型 H2 数据库，运行中的进程锁定 `testdb.mv.db`；同时端口被其他进程占用。
 - **方案**: 采用启动参数覆盖进行隔离验证：临时改用内存 H2（`--spring.datasource.url=jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1`）并切换端口（如 `--server.port=8090`）；确认功能通过后再在默认 8080 + 文件型 H2 上运行。
@@ -46,6 +51,16 @@
 - **根因**: 更新接口复用了创建接口的 DTO（`CreateCategoryRequest`），其中 `categoryName` 有 `@NotBlank` 校验，导致只想更新一个字段时也必须传所有必填字段。
 - **修复**: 创建独立的 `UpdateCategoryRequest` DTO，所有字段都是可选的。
 - **教训**: 创建和更新必须使用不同的 DTO。创建 DTO 有必填校验，更新 DTO 字段全部可选，Service 层做 null 检查后选择性更新。
+
+### 2026-03-25: 导出功能下载文件无效/空文件
+- **根因**: 后端返回 `data:` URL 格式，前端直接使用 `a.href` 赋值，但未正确解析 base64 数据和设置正确的 MIME 类型，导致下载的文件无法打开或内容为空。
+- **修复**: 前端从 `data:` URL 中提取 base64 数据，使用 `decodeURIComponent` 解码，创建 `Blob` 对象并设置正确的 MIME 类型（`application/json`、`text/plain`、`application/xml`、`text/csv`），通过 `URL.createObjectURL` 生成下载链接。
+- **教训**: 处理 `data:` URL 时必须正确解析和创建 Blob，不能直接赋值给 `a.href`。不同格式需要设置对应的 MIME 类型和文件扩展名。
+
+### 2026-03-25: 训练功能缺少状态持久化
+- **根因**: 当前训练接口返回模拟数据，没有真实的训练服务集成，训练状态无法持久化，进度监控和指标展示都是静态数据。
+- **修复**: 需要集成真实的训练服务（如 Python FastAPI 训练脚本），建立训练任务表存储状态，通过 WebSocket 或轮询机制实时更新训练进度。
+- **教训**: 训练功能涉及长时间运行任务，必须设计状态持久化和实时更新机制，不能仅返回模拟数据。
 
 ### 2026-03-18: 创建 OVD 测试结果返回 SYSTEM_ERROR
 - **根因**: `bboxJson` 是字符串字段，curl 里直接塞未转义的 JSON（例如 `"[{\"x\":10,\"y\":20}]"` 写错转义）会导致 Jackson 解析请求体失败。
@@ -335,3 +350,75 @@
   6. **预防性编程**：在删除操作中添加完整的清理逻辑，避免产生孤立数据。删除项目的正确顺序：DetectionResult → ProjectImage → LS Local Storage → LS Project → Project 实体
   7. **DTO 字段映射**：实体新增字段后，必须同步更新 Response DTO 和转换方法，使用 `@JsonProperty` 可以解决前后端字段名不一致问题
   8. **前后端字段名统一**：优先使用 `@JsonProperty` 注解映射字段名，而不是要求前端修改代码，减少联调成本
+
+### 2026-03-25: 进入项目详情页时后端报404错误（Label Studio空项目tasks API）
+- **根因**: Label Studio 1.22.0 对**没有任何 task 的空项目**调用 `GET /api/projects/{id}/tasks` 返回 404 而不是空列表。新建项目同步到 LS 后还没执行自动标注，项目为空就会触发此错误。
+- **排查过程**:
+  1. 用 curl 验证：`GET /api/projects/41/` 返回 200（项目存在），`GET /api/projects/41/tasks` 返回 404（无 tasks）
+  2. 对已有 tasks 的项目 39 测试，`GET /api/projects/39/tasks` 返回 200
+  3. Service 层有 `catch (Exception e)` 但异常被 CGLIB 代理拦截，绕过了 catch 块
+  4. Controller 层的 catch 也被 CGLIB 代理绕过（Controller 上有其他方法带 `@Transactional`，导致整个类被代理）
+- **修复**: 在 `LabelStudioProxyServiceImpl.java` 的 `getProjectReviewStats` 和 `getProjectReviewResults` 两个方法中，**直接在 `restTemplate.exchange()` 调用处**捕获 404：
+  ```java
+  ResponseEntity<String> response;
+  try {
+      response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+  } catch (org.springframework.web.client.HttpClientErrorException.NotFound e404) {
+      log.warn("LS项目尚无任务(404): lsProjectId={}", lsProjectId);
+      return createEmptyReviewStats(); // 或 createEmptyReviewResults()
+  }
+  ```
+- **教训**:
+  1. **CGLIB 代理会干扰异常捕获**：当类中有方法被 `@Transactional` 标注时，整个类会被 CGLIB 代理，异常可能在代理层被包装后绕过内部 catch。这导致 Service 层和 Controller 层的 catch 块都不起作用
+  2. **异常捕获要在离抛出点最近的地方做**：不要依赖外层 catch 兜底，直接在 `restTemplate.exchange()` 调用处捕获具体异常类型（如 `HttpClientErrorException.NotFound`）
+  3. Label Studio 不同版本对空项目的 API 行为不一致（有的返回空列表，有的返回 404），需要做防御性编码
+
+### 2026-03-25: 审核结果解析失败（fastjson2 JSONException: character [）
+- **根因**: Label Studio `GET /api/projects/{id}/tasks` API 返回的 JSON 格式不固定：无 tasks 时返回 404；有 tasks 时直接返回 **JSON 数组**（以 `[` 开头），而不是 `{"tasks": [...]}`。代码中使用 `JSON.parseObject()` 只能解析 JSON 对象（以 `{` 开头），遇到数组就报 `JSONException: offset 1, character [`。
+- **修复**: 在 `LabelStudioProxyServiceImpl.java` 的 `getProjectReviewStats` 和 `getProjectReviewResults` 两个方法中，解析响应时增加格式判断：
+  ```java
+  String body = response.getBody();
+  com.alibaba.fastjson2.JSONArray tasks;
+  if (body != null && body.trim().startsWith("[")) {
+      tasks = JSON.parseArray(body);
+  } else {
+      JSONObject responseData = JSON.parseObject(body);
+      tasks = responseData.getJSONArray("tasks");
+  }
+  ```
+- **教训**:
+  1. **不要假设第三方 API 的返回格式是固定的**，需要做格式判断或兼容处理
+  2. `JSON.parseObject()` 只能解析对象，`JSON.parseArray()` 只能解析数组，要根据实际响应内容选择
+  3. 调用第三方 API 前，先用 curl 手动测试返回格式，确认是对象还是数组
+
+### 2026-03-25: 前端 LabelDefinition.vue 警告 + /api/v1/files/undefined 请求
+- **问题1**: Vue warn: Property "form" was accessed during render but is not defined on instance（`LabelDefinition.vue`）
+- **问题2**: 浏览器请求 `GET /api/v1/files/undefined` 返回 500（`ImageList.vue`）
+- **根因**:
+  1. `LabelDefinition.vue` 模板中 `<el-form :model="form">` 引用了 `form` 变量但 script 中未定义
+  2. `ImageList.vue` 中 `` url: `/api/v1/files/${img.filePath}` `` 当图片的 `filePath` 为 null/undefined 时拼接出无效 URL
+- **修复**:
+  1. `LabelDefinition.vue`：`<el-form :model="form">` 改为 `<el-form>`（去掉 `:model="form"`）
+  2. `ImageList.vue`：加空值判断 `` url: img.filePath ? `/api/v1/files/${img.filePath}` : '' ``
+- **教训**:
+  1. 模板中引用的变量必须在 setup/data 中定义，否则 Vue 3 会报 warn
+  2. 拼接 URL 时必须对变量做空值判断，避免拼出 `/api/v1/files/undefined`
+
+### 2026-04-13: 项目旧代码大清理
+
+- **背景**: 项目从 Streamlit 单体迁移到 Vue + Spring Boot + FastAPI 微服务架构后，根目录残留大量旧版文件，新旧代码混杂，影响可维护性。
+- **操作清单**:
+  1. **修复 `application.yml`**: `app.training.script-path` 从旧路径 `/root/autodl-fs/web_biaozhupingtai/scripts/train_yolo.py` 改为 `/root/autodl-fs/Annotation-Platform/scripts/train_yolo.py`
+  2. **删除 Streamlit 旧版文件（13个）**: `main.py`、`main.py.bak`、`config.py`、`login_page.py`、`user_auth.py`、`annotation_editor.py`、`training_manager.py`、`file_upload_server.py`、`org_project_manager.py`、`user_project_manager.py`、`label_studio_integration_enhanced.py`、`ls_login_proxy.py`、`requirements_web.txt`
+  3. **删除旧目录**: `backend/`（旧 Python 后端）、`.streamlit/`、`__pycache__/`、`.pytest_cache/`
+  4. **删除过期启动脚本（6个）**: `start.sh`、`start_new.sh`、`start_all_services.sh`、`run.sh`、`install_env.sh`、`restructure_project.sh`（均引用旧路径 `web_biaozhupingtai` 或启动 Streamlit）
+  5. **删除一次性修复/诊断脚本（8个）**: `nuclear_fix.py`、`repair_user.py`、`fix_ls_auth.py`、`find_ls_api_key.py`、`diagnose_prediction_score.py`、`diagnose_specific_project.py`、`predicti_demo.py`、`train_freeze.py`
+  6. **删除 `scripts/` 下已替代文件（4个）**: `detect_yolo.py`、`manage_vlm_service.sh`、`run_dino_detection.py`、`run_vlm_clean.py`（功能已由 `algorithm-service/` 替代），保留 `train_yolo.py`（被 `application.yml` 引用）
+  7. **删除过期文档（17个）**: 根目录 `ARCHITECTURE.md`（描述 Streamlit 技术栈）、`QUICKSTART.md`、`REFACTORING_SUMMARY.md`、`CHANGES.md`、`INTERFACE_VERIFICATION.md`、`AUTO_ANNOTATION_ARCHITECTURE.md`、`debug.md`、`debug_dino.sh`、`test_dino.sh`、`frontend-vue-restyled.zip`、`import_to_label_studio.json`、`projects.json`、`test_label_studio_integration.py`、`test_ls_only.py`、`pytest.ini`、`.context/STAGE_16_17_18_SUMMARY.md`、`.context/RESULT_DISPLAY_FIX.md`
+  8. **更新 `.gitignore`**: 补充 `.pytest_cache/`、`*.log`、`.env`/`.env.*`、`.idea/`、`frontend-vue/node_modules/`、`*.zip`、`*.tar.gz`
+  9. **更新 `vite.config.js`**: 默认端口从 `5173` 改为 `6006`
+- **教训**:
+  1. 架构迁移后应及时清理旧代码，避免新旧混杂导致路径引用混乱
+  2. 配置文件中的路径引用（如 `script-path`）必须随项目迁移同步更新
+  3. 项目根目录只保留唯一启动脚本（`startup.sh`），多个启动脚本并存会造成维护混乱
+  4. `.gitignore` 应覆盖所有构建产物、日志、环境变量文件，避免敏感信息或大文件误提交

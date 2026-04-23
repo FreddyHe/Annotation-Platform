@@ -108,7 +108,7 @@ app:
   training:
     output-base-path: /root/autodl-fs/Annotation-Platform/training_runs
     conda-env: xingmu_yolo
-    script-path: /root/autodl-fs/web_biaozhupingtai/scripts/train_yolo.py
+    script-path: /root/autodl-fs/Annotation-Platform/scripts/train_yolo.py
 
 logging:
   level:

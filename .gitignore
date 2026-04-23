@@ -1,6 +1,7 @@
 # 忽略 Python 缓存
 __pycache__/
 *.py[cod]
+.pytest_cache/
 
 # 忽略大型权重文件
 *.pt
@@ -12,17 +13,28 @@ __pycache__/
 datasets/
 runs/
 logs/
+*.log
 data/
 training_runs/
 
+# 忽略环境与秘钥文件
+.env
+.env.*
+!.env.example
 
 # 忽略系统和 IDE 文件
 .DS_Store
 .ipynb_checkpoints/
 .vscode/
+.idea/
 
-
+# 忽略构建产物与依赖
 backend-springboot/target/
 *.jar
 frontend-vue/dist/
 frontend-vue/.vite/
+frontend-vue/node_modules/
+
+# 忽略打包文件
+*.zip
+*.tar.gz

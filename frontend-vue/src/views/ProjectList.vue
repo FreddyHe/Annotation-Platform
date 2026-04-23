@@ -56,7 +56,7 @@
       width="500px"
       :close-on-click-modal="false"
     >
-      <el-form :model="projectForm" :rules="projectRules" ref="projectFormRef" label-width="100px">
+      <el-form :model="projectForm" :rules="projectRules" ref="projectFormRef" label-width="100px" @submit.prevent>
         <el-form-item label="项目名称" prop="name">
           <el-input v-model="projectForm.name" placeholder="请输入项目名称" />
         </el-form-item>
@@ -284,7 +284,6 @@ onMounted(() => {
 
 <style scoped>
 .project-list {
-  max-width: 1200px;
 }
 
 .card-header {

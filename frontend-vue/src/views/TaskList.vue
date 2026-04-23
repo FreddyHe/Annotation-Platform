@@ -82,6 +82,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.task-list { max-width: 1200px; }
+.task-list { }
 .page-title { font-size: 20px; font-weight: 600; color: var(--gray-900); letter-spacing: -0.02em; margin-bottom: 24px; }
 </style>

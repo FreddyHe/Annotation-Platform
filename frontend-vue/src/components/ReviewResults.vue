@@ -68,11 +68,12 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="annotationCount" label="标注数量" width="100">
+      <el-table-column prop="annotationCount" label="标注数量" width="120" align="center">
         <template #default="{ row }">
-          <el-badge :value="row.annotationCount" :max="99" class="item">
-            <el-icon><Location /></el-icon>
-          </el-badge>
+          <div style="display: flex; align-items: center; justify-content: center; gap: 6px;">
+            <el-icon :size="18" color="#409EFF"><Location /></el-icon>
+            <span style="font-weight: 600; color: #409EFF;">{{ row.annotationCount }}</span>
+          </div>
         </template>
       </el-table-column>
       <el-table-column prop="completedAt" label="完成时间" width="180">
@@ -211,8 +212,11 @@ const loadResults = async () => {
 
 const viewInLabelStudio = async (row) => {
   try {
-    const response = await labelStudioAPI.getLoginUrl(props.project.id, `/projects/${props.project.labelStudioProjectId}/data?task=${row.taskId}`)
-    window.open(response.data.loginUrl, '_blank')
+    const response = await labelStudioAPI.getLoginUrl({
+      projectId: props.project.id,
+      returnUrl: `/projects/${props.project.labelStudioProjectId}/data?tab=${row.taskId}&task=${row.taskId}`
+    })
+    window.open(response.data, '_blank')
   } catch (error) {
     ElMessage.error('打开 Label Studio 失败')
   }

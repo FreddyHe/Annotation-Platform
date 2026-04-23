@@ -63,6 +63,10 @@
         <el-tab-pane label="导出结果" name="export">
           <ResultExport :project="project" />
         </el-tab-pane>
+
+        <el-tab-pane label="模型训练" name="training">
+          <Training :project="project" @refresh="loadProject" />
+        </el-tab-pane>
       </el-tabs>
     </div>
   </div>
@@ -79,6 +83,7 @@ import DataManager from '@/components/DataManager.vue'
 import AlgorithmTasks from '@/components/AlgorithmTasks.vue'
 import ResultViewer from '@/components/ResultViewer.vue'
 import ResultExport from '@/components/ResultExport.vue'
+import Training from '@/components/Training.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -164,7 +169,18 @@ const loadUserProfile = async () => {
 
 const copyToClipboard = async (text, label) => {
   try {
-    await navigator.clipboard.writeText(text)
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const textarea = document.createElement('textarea')
+      textarea.value = text
+      textarea.style.position = 'fixed'
+      textarea.style.left = '-9999px'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+    }
     ElMessage.success(`${label}已复制到剪贴板`)
   } catch (error) {
     ElMessage.error('复制失败，请手动复制')
@@ -206,7 +222,6 @@ onUnmounted(() => {
 
 <style scoped>
 .project-detail {
-  max-width: 1200px;
 }
 
 .project-tabs-wrapper {

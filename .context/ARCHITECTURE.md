@@ -57,10 +57,19 @@ curl -I http://localhost:6006 | head -n 5
 
 ## 目录结构
 
+> **2026-04-13 清理后**：已删除全部 Streamlit 旧版文件、旧 `backend/` Python 后端、过期启动脚本、一次性诊断/修复脚本和过期文档。
+
 ```
 /root/autodl-fs/Annotation-Platform/          ← 项目根目录
 ├── CLAUDE.md                                  ← Agent 入口
-├── .context/                                  ← Agent 上下文
+├── README.md                                  ← 项目说明
+├── .context/                                  ← Agent 上下文（4 个核心文件）
+│   ├── ARCHITECTURE.md                        ← 本文件
+│   ├── SETUP.md                               ← 启动/重启/验证命令
+│   ├── LESSONS.md                             ← 踩坑记录
+│   └── CONVENTIONS.md                         ← 开发规范
+├── .gitignore                                 ← Git 忽略规则
+├── startup.sh                                 ← 唯一启动脚本（管理全部 5 个服务）
 ├── backend-springboot/                        ← Spring Boot 后端
 │   ├── src/main/java/com/annotation/platform/
 │   │   ├── controller/                        ← REST 控制器
@@ -74,15 +83,19 @@ curl -I http://localhost:6006 | head -n 5
 │   ├── data/testdb.mv.db                      ← H2 数据库文件
 │   └── pom.xml
 ├── frontend-vue/                              ← Vue 3 前端
+│   ├── vite.config.js                         ← Vite 配置（默认端口 6006）
 │   └── src/
 │       ├── views/                             ← 页面组件
 │       ├── api/                               ← API 封装
 │       ├── router/                            ← 路由
 │       └── layout/                            ← 布局组件
-└── algorithm-service/                         ← 算法服务
-    ├── main.py                                ← FastAPI 入口
-    ├── dino_model_server.py                   ← DINO 模型服务
-    └── routers/                               ← 路由模块
+├── algorithm-service/                         ← 算法服务
+│   ├── main.py                                ← FastAPI 入口
+│   ├── dino_model_server.py                   ← DINO 模型服务
+│   └── routers/                               ← 路由模块
+├── scripts/                                   ← 辅助脚本
+│   └── train_yolo.py                          ← YOLO 训练脚本（被 application.yml 引用）
+└── tests_e2e/                                 ← E2E 测试
 ```
 
 ## 关键配置
@@ -105,7 +118,7 @@ curl -I http://localhost:6006 | head -n 5
 
 ### 前端
 
-- **端口**: 5173（Vite开发服务器）/ 6006（AutoDL 自定义服务默认暴露端口）
+- **端口**: 6006（`vite.config.js` 默认端口已改为 6006，与 AutoDL 暴露端口一致）
 - **公网地址**: `http://122.51.47.91:24379/`
 - **技术栈**: Vue 3 + Element Plus + Vite + Vue Router + Pinia
 - **API Base URL**: `/api/v1`（通过axios配置，自动添加Authorization头）
@@ -289,9 +302,83 @@ PENDING → DOWNLOADING → CONVERTING → TRAINING → COMPLETED
   - 支持用户自定义训练模型
   - 通过 `?modelId=X` 参数可自动选中指定模型
 
+## 项目训练功能（2026-03-25新增）
+
+基于 Label Studio 已标注数据的项目级模型训练功能：
+
+### 后端 API（需JWT认证）
+- `POST /api/v1/projects/{id}/training/start` - 启动训练任务
+  - 参数：modelName, epochs, batchSize, imageSize, trainRatio, valRatio, testRatio
+- `GET  /api/v1/projects/{id}/training/status` - 获取训练状态
+- `POST /api/v1/projects/{id}/training/detect` - 使用训练模型检测
+  - 参数：image (multipart/form-data), modelId (可选)
+
+### 前端组件
+- `Training.vue` - 训练页面组件（配置 + 进度监控 + 测试）
+- 新增"模型训练"标签页在项目详情页面
+
+### 训练状态流转
+```
+IDLE → PREPARING → TRAINING → COMPLETED
+                        ↘ FAILED
+```
+
+### 支持的导出格式（用于训练数据准备）
+- COCO JSON - 标准 COCO 数据集格式
+- YOLO TXT - YOLO 训练格式  
+- VOC XML - Pascal VOC 格式
+- CSV - 简单表格格式
+- JSON - 原始 JSON 格式
+
 ## 期望的架构设计
 
 1. 用户注册时在 LS 中创建对应账户
 2. 每个组织在 LS 中有对应组织，第一个创建者是管理员
 3. **所有 LS 项目操作使用组织管理员的 token**（不是全局 admin token）
 4. 项目自动归属到管理员的 active_organization
+
+
+### 2026-03-25 变更记录（自动标注 + 审核结果 bug 修复）
+
+**后端修改文件清单：**
+
+| 文件 | 修改内容 |
+|------|----------|
+| `AutoAnnotationService.java` | 方法签名增加 `processRange` 参数；增加 `processRange="all"` 时的旧数据清理逻辑（先删 DetectionResult 再删 AnnotationTask） |
+| `DetectionResultRepository.java` | 新增 `@Modifying @Query deleteByProjectId(Long)` 方法 |
+| `AnnotationTaskRepository.java` | 新增 `@Modifying @Query deleteByProjectId(Long)` 方法 |
+| `ProjectDetailResponse.java` | 新增 `@JsonProperty("labelStudioProjectId") private Long lsProjectId` 字段 |
+| `ProjectController.java` | `convertToDetailResponse` 增加 `lsProjectId` 映射；`deleteProject` 增加完整级联删除逻辑（DetectionResult → ProjectImage → LS Storage → LS Project → Project）；`getReviewStats/Results` 的 catch 块改为返回空结果 |
+| `LabelStudioProxyService.java` | 新增 `deleteLocalStorageByProject(Long, Long)` 接口方法 |
+| `LabelStudioProxyServiceImpl.java` | 实现 `deleteLocalStorageByProject`；`getProjectReviewStats/Results` 增加 404 捕获（直接在 restTemplate.exchange 处 catch NotFound）；增加 JSON 数组兼容（parseArray vs parseObject） |
+
+**前端修改文件清单：**
+
+| 文件 | 修改内容 |
+|------|----------|
+| `LabelDefinition.vue` | 去掉 `<el-form :model="form">` 中的 `:model="form"`（变量未定义） |
+| `ImageList.vue` | URL 拼接增加空值判断：`img.filePath ? ... : ''` |
+
+**Label Studio 数据库清理（一次性操作）：**
+- 删除了 5 条孤立的 local storage 记录（ID: 1, 2, 12, 13, 14），这些记录关联的 LS project 已被删除
+
+**核心外键关系与删除顺序：**
+```
+DetectionResult (子) → image_id → ProjectImage
+DetectionResult (子) → task_id → AnnotationTask
+ProjectImage (子) → project_id → Project
+AnnotationTask (子) → project_id → Project
+
+删除项目完整顺序：
+1. DetectionResult (deleteByProjectId)
+2. ProjectImage (deleteByProjectId)
+3. LS Local Storage (DELETE /api/storages/localfiles/{id})
+4. LS Project (DELETE /api/projects/{id})
+5. Project 实体 (JPA delete，级联删除 AnnotationTask)
+```
+
+**Label Studio API 行为记录（v1.22.0）：**
+- `GET /api/projects/{id}/tasks`：空项目返回 **404**，有 tasks 时返回 **JSON 数组**（不是对象）
+- `DELETE /api/projects/{id}`：**不会**自动删除关联的 local storage
+- `GET /api/storages/localfiles?project={id}`：获取项目 local storage 列表
+- `DELETE /api/storages/localfiles/{storageId}`：删除单个 local storage

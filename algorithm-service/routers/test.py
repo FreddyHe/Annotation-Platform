@@ -11,14 +11,14 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File
+from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel, Field
 
 from services.task_manager import task_manager, TaskStatus
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/algo/test", tags=["Testing"])
+router = APIRouter(prefix="/algo/test", tags=["Testing"])
 
 
 class YOLOTestRequest(BaseModel):
@@ -71,6 +71,11 @@ async def run_yolo_inference_task(
         
         # 导入 YOLO
         from ultralytics import YOLO
+        import torch
+
+        if device != "cpu" and not torch.cuda.is_available():
+            logger.warning(f"Task {task_id}: CUDA not available, falling back to CPU")
+            device = "cpu"
         
         model = YOLO(model_path)
         
@@ -87,10 +92,8 @@ async def run_yolo_inference_task(
                     logger.warning(f"Task {task_id}: Image not found: {image_path}")
                     continue
                 
-                # 更新进度
                 processed_images += 1
-                progress = int((processed_images / total_images) * 100)
-                await task_manager.update_task_progress(task_id, progress)
+                await task_manager.update_task_progress(task_id, processed_images)
                 
                 # 推理
                 results = model(
@@ -235,10 +238,10 @@ async def start_yolo_test(
 
 @router.post("/yolo/upload", response_model=YOLOTestResponse)
 async def start_yolo_test_with_upload(
-    model_path: str,
-    conf_threshold: float = 0.25,
-    iou_threshold: float = 0.45,
-    device: str = "0",
+    model_path: str = Form(...),
+    conf_threshold: float = Form(0.25),
+    iou_threshold: float = Form(0.45),
+    device: str = Form("0"),
     files: List[UploadFile] = File(...),
     background_tasks: BackgroundTasks = BackgroundTasks()
 ):

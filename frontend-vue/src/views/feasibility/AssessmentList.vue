@@ -29,7 +29,7 @@ const handleDelete = async (id) => { try { await ElMessageBox.confirm('确定要
 onMounted(() => { loadAssessments() })
 </script>
 <style scoped>
-.assessment-list { max-width: 1200px; }
+.assessment-list { }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
 .page-title { font-size: 20px; font-weight: 600; color: var(--gray-900); letter-spacing: -0.02em; }
 .link-text { color: var(--brand-600); cursor: pointer; }

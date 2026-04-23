@@ -180,6 +180,32 @@ export const projectAPI = {
       url: `/projects/exports/${exportId}`,
       method: 'delete'
     })
+  },
+
+  startTraining(projectId, config) {
+    return request({
+      url: `/projects/${projectId}/training/start`,
+      method: 'post',
+      data: config
+    })
+  },
+
+  getTrainingStatus(projectId) {
+    return request({
+      url: `/projects/${projectId}/training/status`,
+      method: 'get'
+    })
+  },
+
+  detectWithTrainedModel(projectId, formData) {
+    return request({
+      url: `/projects/${projectId}/training/detect`,
+      method: 'post',
+      data: formData,
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
   }
 }
 

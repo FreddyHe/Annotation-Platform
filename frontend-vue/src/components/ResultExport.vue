@@ -1,14 +1,10 @@
 <template>
   <div class="result-export">
-    <p class="section-desc">导出 Label Studio 中已审核的标注结果为多种格式，用于模型训练或其他用途</p>
+    <p class="section-desc">导出最终标注：已审核图片使用人工审核结果，未审核图片使用自动标注结果。</p>
     
-    <el-card class="export-card">
-      <template #header>
-        <span class="card-title">导出格式</span>
-      </template>
-      
+    <div class="export-card">
       <div class="format-selector">
-        <el-radio-group v-model="selectedFormat" size="large">
+        <el-radio-group v-model="selectedFormat">
           <el-radio-button label="coco">COCO JSON</el-radio-button>
           <el-radio-button label="yolo">YOLO TXT</el-radio-button>
           <el-radio-button label="voc">VOC XML</el-radio-button>
@@ -28,7 +24,7 @@
           导出标注结果
         </el-button>
       </div>
-    </el-card>
+    </div>
 
     <div v-if="exporting" class="export-progress">
       <el-progress :percentage="exportProgress" :status="exportProgress === 100 ? 'success' : undefined" />
@@ -63,7 +59,7 @@ const handleExport = async () => {
   try {
     exporting.value = true
     exportProgress.value = 0
-    currentStatus.value = '正在从 Label Studio 获取标注数据...'
+    currentStatus.value = '正在合并人工审核与自动标注数据...'
     
     const requestData = {
       projectId: props.project.id,
@@ -81,8 +77,8 @@ const handleExport = async () => {
     if (response.data && response.data.downloadUrl) {
       // 从 data URL 中提取实际数据
       const dataUrl = response.data.downloadUrl
-      const base64Data = dataUrl.split(',')[1]
-      const decodedData = decodeURIComponent(base64Data)
+      const encodedData = dataUrl.split(',')[1] || ''
+      const decodedData = decodeURIComponent(encodedData.replace(/\+/g, ' '))
       
       // 根据格式确定文件扩展名和 MIME 类型
       const formatExtensions = {
@@ -129,37 +125,30 @@ const handleExport = async () => {
 </script>
 
 <style scoped>
-.result-export {
-  max-width: 800px;
-}
+.result-export { max-width: none; }
 
 .section-desc {
   color: var(--gray-500);
   font-size: 13px;
-  margin-bottom: 20px;
+  margin-bottom: 12px;
 }
 
 .export-card {
-  margin-bottom: 24px;
-}
-
-.card-title {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--gray-900);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .format-selector {
   display: flex;
-  justify-content: center;
-  padding: 24px 0;
+  justify-content: flex-start;
 }
 
 .export-action {
   display: flex;
-  justify-content: center;
-  padding-top: 24px;
-  border-top: 1px solid var(--gray-200);
+  justify-content: flex-start;
 }
 
 .export-progress {

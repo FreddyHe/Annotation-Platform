@@ -50,6 +50,7 @@ const currentChunk = ref(0)
 const totalChunks = ref(0)
 const chunkProgress = ref(0)
 const CHUNK_SIZE = 5 * 1024 * 1024
+const MAX_RETRIES = 3
 
 const totalProgress = computed(() => { if (totalCount.value === 0) return 0; return Math.round((uploadedCount.value / totalCount.value) * 100) })
 const uploadStatus = computed(() => { if (uploadResults.value.some(r => r.status === 'error')) return 'exception'; return undefined })
@@ -70,14 +71,54 @@ const startUpload = async () => {
   uploading.value = false; currentFileName.value = ''; currentChunk.value = 0; totalChunks.value = 0; chunkProgress.value = 0; emit('uploaded')
 }
 
+const makeFileId = async (file, projectId) => {
+  const raw = `${projectId}::${file.name}::${file.size}::${file.lastModified}`
+  const buf = new TextEncoder().encode(raw)
+  const hash = await crypto.subtle.digest('SHA-256', buf)
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 32)
+}
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
+
+const uploadChunkWithRetry = async (formData, maxRetries = MAX_RETRIES) => {
+  let lastErr
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await uploadAPI.uploadChunk(formData)
+    } catch (error) {
+      lastErr = error
+      if (i < maxRetries - 1) {
+        await sleep(1000 * Math.pow(2, i))
+      }
+    }
+  }
+  throw lastErr
+}
+
+const getUploadedChunkSet = async (fileId) => {
+  try {
+    const res = await uploadAPI.getUploadedChunks(fileId)
+    return new Set(res.data?.uploadedChunks || [])
+  } catch {
+    return new Set()
+  }
+}
+
 const uploadFile = async (file) => {
-  const fileId = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`; const fileName = file.name; const fileSize = file.size; const totalChunksCount = Math.ceil(fileSize / CHUNK_SIZE)
+  const fileId = await makeFileId(file, props.projectId); const fileName = file.name; const fileSize = file.size; const totalChunksCount = Math.ceil(fileSize / CHUNK_SIZE)
   totalChunks.value = totalChunksCount; currentChunk.value = 0; chunkProgress.value = 0
+  const uploadedChunks = await getUploadedChunkSet(fileId)
   for (let chunkIndex = 0; chunkIndex < totalChunksCount; chunkIndex++) {
+    if (uploadedChunks.has(chunkIndex)) {
+      currentChunk.value = chunkIndex + 1; chunkProgress.value = Math.round(((uploadedChunks.size) / totalChunksCount) * 100)
+      continue
+    }
     const start = chunkIndex * CHUNK_SIZE; const end = Math.min(start + CHUNK_SIZE, fileSize); const chunk = file.slice(start, end)
     const formData = new FormData(); formData.append('fileId', fileId); formData.append('filename', fileName); formData.append('chunkIndex', chunkIndex); formData.append('totalChunks', totalChunksCount); formData.append('fileSize', fileSize); formData.append('projectId', props.projectId); formData.append('file', chunk)
-    currentChunk.value = chunkIndex + 1; chunkProgress.value = Math.round(((chunkIndex + 1) / totalChunksCount) * 100)
-    await uploadAPI.uploadChunk(formData)
+    currentChunk.value = chunkIndex + 1
+    await uploadChunkWithRetry(formData)
+    uploadedChunks.add(chunkIndex)
+    chunkProgress.value = Math.round((uploadedChunks.size / totalChunksCount) * 100)
   }
   await uploadAPI.mergeChunks({ fileId, filename: fileName, totalChunks: totalChunksCount, projectId: props.projectId })
 }

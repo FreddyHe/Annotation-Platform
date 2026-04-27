@@ -18,4 +18,6 @@ public class DinoDetectRequest {
     private String apiKey;
     private String endpoint;
     private String taskId;
+    private Double boxThreshold;
+    private Double textThreshold;
 }

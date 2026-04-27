@@ -34,12 +34,6 @@ const routes = [
         meta: { title: '项目详情', icon: 'Document' }
       },
       {
-        path: 'tasks',
-        name: 'TaskList',
-        component: () => import('@/views/TaskList.vue'),
-        meta: { title: '算法任务', icon: 'Timer' }
-      },
-      {
         path: 'model-training',
         name: 'ModelTraining',
         component: () => import('@/views/ModelTraining.vue'),

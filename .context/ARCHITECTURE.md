@@ -2,7 +2,9 @@
 
 ## 项目简介
 
-智能标注平台，用于图像目标检测的自动化标注。核心流程：**DINO 检测 → VLM 清洗 → 同步预测到 Label Studio**。
+智能标注平台，用于图像目标检测的自动化标注。当前自动标注支持两条核心流程：
+- `DINO_VLM`：**DINO 检测 → VLM 清洗 → 同步预测到 Label Studio**
+- `DINO_THRESHOLD`：**DINO 检测 → score 阈值过滤 → 同步预测到 Label Studio**
 
 ## 组件一览
 
@@ -36,11 +38,10 @@ source $(conda info --base)/etc/profile.d/conda.sh
 cd /root/autodl-fs/Annotation-Platform/algorithm-service
 
 conda activate groundingdino310
-export CUDA_VISIBLE_DEVICES=""
+export LD_LIBRARY_PATH=/root/miniconda3/envs/groundingdino310/lib/python3.10/site-packages/torch/lib:${LD_LIBRARY_PATH:-}
 nohup python dino_model_server.py > /tmp/dino.log 2>&1 &
 
 conda activate algo_service
-export CUDA_VISIBLE_DEVICES=""
 nohup uvicorn main:app --host 0.0.0.0 --port 8001 > /tmp/algorithm.log 2>&1 &
 
 curl -s http://localhost:8001/docs | head -c 120
@@ -137,6 +138,10 @@ curl -I http://localhost:6006 | head -n 5
 
 主要表：`users`、`organizations`、`projects`、`feasibility_assessments`、`category_assessments`、`ovd_test_results`、`vlm_quality_scores`、`dataset_search_results`、`resource_estimations`、`implementation_plans`
 
+自动标注与上传容错新增结构：
+- `auto_annotation_jobs`：自动标注长任务表，字段包含 `project_id`、`user_id`、`mode`、`status`、`current_stage`、`score_threshold`、`box_threshold`、`text_threshold`、`total_images`、`processed_images`、`kept_detections`、`discarded_detections`、`dino_task_id`、`vlm_task_id`、`progress_percent`、`cancel_requested`、`params_json`
+- 大文件上传断点续传 MVP 不单独建表，真实状态以磁盘目录 `/tmp/upload_chunks/{fileId}/` 和 `manifest.json` 为准
+
 用户模型配置表：
 - `user_model_configs`：每用户一条 VLM/LLM 配置（`user_id` 唯一），字段包含 `vlm_api_key/vlm_base_url/vlm_model_name` 与 `llm_api_key/llm_base_url/llm_model_name`
 
@@ -216,7 +221,8 @@ curl -I http://localhost:6006 | head -n 5
 1. **用户注册** → Spring Boot 创建用户 → 同步到 LS（创建 LS 用户 + 加入组织 + 从默认组织移除）
 2. **创建项目** → Spring Boot 创建项目 → 同步到 LS（用组织管理员 token 创建 LS 项目 + 生成 label_config XML）
 3. **自动标注** → 上传图片 → 调用 DINO/YOLO 检测 → VLM 清洗 → 同步预测结果到 LS
-4. **可行性评估完整流程**（阶段9-17）：
+4. **迭代飞轮** → 项目创建自动开启 Round 1 → 训练记录绑定 Round → 部署到边端模拟器 → 推理回流进 HIGH/LOW_A_CANDIDATE/DISCARDED → VLM 二次判定 LOW_A/LOW_B → 低-B 人审 → 关闭当前轮并触发 FEEDBACK 训练
+5. **可行性评估完整流程**（阶段9-17）：
    - **阶段9**: 创建评估 → LLM解析需求 → 生成类别（CategoryAssessment）
    - **阶段10**: 生成Prompt变体（LLM）
    - **阶段11**: OVD批量测试（DINO服务）→ 保存OvdTestResult
@@ -234,6 +240,18 @@ Spring Boot 提供用户级别的模型配置管理接口（受 JWT 保护）：
 - `PUT  /api/v1/api/user/model-config`：更新配置（不存在自动创建；脱敏 key 不覆盖真实 key）
 - `POST /api/v1/api/user/model-config/test-vlm`：测试 VLM 连通性（转发到算法服务）
 - `POST /api/v1/api/user/model-config/test-llm`：测试 LLM 连通性（转发到算法服务）
+
+自动标注接口（Spring Boot，需 JWT）：
+- `POST /api/v1/auto-annotation/start/{projectId}`：启动自动标注，支持 `processRange`、`mode`、`scoreThreshold`、`boxThreshold`、`textThreshold`
+- `GET  /api/v1/auto-annotation/status/{taskId}`：兼容旧任务状态查询；当 `taskId=job-{id}` 时返回 Job 状态
+- `GET  /api/v1/auto-annotation/jobs/{jobId}`：查询单个自动标注 Job
+- `GET  /api/v1/auto-annotation/projects/{projectId}/jobs/latest`：查询项目最近一次自动标注 Job
+- `POST /api/v1/auto-annotation/jobs/{jobId}/cancel`：请求取消自动标注 Job
+
+上传容错接口（Spring Boot）：
+- `GET  /api/v1/upload/chunks/{fileId}`：查询已上传 chunk 列表（以磁盘/manifest 为准）
+- `POST /api/v1/upload/chunk`：幂等上传单个 chunk
+- `POST /api/v1/upload/merge`：按磁盘实际 chunk 合并，不依赖内存 map
 
 算法服务提供连通性测试接口（供 Spring Boot 转发）：
 - `POST /api/v1/model-config/test-vlm`
@@ -270,6 +288,44 @@ Spring Boot可行性评估工作流接口（全部需JWT认证）：
 - `GET  /api/v1/feasibility/assessments/{id}/datasets` - 获取数据集检索结果
 - `GET  /api/v1/feasibility/assessments/{id}/resource-estimations` - 获取资源估算
 - `GET  /api/v1/feasibility/assessments/{id}/implementation-plans` - 获取实施计划
+
+## 迭代飞轮模块（2026-04-23新增）
+
+新增核心表：
+- `iteration_rounds`：项目迭代轮次，字段包含 `project_id`、`round_number`、`status`、`training_record_id`
+- `edge_deployments`：边端模拟部署记录，字段包含 `project_id`、`round_id`、`model_record_id`、`status`
+- `inference_data_points`：边端回流数据池，使用 `pool_type` 区分 `HIGH/LOW_A_CANDIDATE/LOW_A/LOW_B/DISCARDED`
+- `project_config`：项目级阈值与自动化配置，默认高池阈值 `0.8`、低池阈值 `0.4`
+
+新增/扩展字段：
+- `projects.current_round_id`
+- `projects.project_type`：`LEGACY` 或 `ITERATIVE`
+- `model_training_records.round_id`
+- `model_training_records.training_data_source`：`INITIAL` 或 `FEEDBACK`
+
+Spring Boot 接口（全部需JWT认证）：
+- `GET  /api/v1/projects/{id}/rounds`
+- `GET  /api/v1/projects/{id}/rounds/current`
+- `POST /api/v1/projects/{id}/rounds/close-current`
+- `GET  /api/v1/projects/{id}/rounds/{roundId}/training-preview`
+- `POST /api/v1/projects/{id}/rounds/{roundId}/trigger-retrain`
+- `GET  /api/v1/projects/{id}/config`
+- `PUT  /api/v1/projects/{id}/config`
+- `POST /api/v1/edge-simulator/deploy`
+- `POST /api/v1/edge-simulator/inference`
+- `POST /api/v1/edge-simulator/rollback`
+- `GET  /api/v1/edge-simulator/deployments`
+- `GET  /api/v1/edge-simulator/inference-history`
+- `GET  /api/v1/edge-simulator/pool-stats`
+- `GET  /api/v1/inference-data-points/{id}`
+- `GET  /api/v1/projects/{id}/data-points`
+- `POST /api/v1/projects/{id}/data-points/judge`
+- `POST /api/v1/inference-data-points/{id}/review`
+
+算法服务接口：
+- `POST /api/v1/algo/edge-inference/batch`
+- `POST /api/v1/algo/reinference/vlm-judge`
+- `POST /api/v1/algo/vlm/clean`（兼容旧 E2E）
 
 ### 工作流分叉说明（2026-03-20新增）
 

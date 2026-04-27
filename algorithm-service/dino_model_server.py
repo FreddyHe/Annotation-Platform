@@ -16,7 +16,19 @@ from groundingdino.util.utils import clean_state_dict, get_phrases_from_posmap
 # --- 核心设置 ---
 CONFIG_PATH = "/root/autodl-fs/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py"
 CHECKPOINT_PATH = "/root/autodl-fs/GroundingDINO/weights/groundingdino_swint_ogc.pth"
-DEVICE = "cpu"  # 强制使用 CPU
+
+
+def prepare_runtime():
+    torch_lib_dir = os.path.join(os.path.dirname(torch.__file__), "lib")
+    current_ld_library_path = os.environ.get("LD_LIBRARY_PATH", "")
+    ld_entries = [entry for entry in current_ld_library_path.split(":") if entry]
+    if torch_lib_dir not in ld_entries:
+        os.environ["LD_LIBRARY_PATH"] = ":".join([torch_lib_dir] + ld_entries)
+
+
+prepare_runtime()
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"--- GroundingDINO device selected: {DEVICE} ---")
 
 @lru_cache(maxsize=None)
 def load_model(model_config_path, model_checkpoint_path):
@@ -24,7 +36,7 @@ def load_model(model_config_path, model_checkpoint_path):
     args = SLConfig.fromfile(model_config_path)
     args.device = DEVICE
     model = build_model(args)
-    checkpoint = torch.load(model_checkpoint_path, map_location="cpu", weights_only=True) 
+    checkpoint = torch.load(model_checkpoint_path, map_location=DEVICE, weights_only=True)
     model.load_state_dict(clean_state_dict(checkpoint["model"]), strict=False)
     model.eval()
     print("--- Model loaded successfully! ---")

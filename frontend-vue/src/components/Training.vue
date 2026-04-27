@@ -9,6 +9,14 @@
       </template>
 
       <el-form :model="trainingConfig" label-width="120px" @submit.prevent>
+        <el-form-item label="训练模式">
+          <el-radio-group v-model="trainingConfig.mode">
+            <el-radio-button label="manual">手动配置</el-radio-button>
+            <el-radio-button label="automl">AutoML 自动配置</el-radio-button>
+          </el-radio-group>
+          <span class="form-hint">AutoML 会按数据规模自动选择模型、轮数、batch 和图像尺寸</span>
+        </el-form-item>
+
         <el-form-item label="模型名称">
           <el-input 
             v-model="trainingConfig.modelName" 
@@ -16,6 +24,18 @@
             style="width: 400px;" />
         </el-form-item>
 
+        <el-alert
+          v-if="trainingConfig.mode === 'automl'"
+          type="info"
+          :closable="false"
+          show-icon
+          class="automl-alert">
+          <template #title>
+            AutoML 模式会参考数据量和类别数自动配置：小数据优先 yolov8n，中等数据 yolov8s，大数据 yolov8m；默认使用预训练权重、GPU 0、80/20 train/val 划分。
+          </template>
+        </el-alert>
+
+        <template v-if="trainingConfig.mode === 'manual'">
         <el-form-item label="训练轮数">
           <el-input-number 
             v-model="trainingConfig.epochs" 
@@ -43,36 +63,29 @@
           <span class="form-hint">必须是 32 的倍数</span>
         </el-form-item>
 
+        <el-form-item label="训练设备">
+          <el-select v-model="trainingConfig.device" style="width: 180px;">
+            <el-option label="GPU 0" value="0" />
+            <el-option label="CPU" value="cpu" />
+          </el-select>
+          <span class="form-hint">默认使用 GPU 0；无 CUDA 时算法服务自动回退 CPU</span>
+        </el-form-item>
+        </template>
+
         <el-form-item label="数据集划分">
-          <el-row :gutter="20">
-            <el-col :span="8">
-              <el-input-number 
-                v-model="trainingConfig.trainRatio" 
-                :min="0" 
-                :max="100" 
-                :step="5" 
-                style="width: 100%;" />
-              <span class="ratio-label">训练集 %</span>
-            </el-col>
-            <el-col :span="8">
-              <el-input-number 
-                v-model="trainingConfig.valRatio" 
-                :min="0" 
-                :max="100" 
-                :step="5" 
-                style="width: 100%;" />
-              <span class="ratio-label">验证集 %</span>
-            </el-col>
-            <el-col :span="8">
-              <el-input-number 
-                v-model="trainingConfig.testRatio" 
-                :min="0" 
-                :max="100" 
-                :step="5" 
-                style="width: 100%;" />
-              <span class="ratio-label">测试集 %</span>
-            </el-col>
-          </el-row>
+          <el-alert
+            type="info"
+            :closable="false"
+            show-icon
+            title="当前训练数据会随机划分为 80% 训练集、20% 验证集；不单独生成 test 集。"
+          />
+        </el-form-item>
+
+        <el-form-item label="复训策略">
+          <el-checkbox v-model="trainingConfig.forceRetrain">
+            允许无新增数据时复训同一批数据
+          </el-checkbox>
+          <span class="form-hint">默认会阻止与上次完成训练完全相同的数据集，避免误重复训练。</span>
         </el-form-item>
 
         <el-form-item>
@@ -212,9 +225,24 @@
     </el-card>
 
     <!-- 模型测试 -->
-    <el-card v-if="showTestSection" class="panel">
+    <el-card class="panel">
       <template #header>
-        <span class="card-title">模型测试</span>
+        <div class="history-header">
+          <span class="card-title">模型测试</span>
+          <el-select
+            v-model="selectedTestModelId"
+            placeholder="选择测试模型"
+            filterable
+            clearable
+            style="width: 360px;"
+            @change="handleTestModelChange">
+            <el-option
+              v-for="model in completedModels"
+              :key="model.id"
+              :label="testModelLabel(model)"
+              :value="model.id" />
+          </el-select>
+        </div>
       </template>
 
       <div class="test-section">
@@ -248,7 +276,14 @@
             </div>
 
             <div v-else class="preview-upload">
-              <img :src="testImage" alt="测试图片" />
+              <div class="test-image-preview">
+                <img v-show="!detectionCanvasReady" :src="testImage" alt="测试图片" />
+                <canvas
+                  v-show="detectionCanvasReady"
+                  ref="detectionCanvasRef"
+                  class="detection-canvas"
+                />
+              </div>
               <div class="preview-actions">
                 <el-button size="small" @click.stop="clearTestImage">更换图片</el-button>
                 <el-button 
@@ -263,6 +298,15 @@
             </div>
           </div>
         </el-upload>
+
+        <el-alert
+          v-if="!selectedTestModel"
+          type="warning"
+          :closable="false"
+          show-icon
+          class="test-model-alert"
+          title="暂无可测试模型。训练完成后会自动选择最新模型，也可以在训练历史中手动选择。"
+        />
 
         <div v-if="testImage" class="test-result">
           <div v-if="detectionResults.length > 0" class="detection-results">
@@ -361,13 +405,13 @@ const props = defineProps({
 })
 
 const trainingConfig = ref({
+  mode: 'manual',
   modelName: '',
   epochs: 100,
   batchSize: 16,
   imageSize: 640,
-  trainRatio: 70,
-  valRatio: 20,
-  testRatio: 10
+  device: '0',
+  forceRetrain: false
 })
 
 const isStarting = ref(false)
@@ -377,16 +421,20 @@ const testImage = ref(null)
 const testFile = ref(null)
 const isDetecting = ref(false)
 const detectionResults = ref([])
+const detectionCanvasRef = ref(null)
+const detectionCanvasReady = ref(false)
 const consoleLogs = ref([])
 const consoleRef = ref(null)
 const trainingHistory = ref([])
 const historyLoading = ref(false)
 const selectedTestModel = ref(null)
+const selectedTestModelId = ref(null)
 
 let pollInterval = null
 let trainingStartTime = null
 let elapsedTimerInterval = null
 let lastLoggedEpoch = 0
+let lastLoggedLossEpoch = 0
 const elapsedSeconds = ref(0)
 
 const currentTimeStr = computed(() => {
@@ -406,7 +454,8 @@ const elapsedDisplay = computed(() => {
 
 const trainingProgress = computed(() => {
   if (!trainingStatus.value || !trainingStatus.value.currentEpoch) return 0
-  return Math.round((trainingStatus.value.currentEpoch / trainingStatus.value.totalEpochs) * 100)
+  const percentage = Math.round((trainingStatus.value.currentEpoch / trainingStatus.value.totalEpochs) * 100)
+  return trainingStatus.value.status === 'TRAINING' ? Math.min(99, percentage) : percentage
 })
 
 const formatProgress = (percentage) => {
@@ -424,6 +473,12 @@ const getStatusType = (status) => {
 }
 
 const getStatusText = (status) => {
+  if (
+    status === 'TRAINING' &&
+    trainingStatus.value?.currentEpoch >= trainingStatus.value?.totalEpochs
+  ) {
+    return '最终验证与保存中'
+  }
   const textMap = {
     'PREPARING': '准备中',
     'TRAINING': '训练中',
@@ -474,25 +529,54 @@ const startTraining = async () => {
     return
   }
 
-  const total = trainingConfig.value.trainRatio + trainingConfig.value.valRatio + trainingConfig.value.testRatio
-  if (total !== 100) {
-    ElMessage.warning('数据集划分比例之和必须为 100%')
-    return
-  }
-
   try {
     isStarting.value = true
+    const previewResponse = await projectAPI.getTrainingPreview(props.project.id)
+    const preview = previewResponse.data || {}
+    if (preview.canStart === false) {
+      ElMessage.error('当前没有可用于训练的已审核标注数据')
+      return
+    }
+    const skippedCount = preview.skippedIncrementals?.length || 0
+    const reviewedCount = preview.reviewedIncrementals?.length || 0
+    const syncResult = preview.syncResult || {}
+    const currentPool = preview.currentRoundPoolStats || {}
+    const latestTraining = preview.latestTrainingData || {}
+    const previewHtml = `
+      <div style="line-height:1.8;text-align:left;">
+        <div>主项目任务数：<b>${preview.mainTaskCount || 0}</b>${preview.mainProjectAlive ? '' : '（Label Studio 主项目不可用）'}</div>
+        <div>已全审增量任务数：<b>${preview.reviewedIncrementalTasks || 0}</b>，批次数：<b>${reviewedCount}</b></div>
+        <div>将跳过未全审增量任务数：<b>${preview.pendingIncrementalTasks || 0}</b>，批次数：<b>${skippedCount}</b></div>
+        <div>当前采集轮次：<b>#${preview.currentRoundId || '-'}</b>，本轮新增回流 <b>${currentPool.total || 0}</b> 张（高置信 ${currentPool.HIGH || 0}，低-A ${currentPool.LOW_A || 0}，低-B ${currentPool.LOW_B || 0}，丢弃 ${currentPool.DISCARDED || 0}）</div>
+        <div>上次完成训练：${latestTraining.exists ? `<b>#${latestTraining.trainingRecordId}</b>，数据 ${latestTraining.totalImages || 0} 张 / ${latestTraining.totalAnnotations || 0} 框` : '<b>暂无</b>'}</div>
+        <div>可信池：总计 <b>${syncResult.trustedTotal || 0}</b> 张，已入主 LS <b>${syncResult.trustedSyncedTotal || 0}</b> 张，待补偿 <b>${syncResult.trustedPending || 0}</b> 张</div>
+        <div>本次新增同步：可信数据 <b>${syncResult.trustedSyncedThisTime || syncResult.trustedSynced || 0}</b> 张，LOW_B 入增量项目 <b>${syncResult.lowBSyncedThisTime || syncResult.lowBSynced || 0}</b> 张</div>
+        <div>LOW_B 未满批等待：<b>${syncResult.waitingLowB || 0}</b> / <b>${syncResult.lowBBatchSize || 100}</b></div>
+        <div>本次可用任务总数：<b>${preview.totalUsableTasks || 0}</b></div>
+        ${currentPool.total === 0 && latestTraining.exists ? '<div style="color:#E6A23C;">当前轮次还没有新的边端回流数据；如继续训练，可能与上次训练数据相同并被后端拦截。</div>' : ''}
+        <div style="color:#606266;">${preview.splitPolicy || '随机 80% 训练集 / 20% 验证集'}</div>
+      </div>`
     await ElMessageBox.confirm(
-      `确认开始训练模型？\n模型名称：${trainingConfig.value.modelName}\n训练轮数：${trainingConfig.value.epochs}`,
+      previewHtml,
       '确认训练',
-      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
+      {
+        confirmButtonText: trainingConfig.value.mode === 'automl' ? '启动 AutoML' : '开始训练',
+        cancelButtonText: '取消',
+        type: 'warning',
+        dangerouslyUseHTMLString: true
+      }
     )
 
     consoleLogs.value = []
     lastLoggedEpoch = 0
+    lastLoggedLossEpoch = 0
     addLog('正在提交训练任务...', 'info', '🚀')
 
-    const response = await projectAPI.startTraining(props.project.id, trainingConfig.value)
+    const requestConfig = {
+      ...trainingConfig.value,
+      autoML: trainingConfig.value.mode === 'automl'
+    }
+    const response = await projectAPI.startTraining(props.project.id, requestConfig)
     
     if (response.data?.status === 'FAILED') {
       trainingStatus.value = response.data
@@ -503,7 +587,15 @@ const startTraining = async () => {
     
     trainingStatus.value = response.data
     
-    addLog(`模型: ${trainingConfig.value.modelName} | 轮数: ${trainingConfig.value.epochs} | 批次: ${trainingConfig.value.batchSize}`, 'info', '📋')
+    if (trainingConfig.value.mode === 'automl') {
+      addLog('AutoML 参数配置已提交，后端将按数据规模自动选择训练参数', 'info', '📋')
+      if (response.data?.autoMLConfig) {
+        const cfg = response.data.autoMLConfig
+        addLog(`AutoML 已选择: ${cfg.modelType} | ${cfg.epochs} 轮 | batch ${cfg.batchSize} | imgsz ${cfg.imageSize}`, 'success', '✅')
+      }
+    } else {
+      addLog(`模型: ${trainingConfig.value.modelName} | 轮数: ${trainingConfig.value.epochs} | 批次: ${trainingConfig.value.batchSize}`, 'info', '📋')
+    }
     addLog('训练任务已创建，开始准备数据...', 'success', '✅')
     
     ElMessage.success('训练已启动')
@@ -555,18 +647,50 @@ const loadTrainingStatus = async () => {
       }
     }
     
-    if (
-      newStatus.status === 'TRAINING' &&
-      newStatus.currentEpoch &&
-      newStatus.currentEpoch % 10 === 0 &&
-      newStatus.currentEpoch > lastLoggedEpoch
-    ) {
-      lastLoggedEpoch = newStatus.currentEpoch
-      addLog(`Epoch ${newStatus.currentEpoch}/${newStatus.totalEpochs} - loss: ${newStatus.trainLoss?.toFixed(4) || '?'}`, 'info', '📈')
+    if (shouldLogEpochStatus(newStatus)) {
+      const epoch = Number(newStatus.currentEpoch || 0)
+      lastLoggedEpoch = epoch
+      if (newStatus.trainLoss != null) {
+        lastLoggedLossEpoch = epoch
+      }
+      addLog(`Epoch ${epoch}/${newStatus.totalEpochs} - ${formatLossStatus(newStatus)}`, 'info', '📈')
     }
   } catch (error) {
     console.error('获取训练状态失败:', error)
   }
+}
+
+const shouldLogEpochStatus = (status) => {
+  if (status?.status !== 'TRAINING') return false
+  const epoch = Number(status.currentEpoch || 0)
+  if (!epoch || epoch <= 0) return false
+  if (epoch <= lastLoggedEpoch && !(status.trainLoss != null && lastLoggedLossEpoch === 0)) {
+    return false
+  }
+
+  const totalEpochs = Number(status.totalEpochs || 0)
+  const hasLoss = status.trainLoss != null
+  if (hasLoss && lastLoggedLossEpoch === 0) {
+    return true
+  }
+  if (totalEpochs > 0 && epoch >= totalEpochs && epoch > lastLoggedEpoch) {
+    return true
+  }
+  if (epoch - lastLoggedEpoch >= 10) {
+    return true
+  }
+  return !hasLoss && lastLoggedEpoch === 0
+}
+
+const formatLossStatus = (status) => {
+  if (status?.trainLoss != null) {
+    const parts = [`loss: ${Number(status.trainLoss).toFixed(4)}`]
+    if (status.boxLoss != null) parts.push(`box ${Number(status.boxLoss).toFixed(4)}`)
+    if (status.clsLoss != null) parts.push(`cls ${Number(status.clsLoss).toFixed(4)}`)
+    if (status.dflLoss != null) parts.push(`dfl ${Number(status.dflLoss).toFixed(4)}`)
+    return parts.join(' · ')
+  }
+  return 'loss: 采集中'
 }
 
 const startPolling = () => {
@@ -585,12 +709,13 @@ const stopPolling = () => {
 
 const resetTraining = () => {
   trainingStatus.value = null
-  showTestSection.value = false
   testImage.value = null
   detectionResults.value = []
+  detectionCanvasReady.value = false
   consoleLogs.value = []
   elapsedSeconds.value = 0
   lastLoggedEpoch = 0
+  lastLoggedLossEpoch = 0
   stopElapsedTimer()
 }
 
@@ -607,6 +732,7 @@ const handleImageSelect = (file) => {
   reader.onload = (e) => {
     testImage.value = e.target.result
     detectionResults.value = []
+    detectionCanvasReady.value = false
   }
   reader.readAsDataURL(file.raw)
 }
@@ -615,6 +741,79 @@ const clearTestImage = () => {
   testImage.value = null
   testFile.value = null
   detectionResults.value = []
+  detectionCanvasReady.value = false
+}
+
+const normalizeBbox = (bbox) => {
+  if (!bbox) return null
+  if (Array.isArray(bbox) && bbox.length >= 4) {
+    const [x1, y1, x2, y2] = bbox.map(Number)
+    return { x1, y1, x2, y2 }
+  }
+  if (typeof bbox === 'object') {
+    const x1 = Number(bbox.x1 ?? bbox.x ?? bbox.left)
+    const y1 = Number(bbox.y1 ?? bbox.y ?? bbox.top)
+    const x2 = bbox.x2 != null ? Number(bbox.x2) : x1 + Number(bbox.width ?? bbox.w ?? 0)
+    const y2 = bbox.y2 != null ? Number(bbox.y2) : y1 + Number(bbox.height ?? bbox.h ?? 0)
+    return { x1, y1, x2, y2 }
+  }
+  return null
+}
+
+const drawDetectionPreview = async () => {
+  if (!testImage.value) return
+  await nextTick()
+  const canvas = detectionCanvasRef.value
+  if (!canvas) return
+
+  const img = new Image()
+  img.onload = () => {
+    const ctx = canvas.getContext('2d')
+    canvas.width = img.naturalWidth || img.width
+    canvas.height = img.naturalHeight || img.height
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+
+    const colors = ['#e11d48', '#2563eb', '#16a34a', '#f59e0b', '#7c3aed', '#0891b2']
+    detectionResults.value.forEach((det, index) => {
+      const box = normalizeBbox(det.bbox)
+      if (!box) return
+
+      const x = Math.max(0, Math.min(box.x1, canvas.width))
+      const y = Math.max(0, Math.min(box.y1, canvas.height))
+      const width = Math.max(0, Math.min(box.x2, canvas.width) - x)
+      const height = Math.max(0, Math.min(box.y2, canvas.height) - y)
+      if (width <= 0 || height <= 0) return
+
+      const color = colors[index % colors.length]
+      const label = `${det.label || '目标'} ${((Number(det.confidence) || 0) * 100).toFixed(1)}%`
+
+      ctx.strokeStyle = color
+      ctx.lineWidth = Math.max(2, Math.round(canvas.width / 360))
+      ctx.strokeRect(x, y, width, height)
+
+      ctx.font = `bold ${Math.max(14, Math.round(canvas.width / 42))}px Arial`
+      const paddingX = 8
+      const paddingY = 5
+      const textMetrics = ctx.measureText(label)
+      const labelHeight = Math.max(22, Math.round(canvas.width / 28))
+      const labelWidth = Math.min(canvas.width - x, textMetrics.width + paddingX * 2)
+      const labelY = y >= labelHeight ? y - labelHeight : y
+
+      ctx.fillStyle = color
+      ctx.fillRect(x, labelY, labelWidth, labelHeight)
+      ctx.fillStyle = '#ffffff'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(label, x + paddingX, labelY + labelHeight / 2)
+    })
+
+    detectionCanvasReady.value = true
+  }
+  img.onerror = () => {
+    detectionCanvasReady.value = false
+    ElMessage.error('测试图片加载失败，无法绘制检测框')
+  }
+  img.src = testImage.value
 }
 
 const runDetection = async () => {
@@ -637,6 +836,7 @@ const runDetection = async () => {
 
     const response = await projectAPI.detectWithTrainedModel(props.project.id, formData)
     detectionResults.value = response.data.detections || []
+    await drawDetectionPreview()
     
     if (detectionResults.value.length === 0) {
       ElMessage.info('未检测到目标')
@@ -667,23 +867,45 @@ const syncSelectedTestModel = (preferLatestCompleted = false) => {
   const completed = trainingHistory.value.filter(record => record.status === 'COMPLETED' && record.bestModelPath)
   if (completed.length === 0) {
     selectedTestModel.value = null
+    selectedTestModelId.value = null
     return
   }
 
   if (preferLatestCompleted || !selectedTestModel.value) {
     selectedTestModel.value = completed[0]
+    selectedTestModelId.value = completed[0].id
     return
   }
 
   const stillExists = completed.find(record => record.id === selectedTestModel.value.id)
   selectedTestModel.value = stillExists || completed[0]
+  selectedTestModelId.value = selectedTestModel.value.id
 }
 
 const selectTestModel = (record) => {
   selectedTestModel.value = record
-  showTestSection.value = true
+  selectedTestModelId.value = record.id
   detectionResults.value = []
+  detectionCanvasReady.value = false
   ElMessage.success(`已切换测试模型：${record.runName || record.id}`)
+}
+
+const completedModels = computed(() => trainingHistory.value.filter(record => record.status === 'COMPLETED' && record.bestModelPath))
+
+const testModelLabel = (model) => {
+  const score = model.map50 != null ? ` · mAP@0.5 ${model.map50.toFixed(4)}` : ''
+  return `#${model.id} ${model.runName || model.modelType}${score}`
+}
+
+const handleTestModelChange = (modelId) => {
+  const model = completedModels.value.find(item => item.id === modelId)
+  if (model) {
+    selectTestModel(model)
+  } else {
+    selectedTestModel.value = null
+    detectionResults.value = []
+    detectionCanvasReady.value = false
+  }
 }
 
 const getHistoryStatusType = (status) => {
@@ -827,12 +1049,22 @@ onUnmounted(() => {
   gap: 16px;
   padding: 24px;
 }
-.preview-upload img {
+.test-image-preview {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+.test-image-preview img,
+.detection-canvas {
   max-width: min(640px, 100%);
   max-height: 560px;
   border-radius: 8px;
   object-fit: contain;
   box-shadow: 0 1px 8px rgba(0, 0, 0, 0.08);
+}
+.detection-canvas {
+  width: auto;
+  height: auto;
 }
 .preview-actions {
   display: flex;

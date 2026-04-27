@@ -68,7 +68,7 @@ def test_cancel_nonexistent_training(authenticated_session):
     nonexistent_id = 999999999
     
     response = authenticated_session.post(
-        f"{TestConfig.BACKEND_BASE_URL}/api/v1/training/cancel/{nonexistent_id}"
+        f"{TestConfig.BACKEND_BASE_URL}/training/cancel/{nonexistent_id}"
     )
     
     if response.status_code == 200:
@@ -122,7 +122,7 @@ def test_get_nonexistent_training_record(authenticated_session):
     nonexistent_id = 999999999
     
     response = authenticated_session.get(
-        f"{TestConfig.BACKEND_BASE_URL}/api/v1/training/record/{nonexistent_id}"
+        f"{TestConfig.BACKEND_BASE_URL}/training/record/{nonexistent_id}"
     )
     
     if response.status_code == 200:
@@ -133,7 +133,7 @@ def test_get_nonexistent_training_record(authenticated_session):
 
 def test_invalid_training_request_missing_fields(authenticated_session):
     response = authenticated_session.post(
-        f"{TestConfig.BACKEND_BASE_URL}/api/v1/training/start",
+        f"{TestConfig.BACKEND_BASE_URL}/training/start",
         json={}
     )
     
@@ -147,7 +147,7 @@ def test_get_nonexistent_test_results(authenticated_session):
     nonexistent_task_id = "nonexistent_test_task"
     
     response = authenticated_session.get(
-        f"{TestConfig.BACKEND_BASE_URL}/api/v1/test/results/{nonexistent_task_id}"
+        f"{TestConfig.BACKEND_BASE_URL}/test/results/{nonexistent_task_id}"
     )
     
     if response.status_code == 200:

@@ -81,6 +81,19 @@ public class Project {
     @Column(name = "ls_project_id")
     private Long lsProjectId;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "ls_project_status", length = 20)
+    @Builder.Default
+    private LsProjectStatus lsProjectStatus = LsProjectStatus.UNKNOWN;
+
+    @Column(name = "current_round_id")
+    private Long currentRoundId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "project_type", length = 20)
+    @Builder.Default
+    private ProjectType projectType = ProjectType.LEGACY;
+
     public enum ProjectStatus {
         DRAFT,
         UPLOADING,
@@ -89,5 +102,17 @@ public class Project {
         SYNCING,
         COMPLETED,
         FAILED
+    }
+
+    public enum ProjectType {
+        LEGACY,
+        ITERATIVE
+    }
+
+    public enum LsProjectStatus {
+        UNKNOWN,
+        ACTIVE,
+        DEAD,
+        REPAIRED
     }
 }

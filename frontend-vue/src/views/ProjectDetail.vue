@@ -44,29 +44,37 @@
 
     <div v-if="project.id" class="project-tabs-wrapper">
       <el-tabs v-model="activeTab" class="project-tabs">
-        <el-tab-pane label="类别定义" name="labels">
-          <LabelDefinition :project="project" @refresh="loadProject" />
-        </el-tab-pane>
+        <el-tab-pane label="数据与标注" name="workspace">
+          <div class="workspace-page">
+            <el-card shadow="never" class="workspace-card labels-card">
+              <template #header><span class="card-title">类别定义</span></template>
+              <LabelDefinition :project="project" @refresh="loadProject" />
+            </el-card>
 
-        <el-tab-pane label="数据管理" name="data">
-          <DataManager :project="project" @refresh="loadProject" />
-        </el-tab-pane>
+            <el-card shadow="never" class="workspace-card data-card">
+              <template #header><span class="card-title">数据管理</span></template>
+              <DataManager :project="project" @refresh="loadProject" />
+            </el-card>
 
-        <el-tab-pane label="自动标注" name="tasks">
-          <AlgorithmTasks :project="project" @refresh="loadProject" />
+            <el-card shadow="never" class="workspace-card annotation-card">
+              <template #header><span class="card-title">自动标注</span></template>
+              <AlgorithmTasks :project="project" @refresh="loadProject" />
+            </el-card>
+          </div>
         </el-tab-pane>
 
         <el-tab-pane label="结果查看" name="results">
           <ResultViewer :project="project" />
         </el-tab-pane>
 
-        <el-tab-pane label="导出结果" name="export">
-          <ResultExport :project="project" />
-        </el-tab-pane>
-
         <el-tab-pane label="模型训练" name="training">
           <Training :project="project" @refresh="loadProject" />
         </el-tab-pane>
+
+        <el-tab-pane label="边端模拟" name="edge">
+          <EdgeSimulator :project="project" @refresh="loadProject" />
+        </el-tab-pane>
+
       </el-tabs>
     </div>
   </div>
@@ -77,18 +85,18 @@ import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { projectAPI, labelStudioAPI, userAPI } from '@/api'
 import { ElMessage } from 'element-plus'
-import { Key, DocumentCopy } from '@element-plus/icons-vue'
+import { Key, DocumentCopy, Link } from '@element-plus/icons-vue'
 import LabelDefinition from '@/components/LabelDefinition.vue'
 import DataManager from '@/components/DataManager.vue'
 import AlgorithmTasks from '@/components/AlgorithmTasks.vue'
 import ResultViewer from '@/components/ResultViewer.vue'
-import ResultExport from '@/components/ResultExport.vue'
 import Training from '@/components/Training.vue'
+import EdgeSimulator from '@/components/EdgeSimulator.vue'
 
 const router = useRouter()
 const route = useRoute()
 
-const activeTab = ref('labels')
+const activeTab = ref('workspace')
 const project = ref({
   id: null,
   name: '',
@@ -192,7 +200,7 @@ const openLabelStudio = async () => {
     const response = await labelStudioAPI.getLoginUrl({
       projectId: project.value.id
     })
-    const loginUrl = response.data
+    const loginUrl = normalizeLabelStudioUrl(response.data)
     if (loginUrl) {
       window.open(loginUrl, '_blank')
     } else {
@@ -200,6 +208,19 @@ const openLabelStudio = async () => {
     }
   } catch (error) {
     ElMessage.error('打开 Label Studio 失败')
+  }
+}
+
+const normalizeLabelStudioUrl = (url) => {
+  if (!url) return url
+  try {
+    const parsed = new URL(url)
+    if (parsed.hostname === 'localhost' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      parsed.hostname = window.location.hostname
+    }
+    return parsed.toString()
+  } catch (error) {
+    return url
   }
 }
 
@@ -229,6 +250,51 @@ onUnmounted(() => {
   background: #fff;
   border: 0.5px solid var(--gray-200);
   border-radius: var(--radius-lg);
-  padding: 20px 24px;
+  padding: 14px 18px 18px;
+}
+
+.workspace-page {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.9fr) minmax(420px, 1.5fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.workspace-card {
+  border-radius: 8px;
+}
+
+.workspace-card :deep(.el-card__header) {
+  padding: 10px 14px;
+}
+
+.workspace-card :deep(.el-card__body) {
+  padding: 14px;
+}
+
+.data-card {
+  grid-row: span 2;
+}
+
+.annotation-card {
+  grid-column: 1 / -1;
+}
+
+.card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--gray-900);
+}
+
+@media (max-width: 1180px) {
+  .workspace-page {
+    grid-template-columns: 1fr;
+  }
+
+  .data-card,
+  .annotation-card {
+    grid-column: auto;
+    grid-row: auto;
+  }
 }
 </style>

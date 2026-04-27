@@ -32,6 +32,7 @@ class TaskInfo:
         self.status = TaskStatus.PENDING
         self.parameters = parameters
         self.results = []
+        self.metrics: Dict[str, Any] = {}
         self.error_message = None
         self.created_at = datetime.now()
         self.started_at = None
@@ -49,15 +50,24 @@ class TaskInfo:
             "processed_images": self.processed_images,
             "progress": int((self.processed_images / self.total_images * 100)) if self.total_images > 0 else 0,
             "parameters": self.parameters,
+            "metrics": self.metrics,
+            "current_epoch": self.metrics.get("current_epoch"),
+            "train_loss": self.metrics.get("train_loss"),
+            "val_loss": self.metrics.get("val_loss"),
+            "box_loss": self.metrics.get("box_loss"),
+            "cls_loss": self.metrics.get("cls_loss"),
+            "dfl_loss": self.metrics.get("dfl_loss"),
             "error_message": self.error_message,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None
         }
     
-    def update_progress(self, processed: int):
+    def update_progress(self, processed: int, metrics: Optional[Dict[str, Any]] = None):
         """更新进度"""
         self.processed_images = processed
+        if metrics:
+            self.metrics.update(metrics)
         logger.info(f"Task {self.task_id}: Progress {processed}/{self.total_images} ({self.to_dict()['progress']}%)")
     
     def set_running(self):
@@ -120,12 +130,12 @@ class TaskManager:
         async with self._lock:
             return self.tasks.get(task_id)
     
-    async def update_task_progress(self, task_id: str, processed: int):
+    async def update_task_progress(self, task_id: str, processed: int, metrics: Optional[Dict[str, Any]] = None):
         """更新任务进度"""
         async with self._lock:
             task = self.tasks.get(task_id)
             if task:
-                task.update_progress(processed)
+                task.update_progress(processed, metrics)
     
     async def set_task_running(self, task_id: str):
         """设置任务为运行中"""

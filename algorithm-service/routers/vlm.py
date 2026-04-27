@@ -158,6 +158,7 @@ async def run_vlm_cleaning_with_detections_task(
         await task_manager.set_task_failed(task_id, str(e))
 
 
+@router.post("/algo/vlm/clean", response_model=VlmCleanResponse)
 @router.post("/algo/vlm/clean/mock", response_model=VlmCleanResponse)
 async def run_vlm_cleaning(request: VlmCleanRequest, background_tasks: BackgroundTasks):
     """运行 VLM 清洗（异步后台任务）"""
@@ -249,10 +250,10 @@ async def cancel_vlm_task(task_id: str):
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
     
     if task.status.value in ["completed", "failed", "cancelled"]:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot cancel task {task_id}. Current status: {task.status.value}"
-        )
+        return {
+            "success": True,
+            "message": f"Task {task_id} is already {task.status.value}"
+        }
     
     await task_manager.set_task_cancelled(task_id)
     logger.info(f"Task {task_id}: Cancelled by user")

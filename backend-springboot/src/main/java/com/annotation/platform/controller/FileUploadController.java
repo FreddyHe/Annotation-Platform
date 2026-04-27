@@ -60,6 +60,11 @@ public class FileUploadController {
         return Result.success(progress);
     }
 
+    @GetMapping("/chunks/{fileId}")
+    public Result<Map<String, Object>> getUploadedChunks(@PathVariable String fileId) {
+        return Result.success(fileUploadService.listUploadedChunks(fileId));
+    }
+
     @DeleteMapping("/file")
     public Result<Void> deleteFile(@RequestParam String filePath) {
         log.info("删除文件: {}", filePath);

@@ -23,14 +23,18 @@ import java.sql.*;
 import java.io.File;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
+    private static final int PREDICTION_IMPORT_BATCH_SIZE = 500;
 
     @Value("${app.label-studio.url}")
     private String labelStudioUrl;
@@ -57,14 +61,11 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException(com.annotation.platform.common.ErrorCode.USER_001));
 
-        String lsToken = createLSToken(userId);
+        createLSToken(userId);
 
-        String loginUrl;
-        if (returnUrl != null && !returnUrl.isBlank()) {
-            loginUrl = String.format("%s%s?token=%s", labelStudioPublicUrl, returnUrl, lsToken);
-        } else {
-            loginUrl = String.format("%s/projects?token=%s", labelStudioPublicUrl, lsToken);
-        }
+        String next = returnUrl != null && !returnUrl.isBlank() ? returnUrl : "/projects";
+        String encodedNext = URLEncoder.encode(next, StandardCharsets.UTF_8);
+        String loginUrl = String.format("%s/user/login/?next=%s", labelStudioPublicUrl, encodedNext);
 
         log.info("生成 Label Studio 登录链接: userId={}, loginUrl={}", userId, loginUrl);
         return loginUrl;
@@ -351,11 +352,15 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
                     try {
                         restTemplate.exchange(deleteUrl, HttpMethod.DELETE, entity, String.class);
                         log.info("已删除 local storage: storageId={}, lsProjectId={}", storageId, lsProjectId);
+                    } catch (org.springframework.web.client.HttpClientErrorException.NotFound e) {
+                        log.info("Label Studio local storage 已不存在，跳过: storageId={}, lsProjectId={}", storageId, lsProjectId);
                     } catch (Exception e) {
                         log.warn("删除 local storage 失败: storageId={}, error={}", storageId, e.getMessage());
                     }
                 }
             }
+        } catch (org.springframework.web.client.HttpClientErrorException.NotFound e) {
+            log.info("Label Studio 项目或 storage 已不存在，跳过 storage 清理: lsProjectId={}", lsProjectId);
         } catch (Exception e) {
             log.warn("清理 local storage 失败: lsProjectId={}, error={}", lsProjectId, e.getMessage());
         }
@@ -383,6 +388,8 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
             );
 
             log.info("Label Studio 项目删除成功: lsProjectId={}", lsProjectId);
+        } catch (org.springframework.web.client.HttpClientErrorException.NotFound e) {
+            log.info("Label Studio 项目已不存在，跳过: lsProjectId={}", lsProjectId);
         } catch (Exception e) {
             log.warn("Label Studio 删除项目失败: lsProjectId={}, error={}", lsProjectId, e.getMessage());
             throw e;
@@ -541,11 +548,160 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
                 return stats;
             }
 
-            String tasksUrl = String.format("%s/api/tasks?project=%d", labelStudioUrl, lsProjectId);
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("Authorization", "Token " + lsToken);
 
+            List<Map<String, Object>> tasks = fetchAllProjectTasks(lsProjectId, headers);
+
+            stats.put("total", tasks.size());
+
+            if (tasks.isEmpty()) {
+                log.warn("Label Studio 项目中没有任务: lsProjectId={}", lsProjectId);
+                return stats;
+            }
+
+            Map<String, Map<String, Object>> predictionsByImageName = new LinkedHashMap<>();
+            for (Map<String, Object> pred : predictions) {
+                Object imageNameObj = pred.get("image_name");
+                if (imageNameObj instanceof String imageName && !imageName.isBlank()) {
+                    predictionsByImageName.putIfAbsent(imageName, pred);
+                }
+            }
+
+            List<Map<String, Object>> bulkPayload = new ArrayList<>();
+            for (Map<String, Object> task : tasks) {
+                String imageName = extractTaskImageName(task);
+                if (imageName == null || imageName.isBlank()) {
+                    stats.put("skipped", (int) stats.get("skipped") + 1);
+                    continue;
+                }
+
+                Map<String, Object> prediction = predictionsByImageName.get(imageName);
+                if (prediction == null) {
+                    stats.put("skipped", (int) stats.get("skipped") + 1);
+                    continue;
+                }
+
+                List<Map<String, Object>> results = (List<Map<String, Object>>) prediction.get("results");
+                if (results == null || results.isEmpty()) {
+                    stats.put("skipped", (int) stats.get("skipped") + 1);
+                    continue;
+                }
+
+                Double avgScore = prediction.get("avg_score") != null ?
+                        ((Number) prediction.get("avg_score")).doubleValue() : 0.95;
+
+                Map<String, Object> payload = new HashMap<>();
+                payload.put("task", task.get("id"));
+                payload.put("result", results);
+                payload.put("model_version", "dino_threshold_v1");
+                payload.put("score", avgScore);
+                bulkPayload.add(payload);
+            }
+
+            if (bulkPayload.isEmpty()) {
+                log.info("没有可导入的 Label Studio 预测: lsProjectId={}, skipped={}", lsProjectId, stats.get("skipped"));
+                return stats;
+            }
+
+            importPredictionsInBatches(lsProjectId, bulkPayload, headers, stats);
+
+        } catch (Exception e) {
+            log.error("批量导入预测失败: lsProjectId={}, error={}", lsProjectId, e.getMessage(), e);
+        }
+
+        return stats;
+    }
+
+    private void importPredictionsInBatches(Long lsProjectId,
+                                            List<Map<String, Object>> bulkPayload,
+                                            HttpHeaders headers,
+                                            Map<String, Object> stats) {
+        String bulkUrl = String.format("%s/api/projects/%d/import/predictions", labelStudioUrl, lsProjectId);
+        for (int start = 0; start < bulkPayload.size(); start += PREDICTION_IMPORT_BATCH_SIZE) {
+            int end = Math.min(start + PREDICTION_IMPORT_BATCH_SIZE, bulkPayload.size());
+            List<Map<String, Object>> batch = bulkPayload.subList(start, end);
+
+            try {
+                HttpEntity<String> entity = new HttpEntity<>(JSON.toJSONString(batch), headers);
+                ResponseEntity<String> response = restTemplate.exchange(
+                        bulkUrl,
+                        HttpMethod.POST,
+                        entity,
+                        String.class
+                );
+
+                if (response.getStatusCode() == HttpStatus.OK || response.getStatusCode() == HttpStatus.CREATED) {
+                    int created = extractCreatedPredictionCount(response.getBody(), batch.size());
+                    stats.put("success", (int) stats.get("success") + created);
+                    log.info("Label Studio 批量预测导入成功: lsProjectId={}, batch={}-{}, created={}",
+                            lsProjectId, start, end - 1, created);
+                } else {
+                    log.warn("Label Studio 批量预测导入返回非成功状态，回退逐条导入: lsProjectId={}, status={}, body={}",
+                            lsProjectId, response.getStatusCode(), response.getBody());
+                    importPredictionsOneByOne(batch, headers, stats);
+                }
+            } catch (Exception e) {
+                log.warn("Label Studio 批量预测导入失败，回退逐条导入: lsProjectId={}, batch={}-{}, error={}",
+                        lsProjectId, start, end - 1, e.getMessage());
+                importPredictionsOneByOne(batch, headers, stats);
+            }
+        }
+    }
+
+    private int extractCreatedPredictionCount(String responseBody, int fallbackCount) {
+        if (responseBody == null || responseBody.isBlank()) {
+            return fallbackCount;
+        }
+        try {
+            JSONObject body = JSON.parseObject(responseBody);
+            Integer created = body.getInteger("created");
+            return created != null ? created : fallbackCount;
+        } catch (Exception e) {
+            return fallbackCount;
+        }
+    }
+
+    private void importPredictionsOneByOne(List<Map<String, Object>> payloads,
+                                           HttpHeaders headers,
+                                           Map<String, Object> stats) {
+        String predictionsUrl = String.format("%s/api/predictions", labelStudioUrl);
+        for (Map<String, Object> payload : payloads) {
+            try {
+                HttpEntity<String> entity = new HttpEntity<>(JSON.toJSONString(payload), headers);
+                ResponseEntity<String> response = restTemplate.exchange(
+                        predictionsUrl,
+                        HttpMethod.POST,
+                        entity,
+                        String.class
+                );
+
+                if (response.getStatusCode() == HttpStatus.OK || response.getStatusCode() == HttpStatus.CREATED) {
+                    stats.put("success", (int) stats.get("success") + 1);
+                } else if (response.getStatusCode() == HttpStatus.GONE || response.getStatusCode() == HttpStatus.CONFLICT) {
+                    stats.put("skipped", (int) stats.get("skipped") + 1);
+                } else {
+                    stats.put("failed", (int) stats.get("failed") + 1);
+                    log.error("预测逐条导入失败: taskId={}, status={}, body={}",
+                            payload.get("task"), response.getStatusCode(), response.getBody());
+                }
+            } catch (Exception e) {
+                stats.put("failed", (int) stats.get("failed") + 1);
+                log.error("预测逐条导入异常: taskId={}, error={}", payload.get("task"), e.getMessage(), e);
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> fetchAllProjectTasks(Long lsProjectId, HttpHeaders headers) {
+        List<Map<String, Object>> tasks = new ArrayList<>();
+        int page = 1;
+        int pageSize = 100;
+
+        while (true) {
+            String tasksUrl = String.format("%s/api/tasks?project=%d&page=%d&page_size=%d",
+                    labelStudioUrl, lsProjectId, page, pageSize);
             HttpEntity<String> tasksEntity = new HttpEntity<>(headers);
             ResponseEntity<String> tasksResponse = restTemplate.exchange(
                     tasksUrl,
@@ -556,96 +712,50 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
 
             if (tasksResponse.getStatusCode() != HttpStatus.OK) {
                 log.error("获取 Label Studio 任务列表失败: lsProjectId={}, status={}", lsProjectId, tasksResponse.getStatusCode());
-                return stats;
+                return tasks;
             }
 
             JSONObject tasksData = JSON.parseObject(tasksResponse.getBody());
-            List<Map<String, Object>> tasks = tasksData.getJSONArray("tasks")
-                    .toJavaList(Object.class).stream()
-                    .map(obj -> (Map<String, Object>) obj)
-                    .collect(java.util.stream.Collectors.toList());
-
-            stats.put("total", tasks.size());
-
-            if (tasks.isEmpty()) {
-                log.warn("Label Studio 项目中没有任务: lsProjectId={}", lsProjectId);
-                return stats;
+            com.alibaba.fastjson2.JSONArray taskArray = tasksData.getJSONArray("tasks");
+            if (taskArray == null || taskArray.isEmpty()) {
+                return tasks;
             }
 
-            String predictionsUrl = String.format("%s/api/predictions", labelStudioUrl);
-            for (Map<String, Object> task : tasks) {
-                String imageUrl = (String) ((Map<String, Object>) task.get("data")).get("image");
-                String imageName = imageUrl.substring(imageUrl.lastIndexOf("/") + 1);
-
-                Map<String, Object> prediction = null;
-                for (Map<String, Object> pred : predictions) {
-                    String predImageName = (String) pred.get("image_name");
-                    if (predImageName != null && predImageName.equals(imageName)) {
-                        prediction = pred;
-                        break;
-                    }
-                }
-
-                if (prediction == null) {
-                    stats.put("skipped", (int) stats.get("skipped") + 1);
-                    continue;
-                }
-
-                try {
-                    List<Map<String, Object>> results = (List<Map<String, Object>>) prediction.get("results");
-                    Double avgScore = prediction.get("avg_score") != null ? 
-                            ((Number) prediction.get("avg_score")).doubleValue() : 0.95;
-
-                    Map<String, Object> payload = new HashMap<>();
-                    payload.put("task", task.get("id"));
-                    payload.put("result", results);
-                    payload.put("model_version", "vlm_cleaned_v1");
-                    payload.put("score", avgScore);
-
-                    log.info("[DEBUG] importPredictions - taskId={}, imageName={}, resultCount={}, score={}", 
-                            task.get("id"), imageName, results.size(), avgScore);
-                    log.info("[DEBUG] importPredictions - 完整 payload: {}", JSON.toJSONString(payload));
-                    
-                    // 额外打印每个 result 的 rectanglelabels
-                    for (int i = 0; i < results.size(); i++) {
-                        Map<String, Object> result = results.get(i);
-                        Map<String, Object> value = (Map<String, Object>) result.get("value");
-                        if (value != null && value.containsKey("rectanglelabels")) {
-                            log.info("[DEBUG] importPredictions - result[{}].rectanglelabels: {}", i, value.get("rectanglelabels"));
-                        }
-                    }
-
-                    HttpEntity<String> entity = new HttpEntity<>(JSON.toJSONString(payload), headers);
-                    ResponseEntity<String> response = restTemplate.exchange(
-                            predictionsUrl,
-                            HttpMethod.POST,
-                            entity,
-                            String.class
-                    );
-
-                    if (response.getStatusCode() == HttpStatus.OK || response.getStatusCode() == HttpStatus.CREATED) {
-                        stats.put("success", (int) stats.get("success") + 1);
-                        log.info("预测导入成功: taskId={}", task.get("id"));
-                    } else if (response.getStatusCode() == HttpStatus.GONE || response.getStatusCode() == HttpStatus.CONFLICT) {
-                        stats.put("skipped", (int) stats.get("skipped") + 1);
-                        log.info("预测已存在: taskId={}", task.get("id"));
-                    } else {
-                        stats.put("failed", (int) stats.get("failed") + 1);
-                        log.error("预测导入失败: taskId={}, status={}, body={}", 
-                                task.get("id"), response.getStatusCode(), response.getBody());
-                    }
-
-                } catch (Exception e) {
-                    log.error("导入预测失败: taskId={}, error={}", task.get("id"), e.getMessage(), e);
-                    stats.put("failed", (int) stats.get("failed") + 1);
-                }
+            for (Object obj : taskArray) {
+                tasks.add((Map<String, Object>) obj);
             }
 
-        } catch (Exception e) {
-            log.error("批量导入预测失败: lsProjectId={}, error={}", lsProjectId, e.getMessage(), e);
+            Integer total = tasksData.getInteger("total");
+            if (taskArray.size() < pageSize || (total != null && tasks.size() >= total)) {
+                return tasks;
+            }
+            page++;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private String extractTaskImageName(Map<String, Object> task) {
+        Object dataObj = task.get("data");
+        if (!(dataObj instanceof Map)) {
+            return null;
         }
 
-        return stats;
+        Map<String, Object> data = (Map<String, Object>) dataObj;
+        Object imageObj = data.get("image");
+        if (imageObj == null) {
+            imageObj = data.get("$undefined$");
+        }
+        if (!(imageObj instanceof String imageUrl) || imageUrl.isBlank()) {
+            return null;
+        }
+
+        int slashIndex = imageUrl.lastIndexOf('/');
+        String imageName = slashIndex >= 0 ? imageUrl.substring(slashIndex + 1) : imageUrl;
+        int queryIndex = imageName.indexOf('?');
+        if (queryIndex >= 0) {
+            imageName = imageName.substring(0, queryIndex);
+        }
+        return imageName;
     }
 
     @Override
@@ -1014,61 +1124,51 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
                 return createEmptyReviewStats();
             }
 
-            // 获取项目的所有任务
-            String url = String.format("%s/api/projects/%d/tasks", labelStudioUrl, lsProjectId);
             HttpHeaders headers = new HttpHeaders();
             headers.set("Authorization", "Token " + lsToken);
 
-            HttpEntity<String> entity = new HttpEntity<>(headers);
-            ResponseEntity<String> response;
-            try {
-                response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
-            } catch (org.springframework.web.client.HttpClientErrorException.NotFound e404) {
-                log.warn("LS项目尚无任务(404-stats): lsProjectId={}", lsProjectId);
+            List<Map<String, Object>> tasks = fetchAllProjectTasks(lsProjectId, headers);
+            if (tasks.isEmpty()) {
                 return createEmptyReviewStats();
             }
 
+            int totalTasks = tasks.size();
+            int reviewedTasks = 0;
+            int pendingTasks = 0;
+            int tasksWithPredictions = 0;
+            int totalPredictions = 0;
+            int totalPredictionResults = 0;
+            int totalAnnotationResults = 0;
 
-            if (response.getStatusCode() == HttpStatus.OK) {
-                String body = response.getBody();
-                com.alibaba.fastjson2.JSONArray tasks;
-                if (body != null && body.trim().startsWith("[")) {
-                    tasks = JSON.parseArray(body);
+            for (Map<String, Object> task : tasks) {
+                com.alibaba.fastjson2.JSONArray annotations = toJsonArray(task.get("annotations"));
+                com.alibaba.fastjson2.JSONArray predictions = toJsonArray(task.get("predictions"));
+                if (annotations != null && !annotations.isEmpty()) {
+                    reviewedTasks++;
+                    totalAnnotationResults += countNestedResults(annotations);
                 } else {
-                    JSONObject responseData = JSON.parseObject(body);
-                    tasks = responseData.getJSONArray("tasks");
+                    pendingTasks++;
                 }
-                
-                int totalTasks = tasks != null ? tasks.size() : 0;
-                int reviewedTasks = 0;
-                int pendingTasks = 0;
-
-                if (tasks != null) {
-                    for (int i = 0; i < tasks.size(); i++) {
-                        JSONObject task = tasks.getJSONObject(i);
-                        // 检查是否有 annotations 且 annotations 不为空
-                        com.alibaba.fastjson2.JSONArray annotations = task.getJSONArray("annotations");
-                        if (annotations != null && !annotations.isEmpty()) {
-                            reviewedTasks++;
-                        } else {
-                            pendingTasks++;
-                        }
-                    }
+                if (predictions != null && !predictions.isEmpty()) {
+                    tasksWithPredictions++;
+                    totalPredictions += predictions.size();
+                    totalPredictionResults += countNestedResults(predictions);
                 }
-
-                Map<String, Object> stats = new HashMap<>();
-                stats.put("totalTasks", totalTasks);
-                stats.put("reviewedTasks", reviewedTasks);
-                stats.put("pendingTasks", pendingTasks);
-                
-                log.info("获取审核统计成功: lsProjectId={}, total={}, reviewed={}, pending={}", 
-                    lsProjectId, totalTasks, reviewedTasks, pendingTasks);
-                
-                return stats;
-            } else {
-                log.warn("获取审核统计失败: lsProjectId={}, status={}", lsProjectId, response.getStatusCode());
-                return createEmptyReviewStats();
             }
+
+            Map<String, Object> stats = new HashMap<>();
+            stats.put("totalTasks", totalTasks);
+            stats.put("reviewedTasks", reviewedTasks);
+            stats.put("pendingTasks", pendingTasks);
+            stats.put("tasksWithPredictions", tasksWithPredictions);
+            stats.put("totalPredictions", totalPredictions);
+            stats.put("totalPredictionResults", totalPredictionResults);
+            stats.put("totalAnnotationResults", totalAnnotationResults);
+
+            log.info("获取审核统计成功: lsProjectId={}, total={}, reviewed={}, pending={}, predicted={}",
+                    lsProjectId, totalTasks, reviewedTasks, pendingTasks, tasksWithPredictions);
+
+            return stats;
         } catch (Exception e) {
             log.error("获取审核统计失败: lsProjectId={}, error={}", lsProjectId, e.getMessage(), e);
             return createEmptyReviewStats();
@@ -1084,92 +1184,97 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
                 return createEmptyReviewResults();
             }
 
-            // 获取项目的所有任务
-            String url = String.format("%s/api/projects/%d/tasks", labelStudioUrl, lsProjectId);
             HttpHeaders headers = new HttpHeaders();
             headers.set("Authorization", "Token " + lsToken);
 
-            HttpEntity<String> entity = new HttpEntity<>(headers);
-            ResponseEntity<String> response;
-            try {
-                response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
-            } catch (org.springframework.web.client.HttpClientErrorException.NotFound e404) {
-                log.warn("LS项目尚无任务(404-results): lsProjectId={}", lsProjectId);
-                return createEmptyReviewResults();
-            }
+            List<Map<String, Object>> tasks = fetchAllProjectTasks(lsProjectId, headers);
+            List<Map<String, Object>> taskList = new ArrayList<>();
 
+            for (Map<String, Object> task : tasks) {
+                Map<String, Object> taskInfo = new HashMap<>();
+                taskInfo.put("taskId", task.get("id"));
+                taskInfo.put("imageName", extractTaskImageName(task));
 
-            if (response.getStatusCode() == HttpStatus.OK) {
-                String body = response.getBody();
-                com.alibaba.fastjson2.JSONArray tasks;
-                if (body != null && body.trim().startsWith("[")) {
-                    tasks = JSON.parseArray(body);
-                } else {
-                    JSONObject responseData = JSON.parseObject(body);
-                    tasks = responseData.getJSONArray("tasks");
+                com.alibaba.fastjson2.JSONArray annotations = toJsonArray(task.get("annotations"));
+                com.alibaba.fastjson2.JSONArray predictions = toJsonArray(task.get("predictions"));
+                boolean isReviewed = annotations != null && !annotations.isEmpty();
+                taskInfo.put("isReviewed", isReviewed);
+
+                int annotationCount = 0;
+                int predictionCount = 0;
+                String completedAt = null;
+                String annotatedBy = null;
+
+                if (predictions != null && !predictions.isEmpty()) {
+                    predictionCount = countNestedResults(predictions);
                 }
 
+                if (isReviewed) {
+                    JSONObject annotation = annotations.getJSONObject(0);
+                    com.alibaba.fastjson2.JSONArray results = annotation.getJSONArray("result");
+                    annotationCount = results != null ? results.size() : 0;
+                    completedAt = annotation.getString("created_at");
 
-                List<Map<String, Object>> taskList = new ArrayList<>();
-                
-                if (tasks != null) {
-                    for (int i = 0; i < tasks.size(); i++) {
-                        JSONObject task = tasks.getJSONObject(i);
-                        
-                        Map<String, Object> taskInfo = new HashMap<>();
-                        taskInfo.put("taskId", task.getLong("id"));
-                        
-                        // 获取图片名称
-                        JSONObject data = task.getJSONObject("data");
-                        String imagePath = data != null ? data.getString("image") : "";
-                        String imageName = imagePath.substring(imagePath.lastIndexOf("/") + 1);
-                        taskInfo.put("imageName", imageName);
-                        
-                        // 检查是否已审核
-                        com.alibaba.fastjson2.JSONArray annotations = task.getJSONArray("annotations");
-                        boolean isReviewed = annotations != null && !annotations.isEmpty();
-                        taskInfo.put("isReviewed", isReviewed);
-                        
-                        // 获取标注数量
-                        int annotationCount = 0;
-                        String completedAt = null;
-                        String annotatedBy = null;
-                        
-                        if (isReviewed) {
-                            JSONObject annotation = annotations.getJSONObject(0);
-                            com.alibaba.fastjson2.JSONArray results = annotation.getJSONArray("result");
-                            annotationCount = results != null ? results.size() : 0;
-                            completedAt = annotation.getString("created_at");
-                            
-                            // 获取审核人信息
-                            Integer completedById = annotation.getInteger("completed_by");
-                            if (completedById != null) {
-                                annotatedBy = getUserEmailById(completedById.longValue());
-                            }
-                        }
-                        
-                        taskInfo.put("annotationCount", annotationCount);
-                        taskInfo.put("completedAt", completedAt);
-                        taskInfo.put("annotatedBy", annotatedBy);
-                        
-                        taskList.add(taskInfo);
+                    Object completedBy = annotation.get("completed_by");
+                    Long completedById = extractUserId(completedBy);
+                    if (completedById != null) {
+                        annotatedBy = getUserEmailById(completedById);
                     }
                 }
 
-                Map<String, Object> result = new HashMap<>();
-                result.put("tasks", taskList);
-                
-                log.info("获取审核结果成功: lsProjectId={}, taskCount={}", lsProjectId, taskList.size());
-                
-                return result;
-            } else {
-                log.warn("获取审核结果失败: lsProjectId={}, status={}", lsProjectId, response.getStatusCode());
-                return createEmptyReviewResults();
+                taskInfo.put("annotationCount", annotationCount);
+                taskInfo.put("predictionCount", predictionCount);
+                taskInfo.put("displayCount", isReviewed ? annotationCount : predictionCount);
+                taskInfo.put("completedAt", completedAt);
+                taskInfo.put("annotatedBy", annotatedBy);
+
+                taskList.add(taskInfo);
             }
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("tasks", taskList);
+
+            log.info("获取审核结果成功: lsProjectId={}, taskCount={}", lsProjectId, taskList.size());
+
+            return result;
         } catch (Exception e) {
             log.error("获取审核结果失败: lsProjectId={}, error={}", lsProjectId, e.getMessage(), e);
             return createEmptyReviewResults();
         }
+    }
+
+    private com.alibaba.fastjson2.JSONArray toJsonArray(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof com.alibaba.fastjson2.JSONArray jsonArray) {
+            return jsonArray;
+        }
+        return JSON.parseArray(JSON.toJSONString(value));
+    }
+
+    private int countNestedResults(com.alibaba.fastjson2.JSONArray items) {
+        int count = 0;
+        for (int i = 0; i < items.size(); i++) {
+            JSONObject item = items.getJSONObject(i);
+            com.alibaba.fastjson2.JSONArray results = item.getJSONArray("result");
+            if (results != null) {
+                count += results.size();
+            }
+        }
+        return count;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Long extractUserId(Object completedBy) {
+        if (completedBy instanceof Number number) {
+            return number.longValue();
+        }
+        if (completedBy instanceof Map<?, ?> map) {
+            Object id = map.get("id");
+            return id instanceof Number number ? number.longValue() : null;
+        }
+        return null;
     }
 
     private Map<String, Object> createEmptyReviewStats() {
@@ -1177,6 +1282,10 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
         stats.put("totalTasks", 0);
         stats.put("reviewedTasks", 0);
         stats.put("pendingTasks", 0);
+        stats.put("tasksWithPredictions", 0);
+        stats.put("totalPredictions", 0);
+        stats.put("totalPredictionResults", 0);
+        stats.put("totalAnnotationResults", 0);
         return stats;
     }
 
@@ -1211,97 +1320,89 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
                 return new ArrayList<>();
             }
 
-            // 获取项目的所有任务及其标注
-            String url = String.format("%s/api/projects/%d/export?exportType=JSON", labelStudioUrl, lsProjectId);
             HttpHeaders headers = new HttpHeaders();
             headers.set("Authorization", "Token " + lsToken);
 
-            HttpEntity<String> entity = new HttpEntity<>(headers);
-            ResponseEntity<String> response = restTemplate.exchange(
-                    url,
-                    HttpMethod.GET,
-                    entity,
-                    String.class
-            );
+            List<Map<String, Object>> tasks = fetchAllProjectTasks(lsProjectId, headers);
+            List<Map<String, Object>> annotations = new ArrayList<>();
 
-            if (response.getStatusCode() == HttpStatus.OK) {
-                String body = response.getBody();
-                com.alibaba.fastjson2.JSONArray tasks = JSON.parseArray(body);
-                
-                List<Map<String, Object>> annotations = new ArrayList<>();
-                
-                if (tasks != null) {
-                    for (int i = 0; i < tasks.size(); i++) {
-                        JSONObject task = tasks.getJSONObject(i);
-                        
-                        // 只导出已审核的任务
-                        com.alibaba.fastjson2.JSONArray taskAnnotations = task.getJSONArray("annotations");
-                        if (taskAnnotations == null || taskAnnotations.isEmpty()) {
-                            continue;
+            for (Map<String, Object> task : tasks) {
+                com.alibaba.fastjson2.JSONArray taskAnnotations = toJsonArray(task.get("annotations"));
+                com.alibaba.fastjson2.JSONArray taskPredictions = toJsonArray(task.get("predictions"));
+
+                JSONObject source = null;
+                String sourceType = null;
+                if (taskAnnotations != null && !taskAnnotations.isEmpty()) {
+                    source = taskAnnotations.getJSONObject(0);
+                    sourceType = "annotation";
+                } else if (taskPredictions != null && !taskPredictions.isEmpty()) {
+                    source = taskPredictions.getJSONObject(0);
+                    sourceType = "prediction";
+                }
+
+                if (source == null) {
+                    continue;
+                }
+
+                com.alibaba.fastjson2.JSONArray results = source.getJSONArray("result");
+                if (results == null) {
+                    results = new com.alibaba.fastjson2.JSONArray();
+                }
+
+                Map<String, Object> annotationData = new HashMap<>();
+                annotationData.put("image_name", extractTaskImageName(task));
+                annotationData.put("image_width", extractOriginalSize(results, true));
+                annotationData.put("image_height", extractOriginalSize(results, false));
+                annotationData.put("task_id", task.get("id"));
+                annotationData.put("source", sourceType);
+
+                List<Map<String, Object>> boxes = new ArrayList<>();
+                for (int j = 0; j < results.size(); j++) {
+                    JSONObject result = results.getJSONObject(j);
+                    JSONObject value = result.getJSONObject("value");
+
+                    if (value != null && value.containsKey("rectanglelabels")) {
+                        com.alibaba.fastjson2.JSONArray labels = value.getJSONArray("rectanglelabels");
+                        if (labels != null && !labels.isEmpty()) {
+                            Map<String, Object> box = new HashMap<>();
+                            box.put("label", labels.getString(0));
+                            box.put("x", value.getDouble("x"));
+                            box.put("y", value.getDouble("y"));
+                            box.put("width", value.getDouble("width"));
+                            box.put("height", value.getDouble("height"));
+                            boxes.add(box);
                         }
-                        
-                        JSONObject annotation = taskAnnotations.getJSONObject(0);
-                        com.alibaba.fastjson2.JSONArray results = annotation.getJSONArray("result");
-                        
-                        if (results == null || results.isEmpty()) {
-                            continue;
-                        }
-                        
-                        // 获取图片信息
-                        JSONObject data = task.getJSONObject("data");
-                        String imagePath = data != null ? data.getString("image") : "";
-                        String imageName = imagePath.substring(imagePath.lastIndexOf("/") + 1);
-                        
-                        // 获取图片尺寸
-                        Integer imageWidth = null;
-                        Integer imageHeight = null;
-                        if (results.size() > 0) {
-                            JSONObject firstResult = results.getJSONObject(0);
-                            JSONObject originalWidth = firstResult.getJSONObject("original_width");
-                            JSONObject originalHeight = firstResult.getJSONObject("original_height");
-                            if (originalWidth != null) imageWidth = originalWidth.getInteger("value");
-                            if (originalHeight != null) imageHeight = originalHeight.getInteger("value");
-                        }
-                        
-                        Map<String, Object> annotationData = new HashMap<>();
-                        annotationData.put("image_name", imageName);
-                        annotationData.put("image_width", imageWidth);
-                        annotationData.put("image_height", imageHeight);
-                        annotationData.put("task_id", task.getLong("id"));
-                        
-                        List<Map<String, Object>> boxes = new ArrayList<>();
-                        for (int j = 0; j < results.size(); j++) {
-                            JSONObject result = results.getJSONObject(j);
-                            JSONObject value = result.getJSONObject("value");
-                            
-                            if (value != null && value.containsKey("rectanglelabels")) {
-                                com.alibaba.fastjson2.JSONArray labels = value.getJSONArray("rectanglelabels");
-                                if (labels != null && !labels.isEmpty()) {
-                                    Map<String, Object> box = new HashMap<>();
-                                    box.put("label", labels.getString(0));
-                                    box.put("x", value.getDouble("x"));
-                                    box.put("y", value.getDouble("y"));
-                                    box.put("width", value.getDouble("width"));
-                                    box.put("height", value.getDouble("height"));
-                                    boxes.add(box);
-                                }
-                            }
-                        }
-                        
-                        annotationData.put("annotations", boxes);
-                        annotations.add(annotationData);
                     }
                 }
-                
-                log.info("导出标注成功: lsProjectId={}, format={}, count={}", lsProjectId, format, annotations.size());
-                return annotations;
-            } else {
-                log.warn("导出标注失败: lsProjectId={}, status={}", lsProjectId, response.getStatusCode());
-                return new ArrayList<>();
+
+                annotationData.put("annotations", boxes);
+                annotations.add(annotationData);
             }
+
+            log.info("导出标注成功: lsProjectId={}, format={}, count={}", lsProjectId, format, annotations.size());
+            return annotations;
         } catch (Exception e) {
             log.error("导出标注失败: lsProjectId={}, error={}", lsProjectId, e.getMessage(), e);
             return new ArrayList<>();
         }
+    }
+
+    private Integer extractOriginalSize(com.alibaba.fastjson2.JSONArray results, boolean width) {
+        if (results == null || results.isEmpty()) {
+            return null;
+        }
+        JSONObject firstResult = results.getJSONObject(0);
+        String snakeKey = width ? "original_width" : "original_height";
+        Integer size = firstResult.getInteger(snakeKey);
+        if (size != null) {
+            return size;
+        }
+
+        JSONObject value = firstResult.getJSONObject("value");
+        if (value == null) {
+            return null;
+        }
+        String camelKey = width ? "originalWidth" : "originalHeight";
+        return value.getInteger(camelKey);
     }
 }

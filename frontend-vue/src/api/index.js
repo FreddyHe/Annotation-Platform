@@ -206,6 +206,41 @@ export const projectAPI = {
         'Content-Type': 'multipart/form-data'
       }
     })
+  },
+
+  getLsHealth(projectId) {
+    return request({
+      url: `/projects/${projectId}/ls-health`,
+      method: 'get'
+    })
+  },
+
+  repairLsBinding(projectId) {
+    return request({
+      url: `/projects/${projectId}/repair-ls-binding`,
+      method: 'post'
+    })
+  },
+
+  getIncrementals(projectId) {
+    return request({
+      url: `/projects/${projectId}/incrementals`,
+      method: 'get'
+    })
+  },
+
+  getTrainingPreview(projectId) {
+    return request({
+      url: `/projects/${projectId}/training/preview`,
+      method: 'get'
+    })
+  },
+
+  syncFlywheelData(projectId) {
+    return request({
+      url: `/projects/${projectId}/flywheel/sync`,
+      method: 'post'
+    })
   }
 }
 
@@ -229,6 +264,13 @@ export const uploadAPI = {
   getUploadProgress(fileId) {
     return request({
       url: `/upload/progress/${fileId}`,
+      method: 'get'
+    })
+  },
+
+  getUploadedChunks(fileId) {
+    return request({
+      url: `/upload/chunks/${fileId}`,
       method: 'get'
     })
   },
@@ -368,6 +410,27 @@ export const autoAnnotationAPI = {
       url: `/auto-annotation/results/${taskId}`,
       method: 'get'
     })
+  },
+
+  getJob(jobId) {
+    return request({
+      url: `/auto-annotation/jobs/${jobId}`,
+      method: 'get'
+    })
+  },
+
+  getLatestJob(projectId) {
+    return request({
+      url: `/auto-annotation/projects/${projectId}/jobs/latest`,
+      method: 'get'
+    })
+  },
+
+  cancelJob(jobId) {
+    return request({
+      url: `/auto-annotation/jobs/${jobId}/cancel`,
+      method: 'post'
+    })
   }
 }
 
@@ -504,6 +567,157 @@ export const modelTestAPI = {
     return request({
       url: `/test/cancel/${taskId}`,
       method: 'post'
+    })
+  }
+}
+
+export const roundAPI = {
+  list(projectId) {
+    return request({
+      url: `/projects/${projectId}/rounds`,
+      method: 'get'
+    })
+  },
+
+  current(projectId) {
+    return request({
+      url: `/projects/${projectId}/rounds/current`,
+      method: 'get'
+    })
+  },
+
+  closeCurrent(projectId) {
+    return request({
+      url: `/projects/${projectId}/rounds/close-current`,
+      method: 'post'
+    })
+  },
+
+  trainingPreview(projectId, roundId) {
+    return request({
+      url: `/projects/${projectId}/rounds/${roundId}/training-preview`,
+      method: 'get'
+    })
+  },
+
+  triggerRetrain(projectId, roundId, data) {
+    return request({
+      url: `/projects/${projectId}/rounds/${roundId}/trigger-retrain`,
+      method: 'post',
+      data
+    })
+  }
+}
+
+export const projectConfigAPI = {
+  get(projectId) {
+    return request({
+      url: `/projects/${projectId}/config`,
+      method: 'get'
+    })
+  },
+
+  update(projectId, data) {
+    return request({
+      url: `/projects/${projectId}/config`,
+      method: 'put',
+      data
+    })
+  }
+}
+
+export const edgeSimulatorAPI = {
+  deploy(data) {
+    return request({
+      url: '/edge-simulator/deploy',
+      method: 'post',
+      data
+    })
+  },
+
+  rollback(data) {
+    return request({
+      url: '/edge-simulator/rollback',
+      method: 'post',
+      data
+    })
+  },
+
+  inference(formData, options = {}) {
+    return request({
+      url: '/edge-simulator/inference',
+      method: 'post',
+      params: options.params,
+      data: formData,
+      onUploadProgress: options.onUploadProgress
+    })
+  },
+
+  inferenceAsync(formData, options = {}) {
+    return request({
+      url: '/edge-simulator/inference-async',
+      method: 'post',
+      params: options.params,
+      data: formData,
+      timeout: options.timeout ?? 30 * 60 * 1000,
+      onUploadProgress: options.onUploadProgress
+    })
+  },
+
+  inferenceJob(jobId) {
+    return request({
+      url: `/edge-simulator/inference-jobs/${jobId}`,
+      method: 'get'
+    })
+  },
+
+  deployments(projectId) {
+    return request({
+      url: '/edge-simulator/deployments',
+      method: 'get',
+      params: { projectId }
+    })
+  },
+
+  inferenceHistory(deploymentId) {
+    return request({
+      url: '/edge-simulator/inference-history',
+      method: 'get',
+      params: { deploymentId }
+    })
+  },
+
+  poolStats(projectId, roundId) {
+    return request({
+      url: '/edge-simulator/pool-stats',
+      method: 'get',
+      params: { projectId, roundId }
+    })
+  }
+}
+
+export const inferenceDataPointAPI = {
+  list(projectId, params = {}) {
+    return request({
+      url: `/projects/${projectId}/data-points`,
+      method: 'get',
+      params
+    })
+  },
+
+  judge(projectId, roundId) {
+    return request({
+      url: `/projects/${projectId}/data-points/judge`,
+      method: 'post',
+      params: { roundId }
+    })
+  },
+
+  review(id, reviewed = true) {
+    return request({
+      url: `/inference-data-points/${id}/review`,
+      method: 'post',
+      data: { reviewed }
     })
   }
 }

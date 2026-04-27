@@ -105,6 +105,13 @@ public class ModelTrainingRecord {
     @Column(name = "test_results", columnDefinition = "JSON")
     private String testResults;
 
+    @Column(name = "round_id")
+    private Long roundId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "training_data_source", length = 20)
+    private TrainingDataSource trainingDataSource;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -119,5 +126,10 @@ public class ModelTrainingRecord {
         COMPLETED,
         FAILED,
         CANCELLED
+    }
+
+    public enum TrainingDataSource {
+        INITIAL,
+        FEEDBACK
     }
 }

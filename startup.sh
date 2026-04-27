@@ -12,6 +12,8 @@
 
 PROJECT_ROOT="/root/autodl-fs/Annotation-Platform"
 CONDA_SH="$(conda info --base 2>/dev/null)/etc/profile.d/conda.sh"
+NVM_SH="/root/.nvm/nvm.sh"
+TORCH_LIB_DIR="/root/miniconda3/envs/groundingdino310/lib/python3.10/site-packages/torch/lib"
 
 # 日志文件
 LOG_SPRINGBOOT="/tmp/springboot.log"
@@ -39,7 +41,11 @@ NC='\033[0m' # No Color
 # ---------------------------------------------------------------------------
 
 check_port() {
-    lsof -ti:"$1" > /dev/null 2>&1
+    lsof -nP -iTCP:"$1" -sTCP:LISTEN > /dev/null 2>&1
+}
+
+listening_pid() {
+    lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -1
 }
 
 wait_for_port() {
@@ -60,7 +66,7 @@ wait_for_port() {
 kill_port() {
     local port=$1
     local pids
-    pids=$(lsof -ti:"$port" 2>/dev/null)
+    pids=$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null)
     if [ -n "$pids" ]; then
         echo "$pids" | xargs kill -9 2>/dev/null
         sleep 1
@@ -87,7 +93,7 @@ do_status() {
         local name="${entry#*:}"
         if check_port "$port"; then
             local pid
-            pid=$(lsof -ti:"$port" | head -1)
+            pid=$(listening_pid "$port")
             echo -e "  ${GREEN}✅${NC} 端口 $port ($name) — PID $pid"
         else
             echo -e "  ${RED}❌${NC} 端口 $port ($name) — 未运行"
@@ -150,6 +156,9 @@ do_start() {
     echo ""
 
     source "$CONDA_SH" 2>/dev/null
+    if [ -f "$NVM_SH" ]; then
+        source "$NVM_SH" 2>/dev/null
+    fi
 
     # --- 1. Spring Boot 后端 (8080) ---
     if check_port $PORT_SPRINGBOOT; then
@@ -166,7 +175,7 @@ do_start() {
         if [ ! -f "$jar" ]; then
             echo -e "  ${RED}❌ JAR 不存在，先执行编译: ./startup.sh build${NC}"
         else
-            nohup java -jar "$jar" --server.port=$PORT_SPRINGBOOT \
+            setsid java -jar "$jar" --server.port=$PORT_SPRINGBOOT \
                 > "$LOG_SPRINGBOOT" 2>&1 &
             wait_for_port $PORT_SPRINGBOOT "Spring Boot" 30
         fi
@@ -180,7 +189,7 @@ do_start() {
         conda activate web_annotation 2>/dev/null
         export LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true
         export LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=/root/autodl-fs
-        nohup label-studio start --port $PORT_LABELSTUDIO --no-browser --log-level INFO \
+        setsid label-studio start --port $PORT_LABELSTUDIO --no-browser --log-level INFO \
             > "$LOG_LABELSTUDIO" 2>&1 &
         wait_for_port $PORT_LABELSTUDIO "Label Studio" 30
     fi
@@ -191,8 +200,8 @@ do_start() {
     else
         echo -e "  ${CYAN}🚀${NC} 启动 DINO 模型服务 (模型约 662MB，加载需 30~60 秒)..."
         conda activate groundingdino310 2>/dev/null
-        export CUDA_VISIBLE_DEVICES=""
-        nohup python "$PROJECT_ROOT/algorithm-service/dino_model_server.py" \
+        export LD_LIBRARY_PATH="$TORCH_LIB_DIR:${LD_LIBRARY_PATH:-}"
+        setsid python "$PROJECT_ROOT/algorithm-service/dino_model_server.py" \
             > "$LOG_DINO" 2>&1 &
         wait_for_port $PORT_DINO "DINO 模型服务" 90
     fi
@@ -203,9 +212,8 @@ do_start() {
     else
         echo -e "  ${CYAN}🚀${NC} 启动算法服务 FastAPI..."
         conda activate algo_service 2>/dev/null
-        export CUDA_VISIBLE_DEVICES=""
         cd "$PROJECT_ROOT/algorithm-service"
-        nohup uvicorn main:app --host 0.0.0.0 --port $PORT_ALGORITHM \
+        setsid uvicorn main:app --host 0.0.0.0 --port $PORT_ALGORITHM \
             > "$LOG_ALGORITHM" 2>&1 &
         wait_for_port $PORT_ALGORITHM "算法服务 FastAPI" 15
     fi
@@ -216,7 +224,7 @@ do_start() {
     else
         echo -e "  ${CYAN}🚀${NC} 启动前端 Vue..."
         cd "$PROJECT_ROOT/frontend-vue"
-        nohup npx vite --host 0.0.0.0 --port $PORT_FRONTEND \
+        setsid npx vite --host 0.0.0.0 --port $PORT_FRONTEND \
             > "$LOG_FRONTEND" 2>&1 &
         wait_for_port $PORT_FRONTEND "前端 Vue" 15
     fi

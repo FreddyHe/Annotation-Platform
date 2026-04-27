@@ -18,6 +18,41 @@
 
 ## 问题记录
 
+### 2026-04-25: 数据飞轮增量批次与边端模式语义偏差
+- **根因**: LOW_B 同步逻辑有数据就立即创建/追加增量 Label Studio 项目，和“攒满批次再建待审项目”的业务规则不一致；训练预览没有先补偿同步 HIGH/LOW_A，导致主项目可训练 prediction 可能为空；边端推理只有回流采集模式，缺少纯推理不入库/不回传路径；`inference_data_points` 未记录所属增量子项目。
+- **修复**: LOW_B 改为仅在未同步数据足以补满/创建完整批次时写入增量项目；训练预览和训练启动前先同步未入 LS 的 HIGH/LOW_A，并刷新增量项目审核状态；新增 `ls_sub_project_id` 字段；边端推理新增 `PURE_INFERENCE` 模式，只走临时文件和算法推理，不写数据池、不触发 VLM/LS 同步。
+- **教训**: 飞轮闭环的“进入训练”口径必须和“进入 Label Studio”的物理同步策略一致；批次规则不能只靠前端提示，后端同步服务要守住满批边界；新增可选运行模式时，默认必须保持旧行为兼容。
+
+### 2026-04-24: 自动标注完成但 Label Studio 无预测框
+- **根因**: 同步 predictions 有三处叠加问题：`DetectionResult.image` 懒加载在事务外访问触发 `could not initialize proxy ... no Session`；算法 DINO 结果没有 `image_name` 字段，Java 端把 `null` 写入 `resultData.image_name` 后 `preparePredictions()` 全部跳过；`LabelStudioProxyServiceImpl.importPredictions()` 只取 `/api/tasks?project=...` 默认第一页 100 条，无法覆盖 1004 张图片。
+- **修复**: `DetectionResultRepository` 增加 `findByProjectIdAndTypeWithImage()`，`AutoAnnotationService.syncPredictionsToLabelStudio()` 通过 self proxy 进入只读事务并使用 fetch join；DINO/阈值/VLM 结果保存时对 `image_name` 做文件名兜底；LS task 拉取改为分页获取全部任务并兼容 `data.image` 与 `$undefined$`；验证 `动物检测7` 生成 `707` 条 prediction，框总数 `928`，与 job `keptDetections=928` 一致。
+- **教训**: 自动标注不能只看 Job 显示 COMPLETED 和 keptDetections，必须同时查 LS `prediction` 表或 API；跨服务结果匹配必须保证稳定的图片 key，且 LS 列表接口默认分页不能当作全量。
+
+### 2026-04-24: 自动标注历史导致项目删除被 auto_annotation_jobs 外键阻塞
+- **根因**: `ProjectController.deleteProject()` 清理了检测结果、图片和迭代飞轮表，但遗漏 `auto_annotation_jobs`；`auto_annotation_jobs.project_id` 外键指向 `projects.id`，导致有自动标注历史的项目删除失败。
+- **修复**: `AutoAnnotationJobRepository` 增加 `countByProjectId()` 和 `deleteByProjectId()`，项目删除时在删除 `Project` 前先清理自动标注任务，并对 `project_config` 删除增加存在性判断。
+- **教训**: 新增任何指向 `projects` 的表，都必须同步项目删除链路；删除回归要覆盖“项目有历史 Job/任务记录”的情况。
+
+### 2026-04-24: GroundingDINO 因 torch 动态库未暴露且启动脚本禁用 GPU，导致只能 CPU/甚至启动失败
+- **根因**: `algorithm-service/dino_model_server.py` 把 `DEVICE` 写死为 `cpu`，`startup.sh` 又通过 `CUDA_VISIBLE_DEVICES=""` 隐藏 GPU；同时 `groundingdino._C` 依赖的 `libc10.so/libtorch_cpu.so/libtorch_python.so` 不在默认动态库搜索路径里，直接导入会报 `ImportError: libc10.so: cannot open shared object file`。
+- **修复**: DINO 服务改为 `torch.cuda.is_available()` 自动选择 `cuda`/`cpu`；启动 DINO 前显式注入 `LD_LIBRARY_PATH=/root/miniconda3/envs/groundingdino310/lib/python3.10/site-packages/torch/lib:${LD_LIBRARY_PATH:-}`；`startup.sh` 去掉对 DINO/FastAPI 的 `CUDA_VISIBLE_DEVICES=""`。
+- **教训**: 看到 CUDA 可用但 GroundingDINO 扩展导入失败时，优先用 `ldd groundingdino/_C*.so` 查缺的动态库；不要在总启动脚本里用 `CUDA_VISIBLE_DEVICES=""` 全局禁用 GPU，否则排查会被误导成“模型只能走 CPU”。
+
+### 2026-04-23: 启动脚本普通 nohup 进程在 Agent 命令结束后退出
+- **根因**: 在当前执行环境中，`startup.sh` 的 `nohup ... &` 虽然能短暂打开端口并通过 `lsof` 检查，但启动命令退出后子进程仍会被外层会话清理，导致后续 `curl` 连接失败；同时 Node.js 安装在 nvm 下，非交互 shell 默认 PATH 找不到 `npm/npx`。
+- **修复**: `startup.sh` 启动前加载 `/root/.nvm/nvm.sh`，并将 Spring Boot、Label Studio、DINO、FastAPI、Vite 的后台启动方式改为 `setsid ... > /tmp/*.log 2>&1 &`，让服务脱离当前命令会话并持续运行。
+- **教训**: 不能只看启动脚本内的瞬时端口检查，脚本结束后必须再次 `lsof`/`curl` 验证服务仍在监听；前端命令必须显式加载 nvm，否则非交互环境下 `npm/npx` 不可用。
+
+### 2026-04-23: E2E 测试全跳过与旧路径不兼容
+- **根因**: 首次运行 E2E 时把 `BACKEND_BASE_URL` 设置成根地址，测试 fixture 实际期望包含 `/api/v1`，导致健康检查路径错误并全量跳过；部分旧测试又在已有 base URL 后硬编码 `/api/v1`，形成重复路径；算法服务未注册 `vlm.router`，旧 E2E 期望的 `/algo/vlm/clean` 不存在。
+- **修复**: E2E 运行时使用 `BACKEND_BASE_URL=http://127.0.0.1:8080/api/v1` 和 `ALGORITHM_BASE_URL=http://127.0.0.1:8001/api/v1`；清理测试中的重复 `/api/v1`；在 `main.py` 注册 VLM router，并保留 `/algo/vlm/clean` 与 `/algo/vlm/clean/mock` 兼容路由。
+- **教训**: E2E 的“skipped”不能当作通过，必须检查 collected/pass/skip/fail 汇总；新增或恢复算法路由后要用 `/api/v1/openapi.json` 验证真实注册路径。
+
+### 2026-04-23: 迭代飞轮开发补齐与回归修复
+- **根因**: 回流训练最初只复用了 Label Studio 数据转换，没有真正合并 HIGH、LOW_A、已审核 LOW_B 回流数据；项目图片接口对 `page=0` 用 `(page - 1) * size` 造成负下标；新增迭代表对项目删除产生外键风险。
+- **修复**: 新增 `FormatConverterService.buildFeedbackDataset()` 合并回流池数据并生成 YOLO 标签，`TrainingService.startTrainingFromDataset()` 支持从已准备数据集启动 FEEDBACK 训练；项目图片分页改为 0-based 安全分页；删除项目时清理 `inference_data_points`、`edge_deployments`、`project_config`、`iteration_rounds`。
+- **教训**: “闭环回流”必须落到训练数据集构建，不只是接口状态流转；新增外键表后必须同步删除路径和 E2E 回归。
+
 ### 2026-04-23: 项目详情训练进度和指标未回显、测试模型仍是模拟结果
 - **根因**: 项目详情页 `/projects/{id}/training/status` 只读 `ModelTrainingRecord` 数据库记录，没有实时查询算法服务的 `processed_images/total_images`，也没有在训练完成后把 `results.csv`/算法结果中的 mAP、precision、recall、模型路径写回；`/projects/{id}/training/detect` 返回硬编码模拟检测框，没有调用训练出的 `best.pt`；算法测试上传路由还存在 `/api/v1` 前缀重复和 multipart 表单参数未声明为 `Form` 的问题。
 - **修复**: 后端状态接口主动同步算法服务任务状态，完成后保存/回填 `best.pt`、mAP、precision、recall；算法训练结果返回 `metrics/results_csv`；项目检测接口改为上传图片并调用真实 YOLO 测试服务；修正算法测试路由前缀、上传表单参数和 CPU 回退。
@@ -422,3 +457,28 @@
   2. 配置文件中的路径引用（如 `script-path`）必须随项目迁移同步更新
   3. 项目根目录只保留唯一启动脚本（`startup.sh`），多个启动脚本并存会造成维护混乱
   4. `.gitignore` 应覆盖所有构建产物、日志、环境变量文件，避免敏感信息或大文件误提交
+
+### 2026-04-24: DINO 阈值过滤任务会秒完成且保留 0 个框
+- **问题**: 前端选择 `DINO_THRESHOLD` 跑 1004 张图时，任务在约 10 秒内完成，最终保留 0，实际没有真正完成 DINO 检测。
+- **根因**: 算法服务 `routers/dino.py` 调本机 DINO `http://127.0.0.1:5003/predict` 时继承了环境代理，命中了 `socks5h://127.0.0.1:7890`，但当前 `httpx` 未启用 socks 支持，导致每张图都报 `Unknown scheme for proxy URL`。旧逻辑把“逐图失败”当成“空检测结果”继续完成任务。
+- **方案**: 本机 DINO 调用统一改为 `httpx.AsyncClient(trust_env=False)`；补充相对路径到上传根目录的解析；若全部图片 DINO 调用失败，整个任务直接标记 `FAILED`，不能再伪装为成功。
+
+### 2026-04-24: 自动标注 UI 进度条在走，但 `0/1004 张 / 保留 0 / 舍弃 0` 不更新
+- **问题**: 前端自动标注页能看到百分比变化，但 `processedImages/totalImages` 一直停在 `0/1004`，阈值模式下控制台还会错误输出 “开始 VLM 智能清洗与验证...”。
+- **根因**: 算法服务通用状态接口返回字段是 `processed/total/progress`，后端 `AutoAnnotationService` 之前只按轮询次数估算 `progressPercent`，没有把真实 `processed/total` 写回 `auto_annotation_jobs`；前端又一部分读 Job、一部分读旧 `project.status`，导致数字和日志来源不一致。
+- **方案**: 后端轮询算法状态时实时读取 `processed/total/progress` 并更新 `AutoAnnotationJob.processedImages/totalImages/progressPercent`；前端在拿到 `jobId` 后只使用 Job 状态驱动控制台、数字和进度条，并禁止再用旧 `project.status` 自动补 VLM 阶段日志。
+
+### 2026-04-25: Label Studio 项目修复不能用全局 admin token 判断可见性
+- **问题**: 飞轮同步把 `HIGH/LOW_A` 导入到了全局 admin 组织下新建的同名 LS 项目，用户 `admin@qq.com` 登录自己的 LS 组织时仍只看到原始 `动物检测7`，误以为增量没有进入 LS。
+- **根因**: `IncrementalProjectService` 多处使用 `app.label-studio.admin-token` 调 LS API，跨组织只能看到全局 admin 的项目；健康检查误判用户组织里的原项目不可访问后创建了重复主项目。
+- **方案**: LS 主项目检查、修复绑定、增量项目创建、任务导入、webhook 配置和审核进度刷新都应优先使用当前项目创建者/当前登录用户的 `lsToken`，创建项目时带 `organization`；修复绑定时先在该用户可见项目列表中按标题和组织找原主项目，再考虑新建。
+
+### 2026-04-25: 增量 LS 任务图片打不开与 User 引用错误
+- **问题**: 打开增量审核项目时报 `Failed to resolve reference '1' to type 'User'`，并提示无法从 `$image` URL 加载图片。
+- **根因**: 已迁回用户组织的增量项目仍有历史 `task.updated_by_id` / `task_completion.completed_by_id` 指向原全局 LS 用户 `1`，当前组织前端用户列表无法解析；新导入任务把图片写成 `/data/local-files/?d=/root/autodl-fs/uploads/...`，但 LS 的 `LOCAL_FILES_DOCUMENT_ROOT=/root/autodl-fs`，本地文件 URL 应写成相对路径 `uploads/...`。
+- **方案**: `IncrementalProjectService` 生成任务数据时把绝对上传路径转换为相对 document root 的 `uploads/...`；已有 LS 任务批量替换绝对 URL，并把迁移后的增量审核记录用户引用改到组织用户 `admin@qq.com` 对应的 LS 用户 `25`。
+
+### 2026-04-25: 模拟视频流推理请求缺少 deploymentId 且无进度反馈
+- **问题**: 前端点击“模拟视频流推理”后后端报 `Required request parameter 'deploymentId' ... is not present`，同时用户看不到 zip 内容、帧数、上传和推理阶段。
+- **根因**: multipart 请求把 `deploymentId/mode` 放在 FormData 里且手动设置 `Content-Type: multipart/form-data`，在部分场景下后端未解析到请求参数；前端没有读取 zip 目录，也没有 upload progress 和后端处理阶段状态。
+- **方案**: 前端改为将 `deploymentId/mode` 放到 query params，并让 axios 自动生成 multipart boundary；选择 zip 时扫描 central directory 统计图片帧和非图片条目；推理 UI 显示输入摘要、上传百分比、后端推理/判定/同步阶段和最终池子统计；后端对缺少 `deploymentId` 返回明确业务错误。

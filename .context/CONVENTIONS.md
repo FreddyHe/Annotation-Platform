@@ -88,6 +88,18 @@ git push origin master
 
 - **路由模块化**: 新功能在 `routers/` 下新建文件，在 `main.py` 中 `include_router` 注册
 - **参数传递**: MultipartFile 转发时数值参数必须用 `String.valueOf()` 转字符串，不能直接传 Integer
+- **本机服务调用**: Python 代码凡是调用 `127.0.0.1` / `localhost` 的本机 HTTP 服务，统一显式禁用环境代理（例如 `httpx.AsyncClient(trust_env=False)`）。
+- **任务失败规则**: 长任务里如果“全部样本都失败”，必须把任务整体标记为 `FAILED`；不能把逐项失败静默吞掉后返回空结果成功。
+
+## 自动标注模块约定（2026-04-24 新增）
+
+- **执行模式枚举**:
+  - `DINO_VLM`
+  - `DINO_THRESHOLD`
+- **前端进度来源**: 自动标注页在拿到 `jobId` 后，控制台、`processedImages/totalImages`、进度条一律以 `/auto-annotation/jobs/{jobId}` 返回值为准，不再混用 `project.status` 自动补阶段日志。
+- **兼容规则**: 启动接口必须兼容旧前端只传 `processRange` 的请求；后端默认回退到 `DINO_VLM`。
+- **结果落库规则**: 阈值过滤最终保留的框仍写 `DetectionResult.ResultType.VLM_CLEANING`，并通过 `resultData.source = dino_threshold` 标识来源，不新增额外 ResultType。
+- **上传容错规则**: 大文件上传真实状态以磁盘 chunk 和 `/tmp/upload_chunks/{fileId}/manifest.json` 为准，内存 `uploadProgressMap` 只作为运行时缓存。
 
 ## 可行性评估模块约定
 

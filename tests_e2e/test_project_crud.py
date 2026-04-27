@@ -58,7 +58,8 @@ def test_get_project_images(authenticated_session, temp_image_file):
         images_response.raise_for_status()
         images_data = images_response.json()
         assert images_data["success"], "Failed to get project images"
-        assert isinstance(images_data["data"], list), "Images data should be a list"
+        assert isinstance(images_data["data"], dict), "Images data should include list and total"
+        assert isinstance(images_data["data"].get("images"), list), "Images should be a list"
         
     finally:
         authenticated_session.delete(f"{TestConfig.BACKEND_BASE_URL}/projects/{project_id}")
@@ -172,7 +173,8 @@ def test_get_project_images_pagination(authenticated_session, temp_image_file):
         images_response.raise_for_status()
         images_data = images_response.json()
         assert images_data["success"], "Failed to get paginated images"
-        assert isinstance(images_data["data"], list), "Images data should be a list"
+        assert isinstance(images_data["data"], dict), "Images data should include list and total"
+        assert isinstance(images_data["data"].get("images"), list), "Images should be a list"
         
     finally:
         authenticated_session.delete(f"{TestConfig.BACKEND_BASE_URL}/projects/{project_id}")

@@ -1,6 +1,6 @@
 <template>
   <div class="data-manager">
-    <p class="section-desc">上传图片数据到项目，支持大文件分块上传、ZIP 压缩包、视频抽帧</p>
+    <p class="section-desc">上传、浏览和抽取项目图片数据</p>
 
     <div class="stat-grid">
       <el-card shadow="never" class="mini-stat">
@@ -35,7 +35,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { projectAPI } from '@/api'
 import FileUpload from '@/components/FileUpload.vue'
 import ImageList from '@/components/ImageList.vue'
@@ -43,7 +43,7 @@ import VideoExtract from '@/components/VideoExtract.vue'
 
 const props = defineProps({ project: { type: Object, required: true } })
 const emit = defineEmits(['refresh'])
-const activeTab = ref('upload')
+const activeTab = ref((props.project?.totalImages || 0) > 0 ? 'images' : 'upload')
 const stats = ref({ totalImages: 0, processedImages: 0 })
 
 const loadStats = async () => {
@@ -52,6 +52,11 @@ const loadStats = async () => {
 }
 const handleUploaded = () => { loadStats(); emit('refresh') }
 const handleExtracted = () => { loadStats(); emit('refresh') }
+watch(() => props.project?.totalImages, (total) => {
+  if ((total || 0) > 0 && activeTab.value === 'upload') {
+    activeTab.value = 'images'
+  }
+}, { immediate: true })
 onMounted(() => { loadStats() })
 </script>
 

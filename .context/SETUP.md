@@ -24,7 +24,19 @@ cd /root/autodl-fs/Annotation-Platform
 | 8001 | 算法服务 FastAPI | `/tmp/algorithm.log` |
 | 6006 | 前端 Vue | `/tmp/frontend.log` |
 
-> **注意**：DINO 模型约 662MB，CPU 模式加载需要 30~60 秒，脚本会自动等待。
+> **注意**：DINO 模型约 662MB，GPU 模式通常 30~60 秒内完成加载；若机器无可用 CUDA，服务会自动回退到 CPU。
+
+自动标注/DINO 排查时最常用的实时日志：
+
+```bash
+tail -f /tmp/springboot.log
+tail -f /tmp/algorithm.log
+tail -f /tmp/dino.log
+```
+
+- `/tmp/algorithm.log`：看每张图调用 DINO 的 prompt、阈值、单图错误和进度
+- `/tmp/springboot.log`：看自动标注 Job、阶段切换、入库、阈值过滤、同步 Label Studio
+- `/tmp/dino.log`：看 GroundingDINO Flask 服务自身错误
 
 ## 一键状态检查（手动）
 
@@ -151,28 +163,31 @@ source $(conda info --base)/etc/profile.d/conda.sh
 
 # DINO 服务 (端口 5003)
 conda activate groundingdino310
-export CUDA_VISIBLE_DEVICES=""
+export LD_LIBRARY_PATH=/root/miniconda3/envs/groundingdino310/lib/python3.10/site-packages/torch/lib:${LD_LIBRARY_PATH:-}
 cd /root/autodl-fs/Annotation-Platform/algorithm-service
 nohup python dino_model_server.py > /tmp/dino.log 2>&1 &
 
 # FastAPI 算法服务 (端口 8001)
 conda activate algo_service
-export CUDA_VISIBLE_DEVICES=""
 cd /root/autodl-fs/Annotation-Platform/algorithm-service
 nohup uvicorn main:app --host 0.0.0.0 --port 8001 > /tmp/algorithm.log 2>&1 &
 ```
 
 **⚠️ 必须先 `conda activate`，不要用系统 Python 直接运行！**
+**⚠️ 2026-04-24 起，本机 DINO 调用已在代码中显式禁用环境代理；不要再通过 `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY` 调试 127.0.0.1 链路。**
 
 ## 前端（端口 6006）
 
 ```bash
 pkill -f "vite" 2>/dev/null; sleep 2
 cd /root/autodl-fs/Annotation-Platform/frontend-vue
+source /root/.nvm/nvm.sh
 nohup npx vite --host 0.0.0.0 --port 6006 > /tmp/frontend.log 2>&1 &
 ```
 
 端口 6006 是 AutoDL 自定义服务默认暴露端口，公网可直接访问。`vite.config.js` 默认端口已改为 6006（2026-04-13），无需再通过 `--port 6006` 覆盖，但保留命令行参数以明确意图。
+
+> 2026-04-23：`startup.sh` 已在内部加载 nvm，并使用 `setsid ... > /tmp/*.log 2>&1 &` 启动服务，避免 Agent/非交互 shell 结束后后台服务被清理。
 
 ## LS SQLite 常用查询
 
@@ -255,6 +270,22 @@ curl -s -X POST http://localhost:8001/api/v1/feasibility/estimate-resources \
   }' | python -m json.tool | head -c 800
 
 # 测试AI报告生成（算法服务）
+
+## 自动标注/上传容错验证（2026-04-24 新增）
+
+```bash
+# 查询项目最近一次自动标注任务
+curl -s http://localhost:8080/api/v1/auto-annotation/projects/<projectId>/jobs/latest \
+  -H "Authorization: Bearer <JWT_TOKEN>" | python -m json.tool | head -c 800
+
+# 查询指定自动标注任务
+curl -s http://localhost:8080/api/v1/auto-annotation/jobs/<jobId> \
+  -H "Authorization: Bearer <JWT_TOKEN>" | python -m json.tool | head -c 800
+
+# 查询断点续传 chunk 状态
+curl -s http://localhost:8080/api/v1/upload/chunks/<fileId> \
+  -H "Authorization: Bearer <JWT_TOKEN>" | python -m json.tool
+```
 curl -s -X POST http://localhost:8001/api/v1/feasibility/generate-report \
   -H "Content-Type: application/json" \
   -d '{

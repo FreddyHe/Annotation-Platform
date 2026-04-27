@@ -37,7 +37,7 @@ public interface ProjectImageRepository extends JpaRepository<ProjectImage, Long
     @Query(value = "SELECT * FROM project_images WHERE project_id = :projectId ORDER BY uploaded_at DESC", nativeQuery = true)
     List<ProjectImage> findProjectImagesNative(@Param("projectId") Long projectId);
     
-    @Query(value = "SELECT * FROM project_images WHERE project_id = :projectId AND file_path LIKE '%.jpg' OR file_path LIKE '%.jpeg' OR file_path LIKE '%.png' OR file_path LIKE '%.gif' OR file_path LIKE '%.bmp' OR file_path LIKE '%.webp' ORDER BY uploaded_at DESC", nativeQuery = true)
+    @Query(value = "SELECT * FROM project_images WHERE project_id = :projectId AND (LOWER(file_path) LIKE '%.jpg' OR LOWER(file_path) LIKE '%.jpeg' OR LOWER(file_path) LIKE '%.png' OR LOWER(file_path) LIKE '%.gif' OR LOWER(file_path) LIKE '%.bmp' OR LOWER(file_path) LIKE '%.webp') ORDER BY uploaded_at DESC", nativeQuery = true)
     List<ProjectImage> findProjectImagesNativeByType(@Param("projectId") Long projectId);
 
     @Query(value = "SELECT * FROM project_images WHERE project_id = :projectId AND status = :status ORDER BY uploaded_at DESC", nativeQuery = true)

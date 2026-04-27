@@ -14,6 +14,13 @@ from config import settings
 
 
 router = APIRouter()
+DINO_CONCURRENCY = int(os.getenv("DINO_CONCURRENCY", "4"))
+
+
+def resolve_image_path(image_path: str) -> str:
+    if os.path.isabs(image_path):
+        return image_path
+    return os.path.join(settings.UPLOAD_BASE_PATH, image_path)
 
 
 class DinoDetectRequest(BaseModel):
@@ -35,107 +42,108 @@ class DinoDetectResponse(BaseModel):
     results: Optional[List[Dict[str, Any]]] = None
 
 
-async def call_dino_service(
-    image_paths: List[str], 
+async def call_dino_service_single(
+    client: httpx.AsyncClient,
+    image_path: str,
     labels: List[str],
     box_threshold: float = 0.3,
     text_threshold: float = 0.25
-) -> List[Dict[str, Any]]:
+) -> Dict[str, Any]:
     """
-    调用本地 DINO 服务 (http://127.0.0.1:5002/predict)
-    
-    Args:
-        image_paths: 图片路径列表（绝对路径）
-        labels: 标签列表
-        box_threshold: Box threshold (default: 0.3)
-        text_threshold: Text threshold (default: 0.25)
-        
-    Returns:
-        检测结果列表
+    单图调用本地 DINO 服务，复用外部 httpx client。
     """
-    results = []
     dino_url = "http://127.0.0.1:5003/predict"
-    
-    for image_path in image_paths:
-        try:
-            # 检查图片文件是否存在
-            if not os.path.exists(image_path):
-                logger.error(f"Image file not found: {image_path}")
-                results.append({
-                    "image_path": image_path,
-                    "detections": [],
-                    "labels": labels,
-                    "error": f"File not found: {image_path}"
-                })
-                continue
-            
-            with open(image_path, 'rb') as f:
-                image_data = f.read()
-            
-            text_prompt = " . ".join(labels)
-            if not text_prompt.endswith("."):
-                text_prompt += "."
-            
-            logger.info(f"Calling DINO for {image_path.split('/')[-1]} with prompt: {text_prompt}, thresholds: box={box_threshold}, text={text_threshold}")
-            
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(
-                    dino_url,
-                    files={'image': (image_path.split('/')[-1], image_data, 'image/jpeg')},
-                    data={
-                        'text_prompt': text_prompt,
-                        'box_threshold': str(box_threshold),
-                        'text_threshold': str(text_threshold)
-                    }
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    detections = data.get('detections', [])
-                    
-                    with Image.open(image_path) as img:
-                        img_w, img_h = img.size
-                    
-                    converted_detections = []
-                    for det in detections:
-                        box = det.get('box', [])
-                        if len(box) == 4:
-                            cx, cy, w, h = box
-                            x_min = (cx - w / 2) * img_w
-                            y_min = (cy - h / 2) * img_h
-                            abs_w = w * img_w
-                            abs_h = h * img_h
-                            
-                            converted_detections.append({
-                                "bbox": [x_min, y_min, abs_w, abs_h],
-                                "label": det.get('label', 'unknown'),
-                                "score": det.get('logit_score', det.get('score', 0.0))
-                            })
-                    
-                    results.append({
-                        "image_path": image_path,
-                        "detections": converted_detections,
-                        "labels": labels
-                    })
-                else:
-                    logger.error(f"DINO service error: {response.status_code} - {response.text}")
-                    results.append({
-                        "image_path": image_path,
-                        "detections": [],
-                        "labels": labels,
-                        "error": f"DINO service error: {response.status_code}"
-                    })
-                    
-        except Exception as e:
-            logger.error(f"Error calling DINO service for {image_path}: {e}")
-            results.append({
+    resolved_image_path = resolve_image_path(image_path)
+
+    if not os.path.exists(resolved_image_path):
+        logger.error(f"Image file not found: {resolved_image_path}")
+        return {
+            "image_path": image_path,
+            "detections": [],
+            "labels": labels,
+            "error": f"File not found: {resolved_image_path}",
+        }
+
+    try:
+        with open(resolved_image_path, "rb") as f:
+            image_data = f.read()
+
+        text_prompt = " . ".join(labels)
+        if not text_prompt.endswith("."):
+            text_prompt += "."
+
+        logger.info(
+            f"Calling DINO for {os.path.basename(resolved_image_path)} with prompt: {text_prompt}, "
+            f"thresholds: box={box_threshold}, text={text_threshold}"
+        )
+
+        response = await client.post(
+            dino_url,
+            files={"image": (os.path.basename(resolved_image_path), image_data, "image/jpeg")},
+            data={
+                "text_prompt": text_prompt,
+                "box_threshold": str(box_threshold),
+                "text_threshold": str(text_threshold),
+            },
+        )
+
+        if response.status_code != 200:
+            logger.error(f"DINO service error: {response.status_code} - {response.text}")
+            return {
                 "image_path": image_path,
                 "detections": [],
                 "labels": labels,
-                "error": str(e)
-            })
-    
-    return results
+                "error": f"DINO service error: {response.status_code}",
+            }
+
+        data = response.json()
+        detections = data.get("detections", [])
+
+        with Image.open(resolved_image_path) as img:
+            img_w, img_h = img.size
+
+        converted_detections = []
+        for det in detections:
+            box = det.get("box", [])
+            if len(box) == 4:
+                cx, cy, w, h = box
+                x_min = (cx - w / 2) * img_w
+                y_min = (cy - h / 2) * img_h
+                abs_w = w * img_w
+                abs_h = h * img_h
+
+                converted_detections.append({
+                    "bbox": [x_min, y_min, abs_w, abs_h],
+                    "label": det.get("label", "unknown"),
+                    "score": det.get("logit_score", det.get("score", 0.0)),
+                })
+
+        return {
+            "image_path": image_path,
+            "detections": converted_detections,
+            "labels": labels,
+        }
+    except Exception as e:
+        logger.error(f"Error calling DINO service for {image_path}: {e}")
+        return {
+            "image_path": image_path,
+            "detections": [],
+            "labels": labels,
+            "error": str(e),
+        }
+
+
+async def call_dino_service(
+    image_paths: List[str],
+    labels: List[str],
+    box_threshold: float = 0.3,
+    text_threshold: float = 0.25,
+) -> List[Dict[str, Any]]:
+    async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
+        return [
+            await call_dino_service_single(client, image_path, labels, box_threshold, text_threshold)
+            for image_path in image_paths
+        ]
 
 
 async def run_dino_detection_task(
@@ -151,37 +159,52 @@ async def run_dino_detection_task(
         await task_manager.set_task_running(task_id)
         
         total_images = len(image_paths)
+        failed_images = 0
+        last_error = None
+        processed_counter = 0
+        counter_lock = asyncio.Lock()
+        semaphore = asyncio.Semaphore(DINO_CONCURRENCY)
+
+        async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
+            async def worker(image_path: str):
+                nonlocal failed_images, last_error, processed_counter
+                if await task_manager.is_task_cancelled(task_id):
+                    return
+
+                async with semaphore:
+                    if await task_manager.is_task_cancelled(task_id):
+                        return
+                    result = await call_dino_service_single(
+                        client,
+                        image_path,
+                        labels,
+                        box_threshold,
+                        text_threshold,
+                    )
+
+                async with counter_lock:
+                    if result.get("error"):
+                        failed_images += 1
+                        last_error = result["error"]
+                    await task_manager.add_task_result(task_id, result)
+                    processed_counter += 1
+                    await task_manager.update_task_progress(task_id, processed_counter)
+
+            await asyncio.gather(*(worker(image_path) for image_path in image_paths))
+
+        if await task_manager.is_task_cancelled(task_id):
+            logger.info(f"Task {task_id}: Cancelled by user")
+            await task_manager.set_task_cancelled(task_id)
+            return
         
-        for idx, image_path in enumerate(image_paths):
-            if await task_manager.is_task_cancelled(task_id):
-                logger.info(f"Task {task_id}: Cancelled by user")
-                await task_manager.set_task_cancelled(task_id)
-                return
-            
-            try:
-                detections = await call_dino_service([image_path], labels)
-                
-                if detections:
-                    result = {
-                        "image_path": image_path,
-                        "detections": detections[0].get("detections", []),
-                        "labels": labels
-                    }
-                else:
-                    result = {
-                        "image_path": image_path,
-                        "detections": [],
-                        "labels": labels
-                    }
-                
-                await task_manager.add_task_result(task_id, result)
-                await task_manager.update_task_progress(task_id, idx + 1)
-                
-            except Exception as e:
-                logger.error(f"Task {task_id}: Failed to process {image_path} - {e}")
-        
+        if total_images > 0 and failed_images == total_images:
+            message = f"DINO service failed for all images: {last_error or 'unknown error'}"
+            await task_manager.set_task_failed(task_id, message)
+            logger.error(f"Task {task_id}: {message}")
+            return
+
         await task_manager.set_task_completed(task_id)
-        logger.info(f"Task {task_id}: DINO detection completed successfully")
+        logger.info(f"Task {task_id}: DINO detection completed (failed={failed_images}/{total_images})")
         
     except Exception as e:
         logger.error(f"Task {task_id}: DINO detection failed - {e}", exc_info=True)
@@ -276,10 +299,10 @@ async def cancel_dino_task(task_id: str):
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
     
     if task.status.value in ["completed", "failed", "cancelled"]:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot cancel task {task_id}. Current status: {task.status.value}"
-        )
+        return {
+            "success": True,
+            "message": f"Task {task_id} is already {task.status.value}"
+        }
     
     await task_manager.set_task_cancelled(task_id)
     logger.info(f"Task {task_id}: Cancelled by user")

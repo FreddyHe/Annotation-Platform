@@ -18,6 +18,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
 from services.task_manager import task_manager, TaskStatus
+from services.resource_locks import gpu_lock
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,104 @@ TRAINING_OUTPUT_BASE = "/root/autodl-fs/Annotation-Platform/training_runs"
 CONDA_ENV = "xingmu_yolo"
 
 router = APIRouter(prefix="/algo/train", tags=["Training"])
+
+
+def _to_float(value):
+    if value is None:
+        return None
+    try:
+        if hasattr(value, "detach"):
+            value = value.detach().cpu()
+        if hasattr(value, "tolist"):
+            value = value.tolist()
+        if isinstance(value, (list, tuple)):
+            return [_to_float(item) for item in value]
+        return float(value)
+    except Exception:
+        return None
+
+
+def _loss_metrics_from_trainer(trainer, current_epoch: int) -> Dict[str, Any]:
+    metrics: Dict[str, Any] = {"current_epoch": current_epoch}
+    raw_losses = _to_float(getattr(trainer, "tloss", None))
+    if raw_losses is None:
+        raw_losses = _to_float(getattr(trainer, "loss_items", None))
+    if raw_losses is None:
+        return metrics
+    if not isinstance(raw_losses, list):
+        raw_losses = [raw_losses]
+
+    names = list(getattr(trainer, "loss_names", []) or [])
+    normalized = []
+    for name in names:
+        clean = str(name).replace("train/", "").replace("_loss", "")
+        normalized.append(clean)
+    if not normalized:
+        normalized = ["box", "cls", "dfl"]
+
+    loss_sum = 0.0
+    has_loss = False
+    for idx, value in enumerate(raw_losses):
+        if value is None:
+            continue
+        key = normalized[idx] if idx < len(normalized) else f"loss_{idx}"
+        metrics[f"{key}_loss"] = value
+        loss_sum += value
+        has_loss = True
+    if has_loss:
+        metrics["train_loss"] = loss_sum
+    return metrics
+
+
+def _metrics_from_results_csv(results_csv: Path) -> Dict[str, Any]:
+    if not results_csv.exists():
+        return {}
+    try:
+        with open(results_csv, newline='', encoding='utf-8') as f:
+            rows = list(csv.DictReader(f))
+        if not rows:
+            return {}
+        row = {k.strip(): v for k, v in rows[-1].items()}
+
+        def as_float(key: str):
+            value = row.get(key)
+            if value is None or value == "":
+                return None
+            try:
+                return float(value)
+            except ValueError:
+                return None
+
+        metrics: Dict[str, Any] = {}
+        epoch = as_float("epoch")
+        if epoch is not None:
+            metrics["current_epoch"] = int(epoch)
+
+        box_loss = as_float("train/box_loss")
+        cls_loss = as_float("train/cls_loss")
+        dfl_loss = as_float("train/dfl_loss")
+        val_box_loss = as_float("val/box_loss")
+        val_cls_loss = as_float("val/cls_loss")
+        val_dfl_loss = as_float("val/dfl_loss")
+
+        if box_loss is not None:
+            metrics["box_loss"] = box_loss
+        if cls_loss is not None:
+            metrics["cls_loss"] = cls_loss
+        if dfl_loss is not None:
+            metrics["dfl_loss"] = dfl_loss
+
+        train_losses = [value for value in [box_loss, cls_loss, dfl_loss] if value is not None]
+        val_losses = [value for value in [val_box_loss, val_cls_loss, val_dfl_loss] if value is not None]
+        if train_losses:
+            metrics["train_loss"] = sum(train_losses)
+        if val_losses:
+            metrics["val_loss"] = sum(val_losses)
+
+        return metrics
+    except Exception as exc:
+        logger.debug(f"Failed to parse live training metrics from {results_csv}: {exc}")
+        return {}
 
 
 class YOLOTrainRequest(BaseModel):
@@ -70,7 +169,9 @@ def _do_yolo_training_sync(
 
     output_dir = ensure_training_output_dir(project_id)
     run_name = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    run_dir = output_dir / run_name
     log_file = output_dir / f"{run_name}_training.log"
+    results_csv = run_dir / "results.csv"
 
     data_yaml = str(Path(dataset_path) / "data.yaml")
 
@@ -92,7 +193,28 @@ def _do_yolo_training_sync(
         current_epoch = trainer.epoch + 1
         try:
             future = asyncio.run_coroutine_threadsafe(
-                task_manager.update_task_progress(task_id, current_epoch),
+                task_manager.update_task_progress(
+                    task_id,
+                    current_epoch,
+                    _loss_metrics_from_trainer(trainer, current_epoch)
+                ),
+                loop
+            )
+            future.result(timeout=5)
+        except Exception:
+            pass
+
+    def on_fit_epoch_end(trainer):
+        current_epoch = trainer.epoch + 1
+        metrics = _loss_metrics_from_trainer(trainer, current_epoch)
+        trainer_metrics = getattr(trainer, "metrics", None) or {}
+        for key, value in trainer_metrics.items():
+            numeric = _to_float(value)
+            if numeric is not None:
+                metrics[str(key)] = numeric
+        try:
+            future = asyncio.run_coroutine_threadsafe(
+                task_manager.update_task_progress(task_id, current_epoch, metrics),
                 loop
             )
             future.result(timeout=5)
@@ -100,28 +222,44 @@ def _do_yolo_training_sync(
             pass
 
     model.add_callback("on_train_epoch_end", on_train_epoch_end)
+    model.add_callback("on_fit_epoch_end", on_fit_epoch_end)
 
     logger.info(f"Task {task_id}: Starting YOLO training - data={data_yaml}, "
                 f"epochs={epochs}, batch={batch_size}, imgsz={image_size}, device={device}")
+    try:
+        future = asyncio.run_coroutine_threadsafe(
+            task_manager.update_task_progress(
+                task_id,
+                0,
+                {
+                    "run_dir": str(run_dir),
+                    "results_csv": str(results_csv),
+                    "current_epoch": 0
+                }
+            ),
+            loop
+        )
+        future.result(timeout=5)
+    except Exception:
+        pass
 
     # 真实训练
-    results = model.train(
-        data=data_yaml,
-        epochs=epochs,
-        batch=batch_size,
-        imgsz=image_size,
-        device=device,
-        project=str(output_dir),
-        name=run_name,
-        exist_ok=True,
-        verbose=True,
-    )
+    with gpu_lock:
+        results = model.train(
+            data=data_yaml,
+            epochs=epochs,
+            batch=batch_size,
+            imgsz=image_size,
+            device=device,
+            project=str(output_dir),
+            name=run_name,
+            exist_ok=True,
+            verbose=True,
+        )
 
     # 提取输出路径
-    run_dir = output_dir / run_name
     best_pt = run_dir / "weights" / "best.pt"
     last_pt = run_dir / "weights" / "last.pt"
-    results_csv = run_dir / "results.csv"
 
     metrics = {}
     if results and hasattr(results, 'results_dict'):
@@ -314,8 +452,19 @@ async def get_training_status(task_id: str):
     
     if not task:
         raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
-    
-    return task.to_dict()
+
+    status = task.to_dict()
+    results_csv_value = task.metrics.get("results_csv")
+    if results_csv_value:
+        csv_metrics = _metrics_from_results_csv(Path(results_csv_value))
+        if csv_metrics:
+            task.metrics.update(csv_metrics)
+            csv_epoch = int(csv_metrics.get("current_epoch") or task.processed_images)
+            if csv_epoch > task.processed_images:
+                task.processed_images = csv_epoch
+            status = task.to_dict()
+
+    return status
 
 
 @router.get("/log/{task_id}")
@@ -341,11 +490,19 @@ async def get_training_log(task_id: str, lines: int = 100):
             break
     
     if not log_file_path:
-        raise HTTPException(status_code=404, detail="Log file not found")
+        return {
+            "task_id": task_id,
+            "log_lines": [],
+            "total_lines": 0
+        }
     
     log_file = Path(log_file_path)
     if not log_file.exists():
-        raise HTTPException(status_code=404, detail="Log file does not exist")
+        return {
+            "task_id": task_id,
+            "log_lines": [],
+            "total_lines": 0
+        }
     
     # 读取最后 N 行日志
     try:
@@ -376,7 +533,11 @@ async def cancel_training(task_id: str):
         raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
     
     if task.status != TaskStatus.RUNNING:
-        raise HTTPException(status_code=400, detail="Task is not running")
+        return {
+            "task_id": task_id,
+            "status": "CANCELLED",
+            "message": f"Task is already {task.status.value}"
+        }
     
     # 设置任务为已取消
     await task_manager.set_task_cancelled(task_id)

@@ -22,7 +22,7 @@ import java.util.Map;
 @Service
 public class ModelTestService {
 
-    @Value("${algorithm.service.url:http://localhost:8001}")
+    @Value("${app.algorithm.url:http://localhost:8001}")
     private String algorithmServiceUrl;
 
     @Autowired

@@ -19,6 +19,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -47,7 +48,18 @@ public class ProjectController {
     private final com.annotation.platform.repository.DetectionResultRepository detectionResultRepository;
     private final com.annotation.platform.service.TrainingService trainingService;
     private final com.annotation.platform.service.ModelTestService modelTestService;
+    private final com.annotation.platform.service.RoundService roundService;
+    private final com.annotation.platform.service.ProjectConfigService projectConfigService;
     private final com.annotation.platform.repository.ModelTrainingRecordRepository modelTrainingRecordRepository;
+    private final com.annotation.platform.repository.InferenceDataPointRepository inferenceDataPointRepository;
+    private final com.annotation.platform.repository.EdgeDeploymentRepository edgeDeploymentRepository;
+    private final com.annotation.platform.repository.IterationRoundRepository iterationRoundRepository;
+    private final com.annotation.platform.repository.ProjectConfigRepository projectConfigRepository;
+    private final com.annotation.platform.repository.AutoAnnotationJobRepository autoAnnotationJobRepository;
+    private final com.annotation.platform.service.IncrementalProjectService incrementalProjectService;
+
+    @Value("${app.file.upload.base-path}")
+    private String uploadBasePath;
 
     @PostMapping
     public Result<ProjectDetailResponse> createProject(
@@ -85,6 +97,12 @@ public class ProjectController {
         } catch (DataIntegrityViolationException e) {
             throw new com.annotation.platform.exception.BusinessException("项目名称已存在");
         }
+
+        com.annotation.platform.entity.IterationRound round1 = roundService.ensureCurrentRound(savedProject);
+        savedProject.setCurrentRoundId(round1.getId());
+        savedProject.setProjectType(Project.ProjectType.ITERATIVE);
+        savedProject = projectRepository.save(savedProject);
+        projectConfigService.getOrCreate(savedProject.getId());
 
         labelStudioProxyService.syncProjectToLS(savedProject, userId);
 
@@ -210,6 +228,21 @@ public class ProjectController {
         // 2. 删除 ProjectImage（会级联删除，但显式删除更清晰）
         projectImageRepository.deleteByProjectId(id);
 
+        // 2.5 清理迭代飞轮新增数据，避免 iteration_rounds 外键阻塞项目删除
+        inferenceDataPointRepository.deleteByProjectId(id);
+        edgeDeploymentRepository.deleteByProjectId(id);
+        if (projectConfigRepository.existsById(id)) {
+            projectConfigRepository.deleteById(id);
+        }
+        iterationRoundRepository.deleteByProjectId(id);
+
+        // 2.6 清理自动标注任务，auto_annotation_jobs 外键指向 projects
+        long autoJobCount = autoAnnotationJobRepository.countByProjectId(id);
+        if (autoJobCount > 0) {
+            autoAnnotationJobRepository.deleteByProjectId(id);
+            log.info("已删除项目自动标注任务: projectId={}, count={}", id, autoJobCount);
+        }
+
         // 3. 清理 Label Studio 端数据（必须先删 storage 再删 project）
         Long lsProjectId = project.getLsProjectId();
         if (lsProjectId != null) {
@@ -233,12 +266,15 @@ public class ProjectController {
     public Result<java.util.Map<String, Object>> getProjectImages(
             @PathVariable Long id,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) Integer pageSize) {
 
         List<ProjectImage> images = projectImageRepository.findProjectImagesNativeByType(id);
         
-        int start = (page - 1) * size;
-        int end = Math.min(start + size, images.size());
+        int effectiveSize = pageSize != null ? pageSize : size;
+        int safePage = page <= 1 ? 0 : page - 1;
+        int start = safePage * effectiveSize;
+        int end = Math.min(start + effectiveSize, images.size());
         
         if (start >= images.size()) {
             java.util.Map<String, Object> result = new java.util.HashMap<>();
@@ -281,6 +317,7 @@ public class ProjectController {
                     response.put("id", image.getId());
                     response.put("name", image.getFileName());
                     response.put("path", image.getFilePath());
+                    response.put("url", "/api/v1/files/" + image.getFilePath());
                     response.put("size", image.getFileSize());
                     response.put("uploadedAt", image.getUploadedAt());
                     response.put("status", image.getStatus().name());
@@ -310,6 +347,8 @@ public class ProjectController {
                             String label = (String) resultData.get("label");
                             
                             cleaning.put("originalLabels", java.util.Arrays.asList(label));
+                            cleaning.put("bbox", resultData.get("bbox"));
+                            cleaning.put("confidence", resultData.get("score"));
                             
                             if ("keep".equals(decision)) {
                                 cleaning.put("cleanedLabels", java.util.Arrays.asList(label));
@@ -345,14 +384,142 @@ public class ProjectController {
         long totalImages = projectImageRepository.countByProjectId(id);
         long uploadedImages = projectImageRepository.countByProjectIdAndStatus(
                 id, ProjectImage.ImageStatus.COMPLETED);
+        List<com.annotation.platform.entity.DetectionResult> dinoResults =
+                detectionResultRepository.findByProjectIdAndTypeWithImage(
+                        id,
+                        com.annotation.platform.entity.DetectionResult.ResultType.DINO_DETECTION
+                );
+        List<com.annotation.platform.entity.DetectionResult> vlmResults =
+                detectionResultRepository.findByProjectIdAndTypeWithImage(
+                        id,
+                        com.annotation.platform.entity.DetectionResult.ResultType.VLM_CLEANING
+                );
+        List<com.annotation.platform.entity.DetectionResult> finalResults =
+                vlmResults.isEmpty() ? dinoResults : vlmResults;
+
+        java.util.Set<Long> processedImageIds = dinoResults.stream()
+                .filter(result -> result.getImage() != null)
+                .map(result -> result.getImage().getId())
+                .collect(java.util.stream.Collectors.toSet());
+        int processedImages = processedImageIds.size();
+        java.util.Optional<com.annotation.platform.entity.AutoAnnotationJob> latestAutoJob =
+                autoAnnotationJobRepository.findFirstByProjectIdOrderByCreatedAtDesc(id);
+        if (latestAutoJob.isPresent()) {
+            com.annotation.platform.entity.AutoAnnotationJob job = latestAutoJob.get();
+            if (job.getProcessedImages() != null) {
+                processedImages = Math.max(processedImages, job.getProcessedImages());
+            }
+            if (job.getStatus() == com.annotation.platform.entity.AutoAnnotationJob.JobStatus.COMPLETED
+                    && job.getTotalImages() != null) {
+                processedImages = Math.max(processedImages, job.getTotalImages());
+            }
+        }
+        if (project.getStatus() == Project.ProjectStatus.COMPLETED && project.getProcessedImages() != null) {
+            processedImages = Math.max(processedImages, project.getProcessedImages());
+        }
+        processedImages = (int) Math.min(totalImages, processedImages);
+
+        double avgConfidence = finalResults.stream()
+                .map(com.annotation.platform.entity.DetectionResult::getResultData)
+                .map(data -> data.get("score"))
+                .filter(Number.class::isInstance)
+                .map(Number.class::cast)
+                .mapToDouble(Number::doubleValue)
+                .average()
+                .orElse(0.0);
+
+        java.util.Map<String, Long> labelDistribution = finalResults.stream()
+                .map(com.annotation.platform.entity.DetectionResult::getResultData)
+                .map(data -> data.get("label"))
+                .filter(String.class::isInstance)
+                .map(String.class::cast)
+                .collect(java.util.stream.Collectors.groupingBy(label -> label, java.util.LinkedHashMap::new, java.util.stream.Collectors.counting()));
+
+        java.util.List<java.util.Map<String, Object>> labelDistributionList = labelDistribution.entrySet().stream()
+                .map(entry -> {
+                    java.util.Map<String, Object> item = new java.util.HashMap<>();
+                    item.put("label", entry.getKey());
+                    item.put("count", entry.getValue());
+                    return item;
+                })
+                .collect(java.util.stream.Collectors.toList());
+
+        long[] confidenceBuckets = new long[5];
+        for (com.annotation.platform.entity.DetectionResult result : finalResults) {
+            Object scoreValue = result.getResultData().get("score");
+            if (scoreValue instanceof Number score) {
+                int bucket = Math.min(4, Math.max(0, (int) Math.floor(score.doubleValue() * 5)));
+                confidenceBuckets[bucket]++;
+            }
+        }
+        String[] ranges = {"0-20%", "20-40%", "40-60%", "60-80%", "80-100%"};
+        java.util.List<java.util.Map<String, Object>> confidenceDistribution = new java.util.ArrayList<>();
+        for (int i = 0; i < ranges.length; i++) {
+            java.util.Map<String, Object> item = new java.util.HashMap<>();
+            item.put("range", ranges[i]);
+            item.put("count", confidenceBuckets[i]);
+            confidenceDistribution.add(item);
+        }
 
         java.util.Map<String, Object> stats = new java.util.HashMap<>();
         stats.put("totalImages", totalImages);
         stats.put("uploadedImages", uploadedImages);
-        stats.put("processedImages", project.getProcessedImages());
+        stats.put("processedImages", processedImages);
+        stats.put("totalDetections", dinoResults.size());
+        stats.put("totalFinalResults", finalResults.size());
+        stats.put("cleanedDetections", vlmResults.size());
+        stats.put("hasVlmCleaning", !vlmResults.isEmpty());
+        stats.put("avgConfidence", avgConfidence * 100);
+        stats.put("labelDistribution", labelDistributionList);
+        stats.put("confidenceDistribution", confidenceDistribution);
         stats.put("status", project.getStatus());
 
         return Result.success(stats);
+    }
+
+    @GetMapping("/{id}/ls-health")
+    public Result<java.util.Map<String, Object>> getLsHealth(@PathVariable Long id) {
+        Project project = projectRepository.findById(id)
+                .orElseThrow(() -> new com.annotation.platform.exception.ResourceNotFoundException("Project", "id", id));
+        Long userId = project.getCreatedBy() != null ? project.getCreatedBy().getId() : null;
+        boolean alive = incrementalProjectService.isLsProjectAlive(project.getLsProjectId(), userId, project);
+        if (project.getLsProjectId() != null) {
+            project.setLsProjectStatus(alive
+                    ? (project.getLsProjectStatus() == Project.LsProjectStatus.REPAIRED
+                    ? Project.LsProjectStatus.REPAIRED : Project.LsProjectStatus.ACTIVE)
+                    : Project.LsProjectStatus.DEAD);
+            projectRepository.save(project);
+        }
+        java.util.Map<String, Object> result = new java.util.HashMap<>();
+        result.put("projectId", id);
+        result.put("lsProjectId", project.getLsProjectId());
+        result.put("alive", alive);
+        result.put("status", project.getLsProjectStatus() != null ? project.getLsProjectStatus().name() : "UNKNOWN");
+        return Result.success(result);
+    }
+
+    @PostMapping("/{id}/repair-ls-binding")
+    public Result<java.util.Map<String, Object>> repairLsBinding(@PathVariable Long id, HttpServletRequest httpRequest) {
+        Long userId = (Long) httpRequest.getAttribute("userId");
+        return Result.success(incrementalProjectService.repairMainLsBinding(id, userId));
+    }
+
+    @GetMapping("/{id}/incrementals")
+    public Result<java.util.Map<String, Object>> getIncrementalProjects(@PathVariable Long id, HttpServletRequest httpRequest) {
+        Long userId = (Long) httpRequest.getAttribute("userId");
+        return Result.success(incrementalProjectService.getIncrementalProjectsStatus(id, userId));
+    }
+
+    @GetMapping("/{id}/training/preview")
+    public Result<java.util.Map<String, Object>> trainingPreview(@PathVariable Long id, HttpServletRequest httpRequest) {
+        Long userId = (Long) httpRequest.getAttribute("userId");
+        return Result.success(incrementalProjectService.trainingDatasetPreview(id, userId));
+    }
+
+    @PostMapping("/{id}/flywheel/sync")
+    public Result<java.util.Map<String, Object>> syncFlywheelData(@PathVariable Long id, HttpServletRequest httpRequest) {
+        Long userId = (Long) httpRequest.getAttribute("userId");
+        return Result.success(incrementalProjectService.syncPendingDataToLabelStudio(id, userId));
     }
 
     @GetMapping("/{id}/review-stats")
@@ -447,6 +614,7 @@ public class ProjectController {
             List<java.util.Map<String, Object>> annotations = labelStudioProxyService.exportAnnotations(
                 project.getLsProjectId(), userId, format
             );
+            annotations = mergePlatformPredictionsForExport(project, annotations);
             
             if (annotations.isEmpty()) {
                 throw new com.annotation.platform.exception.BusinessException("没有可导出的标注数据");
@@ -468,6 +636,142 @@ public class ProjectController {
         } catch (Exception e) {
             log.error("导出失败: projectId={}, error={}", id, e.getMessage(), e);
             throw new com.annotation.platform.exception.BusinessException("导出失败: " + e.getMessage());
+        }
+    }
+
+    private List<java.util.Map<String, Object>> mergePlatformPredictionsForExport(
+            Project project,
+            List<java.util.Map<String, Object>> labelStudioAnnotations) {
+        List<java.util.Map<String, Object>> merged = new java.util.ArrayList<>();
+        if (labelStudioAnnotations != null) {
+            merged.addAll(labelStudioAnnotations);
+        }
+
+        java.util.Set<String> exportedImages = merged.stream()
+                .map(item -> item.get("image_name"))
+                .filter(String.class::isInstance)
+                .map(String.class::cast)
+                .collect(java.util.stream.Collectors.toSet());
+
+        Long projectId = project.getId();
+        List<ProjectImage> images = projectImageRepository.findProjectImagesNativeByType(projectId);
+        List<com.annotation.platform.entity.DetectionResult> dinoResults =
+                detectionResultRepository.findByProjectIdAndTypeWithImage(
+                        projectId,
+                        com.annotation.platform.entity.DetectionResult.ResultType.DINO_DETECTION
+                );
+        List<com.annotation.platform.entity.DetectionResult> vlmResults =
+                detectionResultRepository.findByProjectIdAndTypeWithImage(
+                        projectId,
+                        com.annotation.platform.entity.DetectionResult.ResultType.VLM_CLEANING
+                );
+
+        List<com.annotation.platform.entity.DetectionResult> finalResults =
+                vlmResults.isEmpty() ? dinoResults : vlmResults.stream()
+                        .filter(this::isKeptVlmResult)
+                        .collect(java.util.stream.Collectors.toList());
+
+        java.util.Map<Long, List<com.annotation.platform.entity.DetectionResult>> resultsByImage =
+                finalResults.stream()
+                        .filter(result -> result.getImage() != null)
+                        .collect(java.util.stream.Collectors.groupingBy(result -> result.getImage().getId()));
+
+        for (ProjectImage image : images) {
+            String imageName = image.getFileName();
+            if (imageName == null || exportedImages.contains(imageName)) {
+                continue;
+            }
+
+            java.util.Map<String, Object> annotation = buildExportAnnotationFromPlatform(image, resultsByImage.get(image.getId()));
+            merged.add(annotation);
+            exportedImages.add(imageName);
+        }
+
+        return merged;
+    }
+
+    private boolean isKeptVlmResult(com.annotation.platform.entity.DetectionResult result) {
+        java.util.Map<String, Object> data = result.getResultData();
+        Object decision = data != null ? data.get("vlm_decision") : null;
+        return decision == null || "keep".equals(String.valueOf(decision));
+    }
+
+    private java.util.Map<String, Object> buildExportAnnotationFromPlatform(
+            ProjectImage image,
+            List<com.annotation.platform.entity.DetectionResult> results) {
+        java.util.Map<String, Object> annotation = new java.util.HashMap<>();
+        annotation.put("image_name", image.getFileName());
+        annotation.put("task_id", null);
+        annotation.put("source", "platform_prediction");
+
+        int[] size = readImageSize(image.getFilePath());
+        annotation.put("image_width", size[0] > 0 ? size[0] : null);
+        annotation.put("image_height", size[1] > 0 ? size[1] : null);
+
+        List<java.util.Map<String, Object>> boxes = new java.util.ArrayList<>();
+        if (results != null) {
+            for (com.annotation.platform.entity.DetectionResult result : results) {
+                java.util.Map<String, Object> data = result.getResultData();
+                java.util.Map<String, Object> box = convertDetectionResultToExportBox(data, size[0], size[1]);
+                if (box != null) {
+                    boxes.add(box);
+                }
+            }
+        }
+        annotation.put("annotations", boxes);
+        return annotation;
+    }
+
+    private java.util.Map<String, Object> convertDetectionResultToExportBox(
+            java.util.Map<String, Object> data,
+            int imageWidth,
+            int imageHeight) {
+        if (data == null || imageWidth <= 0 || imageHeight <= 0) {
+            return null;
+        }
+        Object labelValue = data.get("label");
+        Object bboxValue = data.get("bbox");
+        if (!(labelValue instanceof String label) || !(bboxValue instanceof List<?> bbox) || bbox.size() < 4) {
+            return null;
+        }
+
+        double x = toDouble(bbox.get(0), 0);
+        double y = toDouble(bbox.get(1), 0);
+        double width = toDouble(bbox.get(2), 0);
+        double height = toDouble(bbox.get(3), 0);
+        if (width <= 0 || height <= 0) {
+            return null;
+        }
+
+        java.util.Map<String, Object> box = new java.util.HashMap<>();
+        box.put("label", label);
+        box.put("x", x / imageWidth * 100.0);
+        box.put("y", y / imageHeight * 100.0);
+        box.put("width", width / imageWidth * 100.0);
+        box.put("height", height / imageHeight * 100.0);
+        return box;
+    }
+
+    private double toDouble(Object value, double defaultValue) {
+        return value instanceof Number number ? number.doubleValue() : defaultValue;
+    }
+
+    private int[] readImageSize(String filePath) {
+        try {
+            java.io.File file = new java.io.File(filePath != null && filePath.startsWith("/")
+                    ? filePath
+                    : uploadBasePath + "/" + filePath);
+            if (!file.exists()) {
+                return new int[]{0, 0};
+            }
+            java.awt.image.BufferedImage image = javax.imageio.ImageIO.read(file);
+            if (image == null) {
+                return new int[]{0, 0};
+            }
+            return new int[]{image.getWidth(), image.getHeight()};
+        } catch (Exception e) {
+            log.warn("读取导出图片尺寸失败: filePath={}, error={}", filePath, e.getMessage());
+            return new int[]{0, 0};
         }
     }
     
@@ -715,6 +1019,18 @@ public class ProjectController {
             Integer imageSize = config.get("imageSize") != null ? ((Number) config.get("imageSize")).intValue() : 640;
             String modelType = config.get("modelType") != null ? (String) config.get("modelType") : "yolov8n";
             String device = config.get("device") != null ? (String) config.get("device") : "0";
+            boolean autoML = Boolean.TRUE.equals(config.get("autoML")) || Boolean.TRUE.equals(config.get("automl"));
+            boolean forceRetrain = Boolean.TRUE.equals(config.get("forceRetrain"));
+            java.util.Map<String, Object> autoMLConfig = null;
+            if (autoML) {
+                autoMLConfig = buildAutoMLTrainingConfig(project);
+                epochs = ((Number) autoMLConfig.get("epochs")).intValue();
+                batchSize = ((Number) autoMLConfig.get("batchSize")).intValue();
+                imageSize = ((Number) autoMLConfig.get("imageSize")).intValue();
+                modelType = (String) autoMLConfig.get("modelType");
+                device = (String) autoMLConfig.get("device");
+                log.info("AutoML training config selected: projectId={}, config={}", id, autoMLConfig);
+            }
             
             com.annotation.platform.entity.ModelTrainingRecord record = trainingService.startTraining(
                     userId,
@@ -725,7 +1041,9 @@ public class ProjectController {
                     batchSize,
                     imageSize,
                     modelType,
-                    device
+                    device,
+                    com.annotation.platform.entity.ModelTrainingRecord.TrainingDataSource.INITIAL,
+                    forceRetrain
             );
             
             java.util.Map<String, Object> trainingStatus = new java.util.HashMap<>();
@@ -736,6 +1054,10 @@ public class ProjectController {
             trainingStatus.put("currentEpoch", 0);
             trainingStatus.put("recordId", record.getId());
             trainingStatus.put("taskId", record.getTaskId());
+            trainingStatus.put("autoML", autoML);
+            if (autoMLConfig != null) {
+                trainingStatus.put("autoMLConfig", autoMLConfig);
+            }
             
             log.info("训练启动成功: projectId={}, modelName={}, taskId={}", id, config.get("modelName"), record.getTaskId());
             
@@ -748,6 +1070,38 @@ public class ProjectController {
             errorStatus.put("errorMessage", e.getMessage());
             return Result.success(errorStatus);
         }
+    }
+
+    private java.util.Map<String, Object> buildAutoMLTrainingConfig(Project project) {
+        int imageCount = project.getTotalImages() != null ? project.getTotalImages() : 0;
+        int labelCount = project.getLabels() != null ? project.getLabels().size() : 1;
+
+        java.util.Map<String, Object> result = new java.util.HashMap<>();
+        result.put("device", "0");
+        result.put("pretrained", true);
+        result.put("strategy", "rule-based-yolo-baseline");
+
+        if (imageCount < 300 || labelCount <= 2) {
+            result.put("modelType", "yolov8n");
+            result.put("epochs", 80);
+            result.put("batchSize", 16);
+            result.put("imageSize", 640);
+            result.put("reason", "小数据集或少类别任务优先使用轻量预训练模型，降低过拟合和训练成本。");
+        } else if (imageCount < 2000 && labelCount <= 10) {
+            result.put("modelType", "yolov8s");
+            result.put("epochs", 120);
+            result.put("batchSize", 16);
+            result.put("imageSize", 768);
+            result.put("reason", "中等规模数据使用 yolov8s 和更高输入分辨率，平衡精度与训练时间。");
+        } else {
+            result.put("modelType", "yolov8m");
+            result.put("epochs", 160);
+            result.put("batchSize", 12);
+            result.put("imageSize", 832);
+            result.put("reason", "较大数据集使用更大模型容量，batch 保守设置以控制显存。");
+        }
+
+        return result;
     }
 
     @GetMapping("/{id}/training/status")
@@ -783,12 +1137,17 @@ public class ProjectController {
             case RUNNING:
                 trainingStatus.put("status", "TRAINING");
                 trainingStatus.put("message", "训练进行中...");
-                trainingStatus.put("currentEpoch", toInt(algorithmStatus.get("processed_images"), 0));
+                trainingStatus.put("currentEpoch", toInt(algorithmStatus.getOrDefault("current_epoch", algorithmStatus.get("processed_images")), 0));
+                putIfDouble(trainingStatus, "trainLoss", algorithmStatus.get("train_loss"));
+                putIfDouble(trainingStatus, "valLoss", algorithmStatus.get("val_loss"));
+                putIfDouble(trainingStatus, "boxLoss", algorithmStatus.get("box_loss"));
+                putIfDouble(trainingStatus, "clsLoss", algorithmStatus.get("cls_loss"));
+                putIfDouble(trainingStatus, "dflLoss", algorithmStatus.get("dfl_loss"));
                 java.util.Map<String, Double> runningLoss = trainingService.getFinalLossSummary(latest);
-                if (runningLoss.get("finalTrainLoss") != null) {
+                if (!trainingStatus.containsKey("trainLoss") && runningLoss.get("finalTrainLoss") != null) {
                     trainingStatus.put("trainLoss", runningLoss.get("finalTrainLoss"));
                 }
-                if (runningLoss.get("finalValLoss") != null) {
+                if (!trainingStatus.containsKey("valLoss") && runningLoss.get("finalValLoss") != null) {
                     trainingStatus.put("valLoss", runningLoss.get("finalValLoss"));
                 }
                 break;
@@ -873,7 +1232,7 @@ public class ProjectController {
                     java.util.List.of(tempFile.toFile()),
                     0.25,
                     0.45,
-                    "cpu"
+                    "0"
             );
 
             java.util.Map<String, Object> status = java.util.Map.of();
@@ -921,6 +1280,26 @@ public class ProjectController {
             }
         }
         return defaultValue;
+    }
+
+    private void putIfDouble(java.util.Map<String, Object> target, String key, Object value) {
+        Double parsed = toDouble(value);
+        if (parsed != null) {
+            target.put(key, parsed);
+        }
+    }
+
+    private Double toDouble(Object value) {
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        if (value != null) {
+            try {
+                return Double.parseDouble(value.toString());
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return null;
     }
 
     @SuppressWarnings("unchecked")
@@ -994,6 +1373,9 @@ public class ProjectController {
                 .processedImages(project.getProcessedImages())
                 .labels(project.getLabels())
                 .labelDefinitions(project.getLabelDefinitions())
+                .currentRoundId(project.getCurrentRoundId())
+                .projectType(project.getProjectType() != null ? project.getProjectType().name() : Project.ProjectType.LEGACY.name())
+                .lsProjectStatus(project.getLsProjectStatus() != null ? project.getLsProjectStatus().name() : Project.LsProjectStatus.UNKNOWN.name())
                 .createdAt(project.getCreatedAt())
                 .updatedAt(project.getUpdatedAt())
                 .lsProjectId(project.getLsProjectId())

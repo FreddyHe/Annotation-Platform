@@ -6,7 +6,7 @@ from loguru import logger
 import sys
 
 from config import settings, BASE_DIR, LOG_DIR
-from routers import dino, vlm, yolo, health, train, test, auto_annotation, single_class_detection, feasibility, training
+from routers import dino, vlm, yolo, health, train, test, auto_annotation, single_class_detection, feasibility, training, edge_inference, reinference
 
 
 @asynccontextmanager
@@ -52,12 +52,15 @@ logger.add(
 
 app.include_router(health.router, prefix=settings.API_PREFIX, tags=["Health"])
 app.include_router(dino.router, prefix=settings.API_PREFIX, tags=["DINO"])
+app.include_router(vlm.router, prefix=settings.API_PREFIX, tags=["VLM"])
 app.include_router(yolo.router, prefix=settings.API_PREFIX, tags=["YOLO"])
 app.include_router(train.router, prefix=settings.API_PREFIX, tags=["Training"])
 app.include_router(test.router, prefix=settings.API_PREFIX, tags=["Testing"])
 app.include_router(auto_annotation.router, prefix=settings.API_PREFIX, tags=["AutoAnnotation"])
 app.include_router(single_class_detection.router, prefix=settings.API_PREFIX, tags=["SingleClassDetection"])
 app.include_router(feasibility.router, prefix=settings.API_PREFIX, tags=["Feasibility"])
+app.include_router(edge_inference.router, prefix=settings.API_PREFIX, tags=["EdgeInference"])
+app.include_router(reinference.router, prefix=settings.API_PREFIX, tags=["ReInference"])
 app.include_router(training.router, tags=["CustomTraining"])
 
 

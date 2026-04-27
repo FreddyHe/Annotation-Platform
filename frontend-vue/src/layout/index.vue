@@ -22,10 +22,6 @@
           <el-icon><FolderOpened /></el-icon>
           <template #title>项目管理</template>
         </el-menu-item>
-        <el-menu-item index="/tasks">
-          <el-icon><Timer /></el-icon>
-          <template #title>算法任务</template>
-        </el-menu-item>
         <el-menu-item index="/model-training">
           <el-icon><Cpu /></el-icon>
           <template #title>单类别模型训练</template>

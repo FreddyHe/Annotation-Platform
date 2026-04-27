@@ -1,6 +1,8 @@
 package com.annotation.platform.controller;
 
 import com.annotation.platform.common.Result;
+import com.annotation.platform.dto.request.AutoAnnotationStartRequest;
+import com.annotation.platform.entity.AutoAnnotationJob;
 import com.annotation.platform.entity.Project;
 import com.annotation.platform.repository.ProjectRepository;
 import com.annotation.platform.service.algorithm.AutoAnnotationService;
@@ -27,20 +29,32 @@ public class AutoAnnotationController {
     @PostMapping("/start/{projectId}")
     public Result<Map<String, Object>> startAutoAnnotation(
             @PathVariable Long projectId, 
-            @RequestBody(required = false) Map<String, String> params,
+            @RequestBody(required = false) AutoAnnotationStartRequest request,
             HttpServletRequest httpRequest) {
         
-        String processRange = params != null ? params.get("processRange") : "unprocessed";
-        log.info("Received request to start auto annotation: projectId={}, processRange={}", projectId, processRange);
+        AutoAnnotationStartRequest startRequest = request != null ? request : AutoAnnotationStartRequest.builder().build();
+        if (startRequest.getProcessRange() == null || startRequest.getProcessRange().isBlank()) {
+            startRequest.setProcessRange("unprocessed");
+        }
+        if (startRequest.getMode() == null) {
+            startRequest.setMode(AutoAnnotationJob.AnnotationMode.DINO_VLM);
+        }
+        if (startRequest.getScoreThreshold() == null) {
+            startRequest.setScoreThreshold(0.7);
+        }
+
+        log.info("Received request to start auto annotation: projectId={}, processRange={}, mode={}",
+                projectId, startRequest.getProcessRange(), startRequest.getMode());
         
         try {
             Long userId = (Long) httpRequest.getAttribute("userId");
             
-            // 异步启动自动标注
-            autoAnnotationService.startAutoAnnotation(projectId, userId, processRange);
+            AutoAnnotationJob job = autoAnnotationService.createJob(projectId, userId, startRequest);
+            autoAnnotationService.startAutoAnnotationJob(job.getId());
             
             Map<String, Object> response = new HashMap<>();
-            response.put("taskId", "project-" + projectId);
+            response.put("taskId", "job-" + job.getId());
+            response.put("jobId", job.getId());
             response.put("message", "Auto annotation started successfully");
             
             return Result.success(response);
@@ -59,6 +73,11 @@ public class AutoAnnotationController {
         log.info("Querying task status: taskId={}", taskId);
         
         try {
+            if (taskId.startsWith("job-")) {
+                Long jobId = Long.parseLong(taskId.replace("job-", ""));
+                return Result.success(autoAnnotationService.getJobStatus(jobId));
+            }
+
             // 从 taskId 中提取 projectId (格式: project-{projectId})
             Long projectId = Long.parseLong(taskId.replace("project-", ""));
             
@@ -115,5 +134,21 @@ public class AutoAnnotationController {
             log.error("Failed to get task results: {}", e.getMessage(), e);
             return Result.error("Failed to get task results: " + e.getMessage());
         }
+    }
+
+    @GetMapping("/jobs/{jobId}")
+    public Result<Map<String, Object>> getJob(@PathVariable Long jobId) {
+        return Result.success(autoAnnotationService.getJobStatus(jobId));
+    }
+
+    @GetMapping("/projects/{projectId}/jobs/latest")
+    public Result<Map<String, Object>> getLatestProjectJob(@PathVariable Long projectId) {
+        Map<String, Object> status = autoAnnotationService.getLatestJobStatus(projectId);
+        return Result.success(status);
+    }
+
+    @PostMapping("/jobs/{jobId}/cancel")
+    public Result<Map<String, Object>> cancelJob(@PathVariable Long jobId) {
+        return Result.success(autoAnnotationService.cancelJob(jobId));
     }
 }

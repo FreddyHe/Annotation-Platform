@@ -5,6 +5,8 @@ import com.annotation.platform.dto.request.upload.UploadChunkRequest;
 import com.annotation.platform.dto.response.upload.UploadProgressResponse;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.Map;
+
 public interface FileUploadService {
 
     String uploadChunk(UploadChunkRequest request, MultipartFile file);
@@ -12,6 +14,8 @@ public interface FileUploadService {
     String mergeChunks(MergeChunksRequest request);
 
     UploadProgressResponse getUploadProgress(String fileId);
+
+    Map<String, Object> listUploadedChunks(String fileId);
 
     boolean deleteFile(String filePath);
 

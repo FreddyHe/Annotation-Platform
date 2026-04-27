@@ -72,6 +72,14 @@ public class TrainingController {
         try {
             ModelTrainingRecord record = trainingService.getTrainingRecordByTaskId(taskId);
             if (record == null) {
+                Map<String, Object> algorithmStatus = trainingService.getAlgorithmTrainingStatus(taskId);
+                if (!algorithmStatus.isEmpty()) {
+                    Map<String, Object> response = new HashMap<>();
+                    response.put("taskId", taskId);
+                    response.put("status", algorithmStatus.getOrDefault("status", "UNKNOWN"));
+                    response.put("source", "ALGORITHM_SERVICE");
+                    return Result.success(response);
+                }
                 return Result.error("404", "Training record not found");
             }
             return Result.success(toRecordResponse(record));
@@ -165,6 +173,8 @@ public class TrainingController {
         response.put("taskId", record.getTaskId());
         response.put("runName", record.getRunName());
         response.put("status", record.getStatus() != null ? record.getStatus().name() : null);
+        response.put("roundId", record.getRoundId());
+        response.put("trainingDataSource", record.getTrainingDataSource() != null ? record.getTrainingDataSource().name() : null);
         response.put("epochs", record.getEpochs());
         response.put("batchSize", record.getBatchSize());
         response.put("imageSize", record.getImageSize());
@@ -183,9 +193,27 @@ public class TrainingController {
         response.put("startedAt", record.getStartedAt());
         response.put("completedAt", record.getCompletedAt());
         response.put("errorMessage", record.getErrorMessage());
-        response.put("testResults", record.getTestResults());
+        response.put("testResults", parseJsonField(record.getTestResults()));
         response.put("createdAt", record.getCreatedAt());
         response.put("updatedAt", record.getUpdatedAt());
         return response;
+    }
+
+    private Object parseJsonField(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        Object current = value;
+        for (int i = 0; i < 8; i++) {
+            if (!(current instanceof String text)) {
+                return current;
+            }
+            try {
+                current = com.alibaba.fastjson2.JSON.parse(text);
+            } catch (Exception e) {
+                return value;
+            }
+        }
+        return current;
     }
 }

@@ -1,14 +1,17 @@
 package com.annotation.platform.service.algorithm;
 
+import com.annotation.platform.dto.request.AutoAnnotationStartRequest;
 import com.annotation.platform.dto.request.algorithm.DinoDetectRequest;
 import com.annotation.platform.dto.request.algorithm.VlmCleanRequest;
 import com.annotation.platform.dto.response.algorithm.DinoDetectResponse;
 import com.annotation.platform.dto.response.algorithm.VlmCleanResponse;
 import com.annotation.platform.entity.AnnotationTask;
+import com.annotation.platform.entity.AutoAnnotationJob;
 import com.annotation.platform.entity.DetectionResult;
 import com.annotation.platform.entity.Project;
 import com.annotation.platform.entity.ProjectImage;
 import com.annotation.platform.repository.AnnotationTaskRepository;
+import com.annotation.platform.repository.AutoAnnotationJobRepository;
 import com.annotation.platform.repository.DetectionResultRepository;
 import com.annotation.platform.repository.ProjectImageRepository;
 import com.annotation.platform.repository.ProjectRepository;
@@ -16,16 +19,25 @@ import com.annotation.platform.service.labelstudio.LabelStudioProxyService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.HttpClientErrorException;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -33,326 +45,320 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class AutoAnnotationService {
 
-    private static final int POLLING_INTERVAL_MS = 5000; // 轮询间隔 5 秒
-    private static final int MAX_POLLING_ATTEMPTS = 60; // 最大轮询次数 (5 分钟)
-    private static final int MAX_POLLING_ATTEMPTS_VLM = 120; // VLM 最大轮询次数 (10 分钟)
+    private static final int POLLING_INTERVAL_MS = 5000;
+    private static final int MIN_DINO_POLLING_ATTEMPTS = 60;
+    private static final int MIN_VLM_POLLING_ATTEMPTS = 120;
 
     private final ProjectRepository projectRepository;
     private final ProjectImageRepository projectImageRepository;
     private final AnnotationTaskRepository annotationTaskRepository;
     private final DetectionResultRepository detectionResultRepository;
+    private final AutoAnnotationJobRepository autoAnnotationJobRepository;
     private final AlgorithmService algorithmService;
     private final LabelStudioProxyService labelStudioProxyService;
     private final ObjectMapper objectMapper;
+    private final TransactionTemplate transactionTemplate;
 
-    /**
-     * 启动自动标注流程（异步执行）
-     */
-    @Async("taskExecutor")
+    @Autowired
+    @Lazy
+    private AutoAnnotationService self;
+
     @Transactional
-    public void startAutoAnnotation(Long projectId, Long userId, String processRange) {
-        log.info("Starting auto annotation for project: {}, userId: {}, processRange: {}", projectId, userId, processRange);
-        
+    public AutoAnnotationJob createJob(Long projectId, Long userId, AutoAnnotationStartRequest request) {
+        Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new RuntimeException("Project not found: " + projectId));
+
+        Double scoreThreshold = clamp(request.getScoreThreshold() == null ? 0.7 : request.getScoreThreshold(), 0.0, 1.0);
+        AutoAnnotationJob job = AutoAnnotationJob.builder()
+                .project(project)
+                .userId(userId)
+                .processRange(request.getProcessRange())
+                .mode(request.getMode() == null ? AutoAnnotationJob.AnnotationMode.DINO_VLM : request.getMode())
+                .status(AutoAnnotationJob.JobStatus.PENDING)
+                .currentStage(AutoAnnotationJob.JobStage.INIT)
+                .scoreThreshold(scoreThreshold)
+                .boxThreshold(request.getBoxThreshold())
+                .textThreshold(request.getTextThreshold())
+                .progressPercent(0.0)
+                .paramsJson(buildParamsJson(request, scoreThreshold))
+                .build();
+        return autoAnnotationJobRepository.save(job);
+    }
+
+    @Async("taskExecutor")
+    public void startAutoAnnotationJob(Long jobId) {
+        AutoAnnotationJob job = autoAnnotationJobRepository.findById(jobId)
+                .orElseThrow(() -> new RuntimeException("Auto annotation job not found: " + jobId));
+        Long projectId = job.getProject().getId();
+        log.info("Starting auto annotation job: jobId={}, projectId={}, mode={}", jobId, projectId, job.getMode());
+
         try {
-            // 获取项目信息
+            markJobRunning(jobId);
+
             Project project = projectRepository.findById(projectId)
                     .orElseThrow(() -> new RuntimeException("Project not found: " + projectId));
-            
-            // ===== 重新执行时清理旧数据 =====
-            if ("all".equals(processRange)) {
-                log.info("processRange=all, 清理项目旧数据: projectId={}", projectId);
-                
-                // 1. 先删除 DetectionResult（因为它外键引用了 AnnotationTask）
-                long deletedResults = detectionResultRepository.countByProjectId(projectId);
-                if (deletedResults > 0) {
-                    detectionResultRepository.deleteByProjectId(projectId);
-                    log.info("已删除旧检测结果: count={}", deletedResults);
-                }
-                
-                // 2. 再删除 AnnotationTask
-                long deletedTasks = annotationTaskRepository.countByProjectId(projectId);
-                if (deletedTasks > 0) {
-                    annotationTaskRepository.deleteByProjectId(projectId);
-                    log.info("已删除旧标注任务: count={}", deletedTasks);
-                }
-                
-                // 3. 清理 Label Studio 端的旧 tasks（避免 LS 端也重复）
-                Long lsProjectId = project.getLsProjectId();
-                if (lsProjectId != null) {
-                    try {
-                        // TODO: 实现 labelStudioProxyService.deleteAllTasks(lsProjectId, userId);
-                        log.info("Label Studio 旧 tasks 清理功能待实现: lsProjectId={}", lsProjectId);
-                    } catch (Exception e) {
-                        log.warn("清理 Label Studio 旧 tasks 失败（可忽略）: {}", e.getMessage());
-                    }
-                }
+
+            if ("all".equals(job.getProcessRange())) {
+                cleanupOldResults(project);
             }
-            
-            // 获取项目图片列表
-            List<ProjectImage> images = projectImageRepository.findByProjectId(projectId, org.springframework.data.domain.PageRequest.of(0, Integer.MAX_VALUE)).getContent();
+
+            List<ProjectImage> images = projectImageRepository
+                    .findByProjectId(projectId, org.springframework.data.domain.PageRequest.of(0, Integer.MAX_VALUE))
+                    .getContent();
             if (images.isEmpty()) {
-                log.warn("No images found for project: {}", projectId);
                 throw new RuntimeException("项目没有图片: " + projectId);
             }
-            
-            // 获取图片路径列表
-            List<String> imagePaths = images.stream()
-                    .map(ProjectImage::getFilePath)
-                    .collect(Collectors.toList());
-            
-            // 获取标签定义
+            updateJobCounts(jobId, images.size(), 0, 0, 0, 5.0);
+
+            List<String> imagePaths = images.stream().map(ProjectImage::getFilePath).collect(Collectors.toList());
             List<String> labels = project.getLabels();
             Map<String, String> labelDefinitions = project.getLabelDefinitions();
-            
+
             if (labels == null || labels.isEmpty()) {
-                log.error("No labels defined for project: {}", projectId);
                 throw new RuntimeException("项目未定义标签: " + projectId);
             }
-            
-            // 如果 labelDefinitions 为空，根据 labels 构建默认定义
             if (labelDefinitions == null || labelDefinitions.isEmpty()) {
-                labelDefinitions = new java.util.HashMap<>();
+                labelDefinitions = new HashMap<>();
                 for (String label : labels) {
                     labelDefinitions.put(label, "标准定义的 " + label);
                 }
-                log.info("Auto-generated label definitions for project {}: {}", projectId, labelDefinitions);
             }
-            
-            log.info("Project: {}, Images: {}, Labels: {}", projectId, imagePaths.size(), labels);
-            
-            // 更新项目状态为 DETECTING
-            project.setStatus(Project.ProjectStatus.DETECTING);
-            projectRepository.save(project);
-            
-            // 步骤 1: 调用 DINO 检测
-            log.info("Step 1: Starting DINO detection...");
+
+            updateProjectStatus(projectId, Project.ProjectStatus.DETECTING);
+            updateJobStage(jobId, AutoAnnotationJob.JobStage.DINO, 10.0);
+
             DinoDetectRequest dinoRequest = DinoDetectRequest.builder()
                     .projectId(projectId)
                     .imagePaths(imagePaths)
                     .labels(labels)
+                    .boxThreshold(job.getBoxThreshold())
+                    .textThreshold(job.getTextThreshold())
                     .build();
-            
             DinoDetectResponse dinoResponse = algorithmService.startDinoDetection(dinoRequest);
-            
             if (!Boolean.TRUE.equals(dinoResponse.getSuccess())) {
-                log.error("DINO detection failed: {}", dinoResponse.getMessage());
                 throw new RuntimeException("DINO 检测失败: " + dinoResponse.getMessage());
             }
-            
+
             String dinoTaskId = dinoResponse.getTaskId();
-            log.info("DINO task started: {}", dinoTaskId);
-            
-            // 轮询等待 DINO 任务完成
-            Object dinoResults = waitForTaskCompletion(dinoTaskId, MAX_POLLING_ATTEMPTS);
-            log.info("DINO results received: {}", dinoResults);
-            
+            updateJobTaskId(jobId, dinoTaskId, null);
+            Object dinoResults = waitForTaskCompletion(jobId, dinoTaskId, dynamicAttemptsForDino(images.size()), 45.0, true);
             if (dinoResults == null) {
-                log.error("Failed to get DINO results for task: {}", dinoTaskId);
                 throw new RuntimeException("无法获取 DINO 结果: " + dinoTaskId);
             }
-            
-            // 保存 DINO 检测结果到数据库
-            log.info("Saving DINO detection results to database...");
+
             saveDinoResults(project, dinoResults, dinoTaskId);
-            
-            // 步骤 2: 调用 VLM 清洗
-            log.info("Step 2: Starting VLM cleaning...");
-            
-            // 更新项目状态为 CLEANING
-            project.setStatus(Project.ProjectStatus.CLEANING);
-            projectRepository.save(project);
-            
-            // 构建 VLM 清洗请求
             List<Map<String, Object>> detections = extractDetectionsFromResults(dinoResults);
-            VlmCleanRequest vlmRequest = VlmCleanRequest.builder()
-                    .projectId(projectId)
-                    .userId(userId)
-                    .detections(detections)
-                    .labelDefinitions(labelDefinitions)
-                    .imagePaths(imagePaths)  // 添加 image_paths 列表
-                    .build();
-            
-            VlmCleanResponse vlmResponse = algorithmService.startVlmCleaning(vlmRequest);
-            
-            if (!Boolean.TRUE.equals(vlmResponse.getSuccess())) {
-                log.error("VLM cleaning failed: {}", vlmResponse.getMessage());
-                throw new RuntimeException("VLM 清洗失败: " + vlmResponse.getMessage());
+            updateJobCounts(jobId, images.size(), images.size(), 0, detections.size(), 50.0);
+
+            if (job.getMode() == AutoAnnotationJob.AnnotationMode.DINO_THRESHOLD) {
+                runThresholdMode(jobId, project, images, detections, dinoTaskId);
+            } else {
+                runVlmMode(jobId, project, images, labelDefinitions, imagePaths, detections, dinoTaskId);
             }
-            
-            String vlmTaskId = vlmResponse.getTaskId();
-            log.info("VLM task started: {}", vlmTaskId);
-            
-            // 轮询等待 VLM 任务完成
-            Object vlmResults = waitForTaskCompletion(vlmTaskId, MAX_POLLING_ATTEMPTS_VLM);
-            log.info("VLM results received: {}", vlmResults);
-            
-            if (vlmResults == null) {
-                log.error("Failed to get VLM results for task: {}", vlmTaskId);
-                throw new RuntimeException("无法获取 VLM 结果: " + vlmTaskId);
-            }
-            
-            // 步骤 3: 保存清洗后的结果到数据库
-            log.info("Step 3: Saving cleaned results to database...");
-            saveCleanedResults(project, vlmResults, dinoTaskId, vlmTaskId);
-            
-            // 步骤 4: 同步预测结果到 Label Studio
-            log.info("Step 4: Syncing predictions to Label Studio...");
-            
-            // 更新项目状态为 SYNCING
-            project.setStatus(Project.ProjectStatus.SYNCING);
-            projectRepository.save(project);
-            
-            syncPredictionsToLabelStudio(project, images, userId);
-            
-            // 更新项目状态为 COMPLETED
-            project.setStatus(Project.ProjectStatus.COMPLETED);
-            projectRepository.save(project);
-            
-            log.info("Auto annotation completed for project: {}", projectId);
-            
+
+            updateProjectStatus(projectId, Project.ProjectStatus.COMPLETED);
+            markJobCompleted(jobId);
+            log.info("Auto annotation job completed: jobId={}, projectId={}", jobId, projectId);
         } catch (Exception e) {
-            log.error("Auto annotation failed for project: {}", projectId, e);
-            throw new RuntimeException("Auto annotation failed: " + e.getMessage(), e);
+            if (isCancelled(jobId)) {
+                markJobCancelled(jobId);
+                updateProjectStatus(projectId, Project.ProjectStatus.FAILED);
+                log.warn("Auto annotation job cancelled: jobId={}", jobId);
+            } else {
+                markJobFailed(jobId, e.getMessage());
+                updateProjectStatus(projectId, Project.ProjectStatus.FAILED);
+                log.error("Auto annotation job failed: jobId={}, projectId={}", jobId, projectId, e);
+            }
         }
     }
 
-    /**
-     * 轮询等待任务完成（工业级实现）
-     * @param taskId 任务 ID
-     * @param maxAttempts 最大轮询次数
-     * @return 任务完成后的结果
-     * @throws RuntimeException 如果轮询失败或任务超时
-     */
-    private Object waitForTaskCompletion(String taskId, int maxAttempts) {
+    @Transactional(readOnly = true)
+    public Map<String, Object> getJobStatus(Long jobId) {
+        AutoAnnotationJob job = autoAnnotationJobRepository.findById(jobId)
+                .orElseThrow(() -> new RuntimeException("Auto annotation job not found: " + jobId));
+        return toJobStatus(job);
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> getLatestJobStatus(Long projectId) {
+        Optional<AutoAnnotationJob> latest = autoAnnotationJobRepository.findFirstByProjectIdOrderByCreatedAtDesc(projectId);
+        return latest.map(this::toJobStatus).orElseGet(() -> {
+            Map<String, Object> empty = new HashMap<>();
+            empty.put("jobId", null);
+            empty.put("projectId", projectId);
+            empty.put("status", "NONE");
+            return empty;
+        });
+    }
+
+    @Transactional
+    public Map<String, Object> cancelJob(Long jobId) {
+        AutoAnnotationJob job = autoAnnotationJobRepository.findById(jobId)
+                .orElseThrow(() -> new RuntimeException("Auto annotation job not found: " + jobId));
+        if (job.getStatus() == AutoAnnotationJob.JobStatus.RUNNING || job.getStatus() == AutoAnnotationJob.JobStatus.PENDING) {
+            job.setCancelRequested(true);
+            job.setStatus(AutoAnnotationJob.JobStatus.CANCELLING);
+            autoAnnotationJobRepository.save(job);
+        }
+        return toJobStatus(job);
+    }
+
+    private void runThresholdMode(Long jobId, Project project, List<ProjectImage> images,
+                                  List<Map<String, Object>> detections, String dinoTaskId) {
+        updateProjectStatus(project.getId(), Project.ProjectStatus.SYNCING);
+        updateJobStage(jobId, AutoAnnotationJob.JobStage.THRESHOLD_FILTER, 65.0);
+
+        AutoAnnotationJob job = autoAnnotationJobRepository.findById(jobId)
+                .orElseThrow(() -> new RuntimeException("Auto annotation job not found: " + jobId));
+        int kept = saveThresholdResults(project, detections, dinoTaskId, job.getScoreThreshold());
+        int discarded = Math.max(0, detections.size() - kept);
+        updateJobCounts(jobId, images.size(), images.size(), kept, discarded, 80.0);
+
+        updateJobStage(jobId, AutoAnnotationJob.JobStage.SYNC, 85.0);
+        self.syncPredictionsToLabelStudio(project, images, job.getUserId());
+    }
+
+    private void runVlmMode(Long jobId, Project project, List<ProjectImage> images,
+                            Map<String, String> labelDefinitions, List<String> imagePaths,
+                            List<Map<String, Object>> detections, String dinoTaskId) {
+        updateProjectStatus(project.getId(), Project.ProjectStatus.CLEANING);
+        updateJobStage(jobId, AutoAnnotationJob.JobStage.VLM, 55.0);
+
+        AutoAnnotationJob job = autoAnnotationJobRepository.findById(jobId)
+                .orElseThrow(() -> new RuntimeException("Auto annotation job not found: " + jobId));
+        VlmCleanRequest vlmRequest = VlmCleanRequest.builder()
+                .projectId(project.getId())
+                .userId(job.getUserId())
+                .detections(detections)
+                .labelDefinitions(labelDefinitions)
+                .imagePaths(imagePaths)
+                .build();
+
+        VlmCleanResponse vlmResponse = algorithmService.startVlmCleaning(vlmRequest);
+        if (!Boolean.TRUE.equals(vlmResponse.getSuccess())) {
+            throw new RuntimeException("VLM 清洗失败: " + vlmResponse.getMessage());
+        }
+
+        String vlmTaskId = vlmResponse.getTaskId();
+        updateJobTaskId(jobId, dinoTaskId, vlmTaskId);
+        Object vlmResults = waitForTaskCompletion(jobId, vlmTaskId, dynamicAttemptsForVlm(detections.size()), 78.0, false);
+        if (vlmResults == null) {
+            throw new RuntimeException("无法获取 VLM 结果: " + vlmTaskId);
+        }
+
+        int kept = saveCleanedResults(project, vlmResults, dinoTaskId, vlmTaskId);
+        int discarded = Math.max(0, detections.size() - kept);
+        updateJobCounts(jobId, images.size(), images.size(), kept, discarded, 82.0);
+
+        updateProjectStatus(project.getId(), Project.ProjectStatus.SYNCING);
+        updateJobStage(jobId, AutoAnnotationJob.JobStage.SYNC, 85.0);
+        self.syncPredictionsToLabelStudio(project, images, job.getUserId());
+    }
+
+    private Object waitForTaskCompletion(Long jobId, String taskId, int maxAttempts, double completedProgress, boolean updateImageProgress) {
         int attempts = 0;
-        
+        int unchangedAttempts = 0;
+        String lastStatus = null;
+
         while (attempts < maxAttempts) {
             attempts++;
-            
+            throwIfCancelRequested(jobId);
+
             try {
-                // 查询任务状态
                 Object statusResponse = algorithmService.getTaskStatus(taskId);
-                log.debug("Polling attempt {}/{} for task {}: status={}", attempts, maxAttempts, taskId, statusResponse);
-                
-                // 解析状态响应
                 Map<String, Object> statusMap = objectMapper.convertValue(statusResponse, Map.class);
                 String status = (String) statusMap.get("status");
-                
-                // 状态比较使用小写，确保大小写不敏感
+                Integer processed = firstInteger(statusMap, "processed_images", "processed");
+                Integer total = firstInteger(statusMap, "total_images", "total");
+                Double algorithmProgress = firstDouble(statusMap, "progress");
+
+                if (status != null && status.equals(lastStatus)) {
+                    unchangedAttempts++;
+                } else {
+                    unchangedAttempts = 0;
+                    lastStatus = status;
+                }
+
+                updatePollingProgress(jobId, attempts, maxAttempts, completedProgress, processed, total, algorithmProgress, updateImageProgress);
+
                 if ("completed".equalsIgnoreCase(status)) {
-                    // 任务完成，获取结果
-                    log.info("Task {} completed successfully after {} attempts", taskId, attempts);
+                    updateJobProgress(jobId, completedProgress);
                     return algorithmService.getTaskResults(taskId);
                 } else if ("failed".equalsIgnoreCase(status)) {
-                    // 任务失败
                     String errorMessage = (String) statusMap.get("message");
-                    log.error("Task {} failed after {} attempts: {}", taskId, attempts, errorMessage);
                     throw new RuntimeException("任务失败: " + errorMessage);
-                } else if ("running".equalsIgnoreCase(status) || "pending".equalsIgnoreCase(status)) {
-                    // 任务还在进行中，等待后继续轮询
-                    Thread.sleep(POLLING_INTERVAL_MS);
-                } else {
-                    // 未知状态
-                    log.warn("Task {} has unknown status: {}", taskId, status);
-                    Thread.sleep(POLLING_INTERVAL_MS);
                 }
-                
+
+                if (unchangedAttempts >= Math.max(60, maxAttempts / 2)) {
+                    throw new RuntimeException("任务状态长时间无变化: " + taskId);
+                }
+
+                Thread.sleep(POLLING_INTERVAL_MS);
             } catch (HttpClientErrorException e) {
-                log.error("Task {} status check failed (HTTP {}): {}", taskId, e.getStatusCode(), e.getResponseBodyAsString());
                 throw new RuntimeException("API请求失败: " + e.getResponseBodyAsString());
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                log.error("Task {} polling interrupted", taskId);
                 throw new RuntimeException("任务轮询被中断");
-            } catch (Exception e) {
-                log.error("Error polling task {} status: {}", taskId, e.getMessage(), e);
-                throw new RuntimeException("轮询任务状态失败: " + e.getMessage());
             }
         }
-        
-        log.error("Task {} timed out after {} attempts", taskId, maxAttempts);
+
         throw new RuntimeException("任务轮询超时: " + taskId);
     }
 
-    /**
-     * 从 DINO 结果中提取检测框
-     */
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> extractDetectionsFromResults(Object dinoResults) {
         if (dinoResults == null) {
             return new ArrayList<>();
         }
-        
+
         try {
-            // 将结果转换为 Map
             Map<String, Object> resultsMap = objectMapper.convertValue(dinoResults, Map.class);
             List<Map<String, Object>> resultsList = (List<Map<String, Object>>) resultsMap.get("results");
-            
             if (resultsList == null) {
                 return new ArrayList<>();
             }
-            
+
             List<Map<String, Object>> detections = new ArrayList<>();
-            
             for (Map<String, Object> result : resultsList) {
+                String imagePath = (String) result.get("image_path");
+                String fileName = imagePath == null ? null : new File(imagePath).getName();
                 List<Map<String, Object>> detectionsList = (List<Map<String, Object>>) result.get("detections");
-                
-                if (detectionsList != null) {
-                    for (Map<String, Object> detection : detectionsList) {
-                        Map<String, Object> detMap = new HashMap<>();
-                        detMap.put("image_path", result.get("image_path"));
-                        detMap.put("image_name", result.get("image_name"));
-                        detMap.put("label", detection.get("label"));
-                        
-                        // 处理 bbox
-                        Object bboxObj = detection.get("bbox");
-                        if (bboxObj instanceof List) {
-                            List<Double> bboxList = new ArrayList<>();
-                            for (Object item : (List<?>) bboxObj) {
-                                if (item instanceof Number) {
-                                    bboxList.add(((Number) item).doubleValue());
-                                }
-                            }
-                            detMap.put("bbox", bboxList);
-                        }
-                        
-                        Object scoreObj = detection.get("score");
-                        if (scoreObj instanceof Number) {
-                            detMap.put("score", ((Number) scoreObj).doubleValue());
-                        }
-                        
-                        detections.add(detMap);
+                if (detectionsList == null) {
+                    continue;
+                }
+                for (Map<String, Object> detection : detectionsList) {
+                    Map<String, Object> detMap = new HashMap<>();
+                    detMap.put("image_path", imagePath);
+                    detMap.put("image_name", firstNonBlank((String) result.get("image_name"), fileName));
+                    detMap.put("label", detection.get("label"));
+                    detMap.put("bbox", normalizeBbox(detection.get("bbox")));
+                    Object scoreObj = detection.get("score");
+                    if (scoreObj instanceof Number) {
+                        detMap.put("score", ((Number) scoreObj).doubleValue());
                     }
+                    detections.add(detMap);
                 }
             }
-            
             return detections;
-            
         } catch (Exception e) {
             log.error("Error extracting detections: {}", e.getMessage(), e);
             return new ArrayList<>();
         }
     }
 
-    /**
-     * 保存 DINO 检测结果到数据库
-     */
     @SuppressWarnings("unchecked")
     private void saveDinoResults(Project project, Object dinoResults, String dinoTaskId) {
         if (dinoResults == null) {
             return;
         }
-        
+
         try {
-            // 将结果转换为 Map
             Map<String, Object> resultsMap = objectMapper.convertValue(dinoResults, Map.class);
             List<Map<String, Object>> resultsList = (List<Map<String, Object>>) resultsMap.get("results");
-            
             if (resultsList == null) {
                 return;
             }
-            
-            // 创建 DINO 检测任务记录
+
             AnnotationTask dinoTask = new AnnotationTask();
             dinoTask.setProject(project);
             dinoTask.setType(AnnotationTask.TaskType.DINO_DETECTION);
@@ -361,217 +367,165 @@ public class AutoAnnotationService {
             dinoTask.setCompletedAt(LocalDateTime.now());
             dinoTask.setParameters(Collections.singletonMap("task_id", dinoTaskId));
             dinoTask = annotationTaskRepository.save(dinoTask);
-            
-            // 保存每个检测结果
+
             for (Map<String, Object> result : resultsList) {
                 String imagePath = (String) result.get("image_path");
                 String fileName = new File(imagePath).getName();
-                
                 List<Map<String, Object>> detectionsList = (List<Map<String, Object>>) result.get("detections");
                 if (detectionsList == null || detectionsList.isEmpty()) {
                     continue;
                 }
-                
-                // 查找对应的图片
-                ProjectImage image = projectImageRepository.findByProjectIdAndFilePath(
-                        project.getId(), imagePath
-                ).orElse(null);
-                
+
+                ProjectImage image = findProjectImage(project.getId(), imagePath, fileName);
                 if (image == null) {
-                    // 如果完整路径匹配失败，尝试用文件名匹配
-                    List<ProjectImage> allImages = projectImageRepository.findByProjectId(
-                        project.getId(), 
-                        org.springframework.data.domain.PageRequest.of(0, Integer.MAX_VALUE)
-                    ).getContent();
-                    for (ProjectImage img : allImages) {
-                        if (img.getFileName().equals(fileName)) {
-                            image = img;
-                            break;
-                        }
-                    }
-                }
-                
-                if (image != null) {
-                    // 保存每个检测框
-                    for (Map<String, Object> detection : detectionsList) {
-                        String label = (String) detection.get("label");
-                        
-                        // 处理 bbox
-                        List<Double> bbox = new ArrayList<>();
-                        Object bboxObj = detection.get("bbox");
-                        if (bboxObj instanceof List) {
-                            for (Object item : (List<?>) bboxObj) {
-                                if (item instanceof Number) {
-                                    bbox.add(((Number) item).doubleValue());
-                                }
-                            }
-                        }
-                        
-                        Double score = null;
-                        Object scoreObj = detection.get("score");
-                        if (scoreObj instanceof Number) {
-                            score = ((Number) scoreObj).doubleValue();
-                        }
-                        
-                        Map<String, Object> detectionData = new HashMap<>();
-                        detectionData.put("label", label);
-                        detectionData.put("bbox", bbox);
-                        detectionData.put("score", score);
-                        detectionData.put("image_path", imagePath);
-                        detectionData.put("image_name", fileName);
-                        
-                        DetectionResult detectionResult = DetectionResult.builder()
-                                .image(image)
-                                .task(dinoTask)
-                                .type(DetectionResult.ResultType.DINO_DETECTION)
-                                .resultData(detectionData)
-                                .build();
-                        
-                        detectionResultRepository.save(detectionResult);
-                        
-                        log.info("Saved DINO detection: image={}, label={}, score={}", 
-                                fileName, label, score);
-                    }
-                } else {
                     log.warn("找不到图片: {}", imagePath);
+                    continue;
+                }
+
+                for (Map<String, Object> detection : detectionsList) {
+                    Map<String, Object> detectionData = new HashMap<>();
+                    detectionData.put("label", detection.get("label"));
+                    detectionData.put("bbox", normalizeBbox(detection.get("bbox")));
+                    detectionData.put("score", asDouble(detection.get("score")));
+                    detectionData.put("image_path", imagePath);
+                    detectionData.put("image_name", fileName);
+
+                    DetectionResult detectionResult = DetectionResult.builder()
+                            .image(image)
+                            .task(dinoTask)
+                            .type(DetectionResult.ResultType.DINO_DETECTION)
+                            .resultData(detectionData)
+                            .build();
+                    detectionResultRepository.save(detectionResult);
                 }
             }
-            
-            log.info("DINO 检测结果保存完成");
-            
         } catch (Exception e) {
             log.error("保存 DINO 检测结果失败: {}", e.getMessage(), e);
+            throw new RuntimeException("保存 DINO 检测结果失败: " + e.getMessage(), e);
         }
     }
 
-    /**
-     * 保存清洗后的结果到数据库
-     */
-    @SuppressWarnings("unchecked")
-    private void saveCleanedResults(Project project, Object vlmResults, String dinoTaskId, String vlmTaskId) {
-        if (vlmResults == null) {
-            return;
+    private int saveThresholdResults(Project project, List<Map<String, Object>> detections, String dinoTaskId, Double threshold) {
+        AnnotationTask thresholdTask = new AnnotationTask();
+        thresholdTask.setProject(project);
+        thresholdTask.setType(AnnotationTask.TaskType.VLM_CLEANING);
+        thresholdTask.setStatus(AnnotationTask.TaskStatus.COMPLETED);
+        thresholdTask.setStartedAt(LocalDateTime.now());
+        thresholdTask.setCompletedAt(LocalDateTime.now());
+        Map<String, Object> params = new HashMap<>();
+        params.put("source_task_id", dinoTaskId);
+        params.put("source", "dino_threshold");
+        params.put("score_threshold", threshold);
+        thresholdTask.setParameters(params);
+        thresholdTask = annotationTaskRepository.save(thresholdTask);
+
+        int kept = 0;
+        for (Map<String, Object> detection : detections) {
+            Double score = asDouble(detection.get("score"));
+            if (score == null || score < threshold) {
+                continue;
+            }
+
+            String imagePath = (String) detection.get("image_path");
+            String fileName = new File(imagePath).getName();
+            ProjectImage image = findProjectImage(project.getId(), imagePath, fileName);
+            if (image == null) {
+                continue;
+            }
+
+            Map<String, Object> detectionData = new HashMap<>();
+            detectionData.put("vlm_decision", "keep");
+            detectionData.put("vlm_reasoning", "score >= " + threshold);
+            detectionData.put("source", "dino_threshold");
+            detectionData.put("label", detection.get("label"));
+            detectionData.put("bbox", normalizeBbox(detection.get("bbox")));
+            detectionData.put("score", score);
+            detectionData.put("image_path", imagePath);
+            detectionData.put("image_name", firstNonBlank((String) detection.get("image_name"), fileName));
+
+            DetectionResult detectionResult = DetectionResult.builder()
+                    .image(image)
+                    .task(thresholdTask)
+                    .type(DetectionResult.ResultType.VLM_CLEANING)
+                    .resultData(detectionData)
+                    .build();
+            detectionResultRepository.save(detectionResult);
+            kept++;
         }
-        
+        return kept;
+    }
+
+    @SuppressWarnings("unchecked")
+    private int saveCleanedResults(Project project, Object vlmResults, String dinoTaskId, String vlmTaskId) {
+        if (vlmResults == null) {
+            return 0;
+        }
+
+        int kept = 0;
         try {
-            // 将结果转换为 Map
             Map<String, Object> resultsMap = objectMapper.convertValue(vlmResults, Map.class);
             List<Map<String, Object>> resultsList = (List<Map<String, Object>>) resultsMap.get("results");
-            
             if (resultsList == null) {
-                return;
+                return 0;
             }
-            
-            // 创建 VLM 清洗任务记录
+
             AnnotationTask vlmTask = new AnnotationTask();
             vlmTask.setProject(project);
             vlmTask.setType(AnnotationTask.TaskType.VLM_CLEANING);
             vlmTask.setStatus(AnnotationTask.TaskStatus.COMPLETED);
             vlmTask.setStartedAt(LocalDateTime.now());
             vlmTask.setCompletedAt(LocalDateTime.now());
-            vlmTask.setParameters(Collections.singletonMap("task_id", vlmTaskId));
+            Map<String, Object> params = new HashMap<>();
+            params.put("task_id", vlmTaskId);
+            params.put("source_task_id", dinoTaskId);
+            vlmTask.setParameters(params);
             vlmTask = annotationTaskRepository.save(vlmTask);
-            
-            // 保存每个清洗结果
+
             for (Map<String, Object> result : resultsList) {
                 String decision = (String) result.get("vlm_decision");
-                String reasoning = (String) result.get("vlm_reasoning");
-                String label = (String) result.get("original_label");
-                
-                // 从完整路径中提取文件名
                 String imagePath = (String) result.get("image_path");
                 String fileName = new File(imagePath).getName();
-                
-                log.info("查找图片: 完整路径={}, 文件名={}", imagePath, fileName);
-                
-                // 处理 bbox
-                List<Double> bbox = new ArrayList<>();
-                Object bboxObj = result.get("bbox");
-                if (bboxObj instanceof List) {
-                    for (Object item : (List<?>) bboxObj) {
-                        if (item instanceof Number) {
-                            bbox.add(((Number) item).doubleValue());
-                        }
-                    }
+                ProjectImage image = findProjectImage(project.getId(), imagePath, fileName);
+                if (image == null || !"keep".equals(decision)) {
+                    continue;
                 }
-                
-                Double score = null;
-                Object scoreObj = result.get("score");
-                if (scoreObj instanceof Number) {
-                    score = ((Number) scoreObj).doubleValue();
-                }
-                
-                // 查找对应的图片（先用文件名匹配）
-                ProjectImage image = projectImageRepository.findByProjectIdAndFilePath(
-                        project.getId(), imagePath
-                ).orElse(null);
-                
-                if (image == null) {
-                    // 如果完整路径匹配失败，尝试用文件名匹配
-                    log.info("完整路径匹配失败，尝试用文件名匹配: {}", fileName);
-                    List<ProjectImage> allImages = projectImageRepository.findByProjectId(project.getId(), org.springframework.data.domain.PageRequest.of(0, Integer.MAX_VALUE)).getContent();
-                    for (ProjectImage img : allImages) {
-                        if (img.getFileName().equals(fileName)) {
-                            image = img;
-                            log.info("找到匹配的图片: {}", img.getFilePath());
-                            break;
-                        }
-                    }
-                }
-                
-                if (image != null) {
-                    log.info("处理图片: {}, decision={}, label={}", imagePath, decision, label);
-                    
-                    if ("keep".equals(decision)) {
-                        Map<String, Object> detectionData = new HashMap<>();
-                        detectionData.put("vlm_decision", decision);
-                        detectionData.put("vlm_reasoning", reasoning);
-                        detectionData.put("label", label);
-                        detectionData.put("bbox", bbox);
-                        detectionData.put("score", score);
-                        detectionData.put("image_path", imagePath);
-                        detectionData.put("image_name", result.get("image_name"));
 
-                        DetectionResult detectionResult = DetectionResult.builder()
-                                .image(image)
-                                .task(vlmTask)
-                                .type(DetectionResult.ResultType.VLM_CLEANING)
-                                .resultData(detectionData)
-                                .build();
+                Map<String, Object> detectionData = new HashMap<>();
+                detectionData.put("vlm_decision", decision);
+                detectionData.put("vlm_reasoning", result.get("vlm_reasoning"));
+                detectionData.put("label", result.get("original_label"));
+                detectionData.put("bbox", normalizeBbox(result.get("bbox")));
+                detectionData.put("score", asDouble(result.get("score")));
+                detectionData.put("image_path", imagePath);
+                detectionData.put("image_name", firstNonBlank((String) result.get("image_name"), fileName));
 
-                        detectionResultRepository.save(detectionResult);
-
-                        log.info("Saved detection: image={}, label={}, decision={}", 
-                                imagePath, label, decision);
-                    } else {
-                        log.info("跳过保存: image={}, decision={}", imagePath, decision);
-                    }
-                } else {
-                    log.warn("未找到图片: {}", imagePath);
-                }
+                DetectionResult detectionResult = DetectionResult.builder()
+                        .image(image)
+                        .task(vlmTask)
+                        .type(DetectionResult.ResultType.VLM_CLEANING)
+                        .resultData(detectionData)
+                        .build();
+                detectionResultRepository.save(detectionResult);
+                kept++;
             }
-            
         } catch (Exception e) {
             log.error("Error saving cleaned results: {}", e.getMessage(), e);
+            throw new RuntimeException("保存 VLM 清洗结果失败: " + e.getMessage(), e);
         }
+        return kept;
     }
 
-    /**
-     * 同步预测结果到 Label Studio
-     * 对应旧版 Python: mount_local_storage -> sync_local_storage -> get_project_tasks -> add_predictions_batch
-     */
+    @Transactional(readOnly = true)
     @SuppressWarnings("unchecked")
-    private void syncPredictionsToLabelStudio(Project project, List<ProjectImage> images, Long userId) {
+    public void syncPredictionsToLabelStudio(Project project, List<ProjectImage> images, Long userId) {
         try {
             Long lsProjectId = project.getLsProjectId();
-
             if (userId == null) {
                 log.error("无法获取项目创建者ID，跳过预测同步: projectId={}", project.getId());
                 return;
             }
 
             if (lsProjectId == null) {
-                log.info("项目未同步到 Label Studio，尝试自动同步: projectId={}", project.getId());
                 lsProjectId = labelStudioProxyService.syncProjectToLS(project, userId);
                 if (lsProjectId == null) {
                     log.warn("项目自动同步失败，跳过预测同步: projectId={}", project.getId());
@@ -579,87 +533,60 @@ public class AutoAnnotationService {
                 }
             }
 
-            String localPath = getLocalImagePath(images);
+            String localPath = getLocalImagePath(project.getId(), images);
             if (localPath == null) {
                 log.warn("无法获取本地图片路径，跳过预测同步: projectId={}", project.getId());
                 return;
             }
 
-            log.info("Mounting local storage: lsProjectId={}, localPath={}", lsProjectId, localPath);
             Long storageId = labelStudioProxyService.mountLocalStorage(lsProjectId, localPath, userId);
             if (storageId == null) {
                 log.warn("挂载本地存储失败，跳过预测同步: lsProjectId={}", lsProjectId);
                 return;
             }
 
-            log.info("Syncing local storage: storageId={}", storageId);
             boolean syncSuccess = labelStudioProxyService.syncLocalStorage(storageId, userId);
             if (!syncSuccess) {
                 log.warn("同步本地存储失败，跳过预测同步: storageId={}", storageId);
                 return;
             }
 
-            log.info("Waiting for tasks to be created...");
-            int maxRetries = 10;
             int taskCount = 0;
-            for (int i = 0; i < maxRetries; i++) {
+            for (int i = 0; i < 10; i++) {
                 Thread.sleep(3000);
                 taskCount = getProjectTaskCount(lsProjectId, userId);
-                log.info("等待 task 创建: 第{}次检查, task数量={}", i + 1, taskCount);
                 if (taskCount > 0) {
                     break;
                 }
             }
-            
             if (taskCount == 0) {
                 log.warn("等待超时，LS项目中仍无task: lsProjectId={}", lsProjectId);
                 return;
             }
 
             List<DetectionResult> keptDetections = detectionResultRepository
-                    .findByProjectIdAndType(project.getId(), DetectionResult.ResultType.VLM_CLEANING);
-
-            log.info("查询 VLM 清洗结果: projectId={}, count={}", project.getId(), keptDetections.size());
-            
-            for (DetectionResult dr : keptDetections) {
-                log.info("检测结果: id={}, type={}, resultData={}", dr.getId(), dr.getType(), dr.getResultData());
-            }
-            
+                    .findByProjectIdAndTypeWithImage(project.getId(), DetectionResult.ResultType.VLM_CLEANING);
             if (keptDetections.isEmpty()) {
                 log.info("没有需要同步的检测结果: projectId={}", project.getId());
                 return;
             }
 
             List<Map<String, Object>> predictions = preparePredictions(keptDetections);
-
-            log.info("Importing predictions to Label Studio: lsProjectId={}, count={}", lsProjectId, predictions.size());
             Map<String, Object> stats = labelStudioProxyService.importPredictions(lsProjectId, predictions, userId);
-
             log.info("Label Studio 预测同步完成: success={}, failed={}, skipped={}",
                     stats.get("success"), stats.get("failed"), stats.get("skipped"));
-
         } catch (Exception e) {
             log.error("同步预测到 Label Studio 失败: projectId={}, error={}", project.getId(), e.getMessage(), e);
         }
     }
 
-    /**
-     * 获取本地图片目录的绝对路径
-     */
-    private String getLocalImagePath(List<ProjectImage> images) {
+    private String getLocalImagePath(Long projectId, List<ProjectImage> images) {
         if (images == null || images.isEmpty()) {
             return null;
         }
-
-        Long projectId = images.get(0).getProject().getId();
         return String.format("/root/autodl-fs/uploads/%d", projectId);
     }
 
-    /**
-     * 准备预测数据
-     * 对应旧版 Python: prepare_predictions_from_vlm
-     * 坐标转换: x = bx/w*100, y = by/h*100, width = bw/w*100, height = bh/h*100
-     */
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> preparePredictions(List<DetectionResult> detections) {
         Map<String, Map<String, Object>> predictionsMap = new HashMap<>();
@@ -667,7 +594,6 @@ public class AutoAnnotationService {
         for (DetectionResult detection : detections) {
             ProjectImage image = detection.getImage();
             String imagePath = image.getFilePath();
-
             try {
                 Map<String, Object> resultData = detection.getResultData();
                 if (resultData == null) {
@@ -675,31 +601,15 @@ public class AutoAnnotationService {
                 }
 
                 String imageName = (String) resultData.get("image_name");
-                if (imageName == null) {
-                    continue;
-                }
-
                 List<Double> bbox = (List<Double>) resultData.get("bbox");
                 String label = (String) resultData.get("label");
-                Double score = resultData.get("score") != null ? 
-                        ((Number) resultData.get("score")).doubleValue() : 1.0;
-
-                if (bbox == null || bbox.size() != 4) {
+                Double score = resultData.get("score") != null ? ((Number) resultData.get("score")).doubleValue() : 1.0;
+                imageName = firstNonBlank(imageName, image.getFileName(), new File(imagePath).getName());
+                if (imageName == null || bbox == null || bbox.size() != 4) {
                     continue;
                 }
 
-                Double bx = bbox.get(0);
-                Double by = bbox.get(1);
-                Double bw = bbox.get(2);
-                Double bh = bbox.get(3);
-
-                String fullImagePath;
-                if (imagePath.startsWith("/")) {
-                    fullImagePath = imagePath;
-                } else {
-                    fullImagePath = "/root/autodl-fs/uploads/" + imagePath;
-                }
-                
+                String fullImagePath = imagePath.startsWith("/") ? imagePath : "/root/autodl-fs/uploads/" + imagePath;
                 File imageFile = new File(fullImagePath);
                 if (!imageFile.exists()) {
                     log.warn("图片文件不存在: {}", fullImagePath);
@@ -727,10 +637,10 @@ public class AutoAnnotationService {
                 resultItem.put("image_rotation", 0);
 
                 Map<String, Object> value = new HashMap<>();
-                value.put("x", bx / imageWidth * 100);
-                value.put("y", by / imageHeight * 100);
-                value.put("width", bw / imageWidth * 100);
-                value.put("height", bh / imageHeight * 100);
+                value.put("x", bbox.get(0) / imageWidth * 100);
+                value.put("y", bbox.get(1) / imageHeight * 100);
+                value.put("width", bbox.get(2) / imageWidth * 100);
+                value.put("height", bbox.get(3) / imageHeight * 100);
                 value.put("rotation", 0);
                 value.put("rectanglelabels", Collections.singletonList(label));
 
@@ -743,25 +653,277 @@ public class AutoAnnotationService {
 
                 results.add(resultItem);
                 scores.add(score);
-
             } catch (Exception e) {
                 log.error("准备预测数据失败: imagePath={}, error={}", imagePath, e.getMessage());
             }
         }
 
         List<Map<String, Object>> predictions = new ArrayList<>();
-        for (Map.Entry<String, Map<String, Object>> entry : predictionsMap.entrySet()) {
-            Map<String, Object> prediction = entry.getValue();
+        for (Map<String, Object> prediction : predictionsMap.values()) {
             List<Double> scores = (List<Double>) prediction.get("scores");
-
             double avgScore = scores.stream().mapToDouble(Double::doubleValue).average().orElse(0.95);
             prediction.put("avg_score", avgScore);
             prediction.remove("scores");
-
             predictions.add(prediction);
         }
-
         return predictions;
+    }
+
+    private void cleanupOldResults(Project project) {
+        transactionTemplate.executeWithoutResult(status -> {
+            Long projectId = project.getId();
+            long deletedResults = detectionResultRepository.countByProjectId(projectId);
+            if (deletedResults > 0) {
+                detectionResultRepository.deleteByProjectId(projectId);
+            }
+            long deletedTasks = annotationTaskRepository.countByProjectId(projectId);
+            if (deletedTasks > 0) {
+                annotationTaskRepository.deleteByProjectId(projectId);
+            }
+        });
+    }
+
+    private ProjectImage findProjectImage(Long projectId, String imagePath, String fileName) {
+        ProjectImage image = projectImageRepository.findByProjectIdAndFilePath(projectId, imagePath).orElse(null);
+        if (image != null) {
+            return image;
+        }
+        List<ProjectImage> allImages = projectImageRepository
+                .findByProjectId(projectId, org.springframework.data.domain.PageRequest.of(0, Integer.MAX_VALUE))
+                .getContent();
+        for (ProjectImage img : allImages) {
+            if (img.getFileName().equals(fileName)) {
+                return img;
+            }
+        }
+        return null;
+    }
+
+    private List<Double> normalizeBbox(Object bboxObj) {
+        List<Double> bbox = new ArrayList<>();
+        if (bboxObj instanceof List) {
+            for (Object item : (List<?>) bboxObj) {
+                if (item instanceof Number) {
+                    bbox.add(((Number) item).doubleValue());
+                }
+            }
+        }
+        return bbox;
+    }
+
+    private Double asDouble(Object value) {
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue();
+        }
+        return null;
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private Integer firstInteger(Map<String, Object> map, String... keys) {
+        for (String key : keys) {
+            Object value = map.get(key);
+            if (value instanceof Number) {
+                return ((Number) value).intValue();
+            }
+        }
+        return null;
+    }
+
+    private Double firstDouble(Map<String, Object> map, String... keys) {
+        for (String key : keys) {
+            Object value = map.get(key);
+            if (value instanceof Number) {
+                return ((Number) value).doubleValue();
+            }
+        }
+        return null;
+    }
+
+    private double clamp(Double value, double min, double max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private int dynamicAttemptsForDino(int imageCount) {
+        return Math.max(MIN_DINO_POLLING_ATTEMPTS, imageCount * 6);
+    }
+
+    private int dynamicAttemptsForVlm(int detectionCount) {
+        return Math.max(MIN_VLM_POLLING_ATTEMPTS, Math.max(1, detectionCount) * 3);
+    }
+
+    private Map<String, Object> buildParamsJson(AutoAnnotationStartRequest request, Double scoreThreshold) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("processRange", request.getProcessRange());
+        params.put("mode", request.getMode());
+        params.put("scoreThreshold", scoreThreshold);
+        params.put("boxThreshold", request.getBoxThreshold());
+        params.put("textThreshold", request.getTextThreshold());
+        return params;
+    }
+
+    private Map<String, Object> toJobStatus(AutoAnnotationJob job) {
+        Map<String, Object> status = new LinkedHashMap<>();
+        status.put("jobId", job.getId());
+        status.put("taskId", "job-" + job.getId());
+        status.put("projectId", job.getProject().getId());
+        status.put("mode", job.getMode());
+        status.put("status", job.getStatus());
+        status.put("currentStage", job.getCurrentStage());
+        status.put("progressPercent", job.getProgressPercent());
+        status.put("stageProgressPercent", job.getProgressPercent());
+        status.put("totalImages", job.getTotalImages());
+        status.put("processedImages", job.getProcessedImages());
+        Integer processed = job.getProcessedImages() == null ? 0 : job.getProcessedImages();
+        Integer total = job.getTotalImages() == null ? 0 : job.getTotalImages();
+        double imageProgress = total > 0 ? (processed * 100.0 / total) : 0.0;
+        status.put("imageProgressPercent", imageProgress);
+        status.put("keptDetections", job.getKeptDetections());
+        status.put("discardedDetections", job.getDiscardedDetections());
+        status.put("dinoTaskId", job.getDinoTaskId());
+        status.put("vlmTaskId", job.getVlmTaskId());
+        status.put("cancelRequested", job.getCancelRequested());
+        status.put("startedAt", job.getStartedAt());
+        status.put("updatedAt", job.getUpdatedAt());
+        status.put("errorMessage", job.getErrorMessage());
+        return status;
+    }
+
+    private void markJobRunning(Long jobId) {
+        AutoAnnotationJob job = autoAnnotationJobRepository.findById(jobId).orElseThrow();
+        job.setStatus(AutoAnnotationJob.JobStatus.RUNNING);
+        job.setCurrentStage(AutoAnnotationJob.JobStage.INIT);
+        job.setStartedAt(LocalDateTime.now());
+        job.setProgressPercent(1.0);
+        autoAnnotationJobRepository.save(job);
+    }
+
+    private void updateProjectStatus(Long projectId, Project.ProjectStatus status) {
+        Project project = projectRepository.findById(projectId).orElseThrow();
+        project.setStatus(status);
+        projectRepository.save(project);
+    }
+
+    private void updateJobStage(Long jobId, AutoAnnotationJob.JobStage stage, double progress) {
+        AutoAnnotationJob job = autoAnnotationJobRepository.findById(jobId).orElseThrow();
+        job.setCurrentStage(stage);
+        job.setProgressPercent(Math.max(job.getProgressPercent() == null ? 0.0 : job.getProgressPercent(), progress));
+        autoAnnotationJobRepository.save(job);
+    }
+
+    private void updateJobTaskId(Long jobId, String dinoTaskId, String vlmTaskId) {
+        AutoAnnotationJob job = autoAnnotationJobRepository.findById(jobId).orElseThrow();
+        if (dinoTaskId != null) {
+            job.setDinoTaskId(dinoTaskId);
+        }
+        if (vlmTaskId != null) {
+            job.setVlmTaskId(vlmTaskId);
+        }
+        autoAnnotationJobRepository.save(job);
+    }
+
+    private void updateJobCounts(Long jobId, int totalImages, int processedImages, int kept, int discarded, double progress) {
+        AutoAnnotationJob job = autoAnnotationJobRepository.findById(jobId).orElseThrow();
+        job.setTotalImages(totalImages);
+        job.setProcessedImages(processedImages);
+        job.setKeptDetections(kept);
+        job.setDiscardedDetections(discarded);
+        job.setProgressPercent(Math.max(job.getProgressPercent() == null ? 0.0 : job.getProgressPercent(), progress));
+        autoAnnotationJobRepository.save(job);
+    }
+
+    private void updatePollingProgress(Long jobId, int attempts, int maxAttempts, double completedProgress,
+                                       Integer processed, Integer total, Double algorithmProgress,
+                                       boolean updateImageProgress) {
+        AutoAnnotationJob job = autoAnnotationJobRepository.findById(jobId).orElseThrow();
+        double floor = job.getProgressPercent() == null ? 0.0 : job.getProgressPercent();
+        double stageStart = stageStartProgress(job.getCurrentStage());
+        double ratio;
+        if (algorithmProgress != null) {
+            ratio = algorithmProgress / 100.0;
+        } else if (processed != null && total != null && total > 0) {
+            ratio = (double) processed / total;
+        } else {
+            ratio = (double) attempts / Math.max(1, maxAttempts);
+        }
+        double progress = stageStart + ((completedProgress - stageStart) * Math.min(0.99, Math.max(0.0, ratio)));
+        job.setProgressPercent(Math.min(completedProgress - 0.5, Math.max(floor, progress)));
+        if (updateImageProgress) {
+            if (total != null && total > 0) {
+                job.setTotalImages(total);
+            }
+            if (processed != null) {
+                job.setProcessedImages(processed);
+            }
+        }
+        autoAnnotationJobRepository.save(job);
+    }
+
+    private double stageStartProgress(AutoAnnotationJob.JobStage stage) {
+        if (stage == AutoAnnotationJob.JobStage.DINO) {
+            return 10.0;
+        }
+        if (stage == AutoAnnotationJob.JobStage.VLM) {
+            return 55.0;
+        }
+        if (stage == AutoAnnotationJob.JobStage.THRESHOLD_FILTER) {
+            return 65.0;
+        }
+        if (stage == AutoAnnotationJob.JobStage.SYNC) {
+            return 85.0;
+        }
+        return 1.0;
+    }
+
+    private void updateJobProgress(Long jobId, double progress) {
+        AutoAnnotationJob job = autoAnnotationJobRepository.findById(jobId).orElseThrow();
+        job.setProgressPercent(progress);
+        autoAnnotationJobRepository.save(job);
+    }
+
+    private void markJobCompleted(Long jobId) {
+        AutoAnnotationJob job = autoAnnotationJobRepository.findById(jobId).orElseThrow();
+        job.setStatus(AutoAnnotationJob.JobStatus.COMPLETED);
+        job.setProgressPercent(100.0);
+        job.setCompletedAt(LocalDateTime.now());
+        autoAnnotationJobRepository.save(job);
+    }
+
+    private void markJobFailed(Long jobId, String errorMessage) {
+        AutoAnnotationJob job = autoAnnotationJobRepository.findById(jobId).orElseThrow();
+        job.setStatus(AutoAnnotationJob.JobStatus.FAILED);
+        job.setErrorMessage(errorMessage);
+        job.setCompletedAt(LocalDateTime.now());
+        autoAnnotationJobRepository.save(job);
+    }
+
+    private void markJobCancelled(Long jobId) {
+        AutoAnnotationJob job = autoAnnotationJobRepository.findById(jobId).orElseThrow();
+        job.setStatus(AutoAnnotationJob.JobStatus.CANCELLED);
+        job.setCancelRequested(true);
+        job.setCompletedAt(LocalDateTime.now());
+        autoAnnotationJobRepository.save(job);
+    }
+
+    private boolean isCancelled(Long jobId) {
+        AutoAnnotationJob job = autoAnnotationJobRepository.findById(jobId).orElseThrow();
+        return Boolean.TRUE.equals(job.getCancelRequested()) || job.getStatus() == AutoAnnotationJob.JobStatus.CANCELLING;
+    }
+
+    private void throwIfCancelRequested(Long jobId) {
+        if (isCancelled(jobId)) {
+            throw new RuntimeException("任务已取消");
+        }
     }
 
     private int getProjectTaskCount(Long lsProjectId, Long userId) {

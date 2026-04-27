@@ -101,6 +101,10 @@ app:
     url: http://localhost:8001
     timeout: 600000
 
+  backend:
+    public-url: http://localhost:8080/api/v1
+    webhook-url: http://localhost:8080/api/v1/ls-webhook/annotation
+
   yolo:
     model:
       path: /root/autodl-fs/xingmu_jiancepingtai/runs/detect/train7/weights/best.pt

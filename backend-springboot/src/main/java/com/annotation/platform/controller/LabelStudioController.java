@@ -30,10 +30,17 @@ public class LabelStudioController {
 
     @GetMapping("/login-url")
     public Result<String> getLoginUrl(
+            @RequestParam(required = false) Long projectId,
             @RequestParam(required = false) String returnUrl,
             HttpServletRequest request) {
 
         Long userId = (Long) request.getAttribute("userId");
+        if ((returnUrl == null || returnUrl.isBlank()) && projectId != null) {
+            Project project = projectRepository.findById(projectId).orElse(null);
+            if (project != null && project.getLsProjectId() != null) {
+                returnUrl = "/projects/" + project.getLsProjectId() + "/data";
+            }
+        }
         String loginUrl = labelStudioProxyService.getLoginUrl(userId, returnUrl);
         return Result.success(loginUrl);
     }

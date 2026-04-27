@@ -11,6 +11,9 @@ import com.annotation.platform.exception.ResourceNotFoundException;
 import com.annotation.platform.repository.ProjectImageRepository;
 import com.annotation.platform.repository.ProjectRepository;
 import com.annotation.platform.service.upload.FileUploadService;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -41,6 +44,7 @@ public class FileUploadServiceImpl implements FileUploadService {
 
     private final ProjectRepository projectRepository;
     private final ProjectImageRepository projectImageRepository;
+    private final ObjectMapper objectMapper;
 
     private final Map<String, UploadProgress> uploadProgressMap = new ConcurrentHashMap<>();
 
@@ -61,6 +65,9 @@ public class FileUploadServiceImpl implements FileUploadService {
             }
 
             File chunkFile = new File(chunkDir, String.format("%s_%d", filename, chunkIndex));
+            if (chunkFile.exists() && !chunkFile.delete()) {
+                throw new IOException("无法覆盖已存在分块: " + chunkFile.getName());
+            }
             file.transferTo(chunkFile);
 
             UploadProgress progress = uploadProgressMap.computeIfAbsent(fileId, k -> 
@@ -76,6 +83,8 @@ public class FileUploadServiceImpl implements FileUploadService {
 
             progress.getReceivedChunks().add(chunkIndex);
             progress.setLastUpdated(LocalDateTime.now());
+            progress.setFileSize(request.getFileSize());
+            progress.setProjectId(request.getProjectId());
 
             if (progress.getReceivedChunks().size() == totalChunks) {
                 progress.setStatus("ready_to_merge");
@@ -86,6 +95,8 @@ public class FileUploadServiceImpl implements FileUploadService {
 
             log.info("分块上传成功: fileId={}, chunkIndex={}/{}, progress={}%", 
                     fileId, chunkIndex, totalChunks, progress.getProgress());
+
+            writeManifest(progress);
 
             return fileId;
 
@@ -103,20 +114,16 @@ public class FileUploadServiceImpl implements FileUploadService {
         Integer totalChunks = request.getTotalChunks();
         Long projectId = request.getProjectId();
 
-        UploadProgress progress = uploadProgressMap.get(fileId);
-        if (progress == null) {
-            throw new BusinessException(ErrorCode.FILE_006, "上传进度不存在");
-        }
-
-        if (progress.getReceivedChunks().size() != totalChunks) {
+        File chunkDir = new File(chunkPath, fileId);
+        Set<Integer> diskChunks = scanUploadedChunkIndexes(chunkDir, filename, totalChunks);
+        if (diskChunks.size() != totalChunks) {
             throw new BusinessException(ErrorCode.FILE_006, 
-                    String.format("分块不完整: 已接收 %d/%d", progress.getReceivedChunks().size(), totalChunks));
+                    String.format("分块不完整: 已接收 %d/%d", diskChunks.size(), totalChunks));
         }
 
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new ResourceNotFoundException("Project", "id", projectId));
 
-        File chunkDir = new File(chunkPath, fileId);
         File projectDir = new File(basePath, String.valueOf(projectId));
         if (!projectDir.exists()) {
             projectDir.mkdirs();
@@ -168,7 +175,25 @@ public class FileUploadServiceImpl implements FileUploadService {
     public UploadProgressResponse getUploadProgress(String fileId) {
         UploadProgress progress = uploadProgressMap.get(fileId);
         if (progress == null) {
-            throw new BusinessException(ErrorCode.FILE_001, "上传进度不存在");
+            Map<String, Object> chunks = listUploadedChunks(fileId);
+            @SuppressWarnings("unchecked")
+            List<Integer> uploadedChunks = (List<Integer>) chunks.get("uploadedChunks");
+            if (uploadedChunks == null || uploadedChunks.isEmpty()) {
+                throw new BusinessException(ErrorCode.FILE_001, "上传进度不存在");
+            }
+            String filename = (String) chunks.get("filename");
+            Integer totalChunks = (Integer) chunks.get("totalChunks");
+            int progressValue = totalChunks != null && totalChunks > 0
+                    ? (int) ((double) uploadedChunks.size() / totalChunks * 100)
+                    : 0;
+            return UploadProgressResponse.builder()
+                    .fileId(fileId)
+                    .filename(filename)
+                    .totalChunks(totalChunks)
+                    .receivedChunks(uploadedChunks.size())
+                    .progress(progressValue)
+                    .status("uploading")
+                    .build();
         }
 
         return UploadProgressResponse.builder()
@@ -179,6 +204,86 @@ public class FileUploadServiceImpl implements FileUploadService {
                 .progress(progress.getProgress())
                 .status(progress.getStatus())
                 .build();
+    }
+
+    @Override
+    public Map<String, Object> listUploadedChunks(String fileId) {
+        File chunkDir = new File(chunkPath, fileId);
+        Map<String, Object> manifest = readManifest(chunkDir);
+        String filename = manifest.get("filename") instanceof String ? (String) manifest.get("filename") : null;
+        Integer totalChunks = manifest.get("totalChunks") instanceof Number
+                ? ((Number) manifest.get("totalChunks")).intValue()
+                : null;
+
+        List<Integer> uploadedChunks = new ArrayList<>();
+        if (filename != null && totalChunks != null) {
+            uploadedChunks.addAll(scanUploadedChunkIndexes(chunkDir, filename, totalChunks));
+        } else if (chunkDir.exists()) {
+            File[] files = chunkDir.listFiles(file -> file.isFile() && !"manifest.json".equals(file.getName()));
+            if (files != null) {
+                for (File file : files) {
+                    String name = file.getName();
+                    int idx = name.lastIndexOf('_');
+                    if (idx >= 0 && idx < name.length() - 1) {
+                        try {
+                            uploadedChunks.add(Integer.parseInt(name.substring(idx + 1)));
+                        } catch (NumberFormatException ignored) {
+                        }
+                    }
+                }
+            }
+        }
+        Collections.sort(uploadedChunks);
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("fileId", fileId);
+        response.put("filename", filename);
+        response.put("projectId", manifest.get("projectId"));
+        response.put("totalChunks", totalChunks);
+        response.put("fileSize", manifest.get("fileSize"));
+        response.put("uploadedChunks", uploadedChunks);
+        response.put("receivedChunks", uploadedChunks.size());
+        response.put("createdAt", manifest.get("createdAt"));
+        response.put("updatedAt", manifest.get("updatedAt"));
+        return response;
+    }
+
+    @PostConstruct
+    public void restoreUploadSessions() {
+        File chunkRootDir = new File(chunkPath);
+        File[] dirs = chunkRootDir.listFiles(File::isDirectory);
+        if (dirs == null) {
+            return;
+        }
+        for (File dir : dirs) {
+            Map<String, Object> manifest = readManifest(dir);
+            if (manifest.isEmpty()) {
+                continue;
+            }
+            String fileId = (String) manifest.get("fileId");
+            String filename = (String) manifest.get("filename");
+            Integer totalChunks = manifest.get("totalChunks") instanceof Number
+                    ? ((Number) manifest.get("totalChunks")).intValue()
+                    : 0;
+            if (fileId == null || filename == null || totalChunks == null || totalChunks <= 0) {
+                continue;
+            }
+            Set<Integer> chunks = scanUploadedChunkIndexes(dir, filename, totalChunks);
+            UploadProgress progress = UploadProgress.builder()
+                    .fileId(fileId)
+                    .filename(filename)
+                    .totalChunks(totalChunks)
+                    .receivedChunks(chunks)
+                    .progress((int) ((double) chunks.size() / totalChunks * 100))
+                    .status(chunks.size() == totalChunks ? "ready_to_merge" : "uploading")
+                    .createdAt(LocalDateTime.now())
+                    .lastUpdated(LocalDateTime.now())
+                    .fileSize(manifest.get("fileSize") instanceof Number ? ((Number) manifest.get("fileSize")).longValue() : null)
+                    .projectId(manifest.get("projectId") instanceof Number ? ((Number) manifest.get("projectId")).longValue() : null)
+                    .build();
+            uploadProgressMap.put(fileId, progress);
+        }
+        log.info("恢复上传会话完成: count={}", uploadProgressMap.size());
     }
 
     @Override
@@ -253,6 +358,52 @@ public class FileUploadServiceImpl implements FileUploadService {
                     }
                 }
             }
+        }
+    }
+
+    private Set<Integer> scanUploadedChunkIndexes(File chunkDir, String filename, Integer totalChunks) {
+        Set<Integer> chunks = new HashSet<>();
+        if (!chunkDir.exists()) {
+            return chunks;
+        }
+        for (int i = 0; i < totalChunks; i++) {
+            File chunkFile = new File(chunkDir, String.format("%s_%d", filename, i));
+            if (chunkFile.exists() && chunkFile.isFile()) {
+                chunks.add(i);
+            }
+        }
+        return chunks;
+    }
+
+    private void writeManifest(UploadProgress progress) throws IOException {
+        File chunkDir = new File(chunkPath, progress.getFileId());
+        if (!chunkDir.exists()) {
+            chunkDir.mkdirs();
+        }
+        Map<String, Object> manifest = new LinkedHashMap<>();
+        manifest.put("fileId", progress.getFileId());
+        manifest.put("filename", progress.getFilename());
+        manifest.put("projectId", progress.getProjectId());
+        manifest.put("totalChunks", progress.getTotalChunks());
+        manifest.put("fileSize", progress.getFileSize());
+        List<Integer> uploadedChunks = new ArrayList<>(progress.getReceivedChunks());
+        Collections.sort(uploadedChunks);
+        manifest.put("uploadedChunks", uploadedChunks);
+        manifest.put("createdAt", progress.getCreatedAt() != null ? progress.getCreatedAt().toString() : LocalDateTime.now().toString());
+        manifest.put("updatedAt", LocalDateTime.now().toString());
+        objectMapper.writeValue(new File(chunkDir, "manifest.json"), manifest);
+    }
+
+    private Map<String, Object> readManifest(File chunkDir) {
+        File manifestFile = new File(chunkDir, "manifest.json");
+        if (!manifestFile.exists()) {
+            return new HashMap<>();
+        }
+        try {
+            return objectMapper.readValue(manifestFile, new TypeReference<Map<String, Object>>() {});
+        } catch (IOException e) {
+            log.warn("读取上传 manifest 失败: {}", manifestFile.getAbsolutePath(), e);
+            return new HashMap<>();
         }
     }
 
@@ -380,5 +531,7 @@ public class FileUploadServiceImpl implements FileUploadService {
         private String status;
         private LocalDateTime createdAt;
         private LocalDateTime lastUpdated;
+        private Long fileSize;
+        private Long projectId;
     }
 }

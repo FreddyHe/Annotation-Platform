@@ -121,7 +121,7 @@ names:
             train_response.raise_for_status()
             
             records_response = authenticated_session.get(
-                f"{TestConfig.BACKEND_BASE_URL}/api/v1/training/project/{project_id}"
+                f"{TestConfig.BACKEND_BASE_URL}/training/project/{project_id}"
             )
             records_response.raise_for_status()
             records_data = records_response.json()
@@ -184,7 +184,7 @@ names:
             train_response.raise_for_status()
             
             records_response = authenticated_session.get(
-                f"{TestConfig.BACKEND_BASE_URL}/api/v1/training/user"
+                f"{TestConfig.BACKEND_BASE_URL}/training/user"
             )
             records_response.raise_for_status()
             records_data = records_response.json()
@@ -249,7 +249,7 @@ names:
             task_id = train_data["task_id"]
             
             record_response = authenticated_session.get(
-                f"{TestConfig.BACKEND_BASE_URL}/api/v1/training/record/task/{task_id}"
+                f"{TestConfig.BACKEND_BASE_URL}/training/record/task/{task_id}"
             )
             record_response.raise_for_status()
             record_data = record_response.json()
@@ -266,7 +266,7 @@ names:
 
 def test_get_completed_trainings(authenticated_session):
     response = authenticated_session.get(
-        f"{TestConfig.BACKEND_BASE_URL}/api/v1/training/completed"
+        f"{TestConfig.BACKEND_BASE_URL}/training/completed"
     )
     response.raise_for_status()
     data = response.json()
@@ -289,7 +289,7 @@ def test_start_model_test(authenticated_session, algorithm_session):
     }
     
     response = authenticated_session.post(
-        f"{TestConfig.BACKEND_BASE_URL}/api/v1/test/start",
+        f"{TestConfig.BACKEND_BASE_URL}/test/start",
         json=test_request
     )
     
@@ -301,7 +301,7 @@ def test_start_model_test(authenticated_session, algorithm_session):
 
 def test_get_model_test_status(authenticated_session):
     response = authenticated_session.get(
-        f"{TestConfig.BACKEND_BASE_URL}/api/v1/test/status/nonexistent_test_task"
+        f"{TestConfig.BACKEND_BASE_URL}/test/status/nonexistent_test_task"
     )
     
     assert response.status_code == 200, "Should return 200 for nonexistent test task"
@@ -313,7 +313,7 @@ def test_get_model_test_status(authenticated_session):
 
 def test_get_model_test_results(authenticated_session):
     response = authenticated_session.get(
-        f"{TestConfig.BACKEND_BASE_URL}/api/v1/test/results/nonexistent_test_task"
+        f"{TestConfig.BACKEND_BASE_URL}/test/results/nonexistent_test_task"
     )
     
     assert response.status_code == 200, "Should return 200 for nonexistent test results"
@@ -325,7 +325,7 @@ def test_get_model_test_results(authenticated_session):
 
 def test_cancel_model_test(authenticated_session):
     response = authenticated_session.post(
-        f"{TestConfig.BACKEND_BASE_URL}/api/v1/test/cancel/nonexistent_test_task"
+        f"{TestConfig.BACKEND_BASE_URL}/test/cancel/nonexistent_test_task"
     )
     
     assert response.status_code == 200, "Should return 200 for nonexistent test cancel"
@@ -339,7 +339,7 @@ def test_get_training_record_not_found(authenticated_session):
     nonexistent_id = 999999999
     
     response = authenticated_session.get(
-        f"{TestConfig.BACKEND_BASE_URL}/api/v1/training/record/{nonexistent_id}"
+        f"{TestConfig.BACKEND_BASE_URL}/training/record/{nonexistent_id}"
     )
     
     assert response.status_code == 200, "Should return 200 for nonexistent training record"
@@ -353,7 +353,7 @@ def test_cancel_nonexistent_training_by_id(authenticated_session):
     nonexistent_id = 999999999
     
     response = authenticated_session.post(
-        f"{TestConfig.BACKEND_BASE_URL}/api/v1/training/cancel/{nonexistent_id}"
+        f"{TestConfig.BACKEND_BASE_URL}/training/cancel/{nonexistent_id}"
     )
     
     assert response.status_code == 200, "Should return 200 for nonexistent training cancel"

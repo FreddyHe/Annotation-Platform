@@ -19,6 +19,47 @@
 
     <el-card class="panel">
       <template #header><span class="card-title">操作</span></template>
+      <div class="mode-settings">
+        <div class="setting-row">
+          <span class="setting-label">自动标注模式</span>
+          <el-radio-group v-model="mode" :disabled="isProcessing || isStarting">
+            <el-radio-button label="DINO_VLM">DINO + VLM 清洗</el-radio-button>
+            <el-radio-button label="DINO_THRESHOLD">DINO 阈值过滤</el-radio-button>
+          </el-radio-group>
+        </div>
+
+        <div v-if="mode === 'DINO_THRESHOLD'" class="setting-row">
+          <span class="setting-label">保留阈值</span>
+          <el-input-number
+            v-model="scoreThreshold"
+            :min="0"
+            :max="1"
+            :step="0.05"
+            :precision="2"
+            :disabled="isProcessing || isStarting"
+          />
+        </div>
+
+        <div v-if="mode === 'DINO_VLM'" class="vlm-config">
+          <el-form label-width="96px" size="small">
+            <el-form-item label="Base URL">
+              <el-input v-model="vlmConfig.vlmBaseUrl" :disabled="isProcessing || isStarting" />
+            </el-form-item>
+            <el-form-item label="Model">
+              <el-input v-model="vlmConfig.vlmModelName" :disabled="isProcessing || isStarting" />
+            </el-form-item>
+            <el-form-item label="API Key">
+              <el-input v-model="vlmConfig.vlmApiKey" type="password" show-password :disabled="isProcessing || isStarting" />
+            </el-form-item>
+            <el-form-item>
+              <el-button size="small" :loading="savingVlm" @click="saveVlmConfig">保存配置</el-button>
+              <el-button size="small" :loading="testingVlm" @click="testVlmConnectivity">测试连通</el-button>
+              <el-tag v-if="vlmTestResult === 'ok'" type="success" size="small">连通正常</el-tag>
+              <el-tag v-else-if="vlmTestResult === 'fail'" type="danger" size="small">连通失败</el-tag>
+            </el-form-item>
+          </el-form>
+        </div>
+      </div>
       <div class="action-center">
         <el-button 
           type="primary" 
@@ -30,6 +71,7 @@
         >
           {{ buttonText }}
         </el-button>
+        <el-button v-if="activeJobId && isProcessing" size="large" @click="cancelCurrentJob">取消任务</el-button>
         <p class="action-hint">{{ actionHint }}</p>
       </div>
     </el-card>
@@ -42,6 +84,7 @@
           <div style="display: flex; align-items: center; gap: 8px;">
             <el-tag v-if="isCompleted" type="success" size="small">已完成</el-tag>
             <el-tag v-else-if="isFailed" type="danger" size="small">失败</el-tag>
+            <el-tag v-else-if="isCancelled" type="warning" size="small">已取消</el-tag>
             <el-tag v-else-if="isProcessing" type="primary" size="small">
               <el-icon class="is-loading" style="margin-right: 4px;"><Loading /></el-icon>
               进行中
@@ -65,14 +108,28 @@
       </div>
 
       <div v-if="isProcessing" style="margin-top: 12px;">
-        <div class="progress-info">
-          <span class="progress-label">{{ currentStepText }}</span>
-          <span class="progress-percent">{{ progressPercent }}%</span>
+        <div class="stage-indicator">
+          <el-tag size="small" type="info">当前阶段: {{ stageLabel }}</el-tag>
+          <span class="stage-progress-hint">流程总进度 {{ progressPercent }}%</span>
         </div>
-        <el-progress 
-          :percentage="progressPercent" 
+
+        <div class="progress-info" style="margin-top: 12px;">
+          <span class="progress-label">图像处理进度</span>
+          <span class="progress-percent">
+            {{ jobStatus?.processedImages || 0 }} / {{ jobStatus?.totalImages || 0 }}
+            ({{ imageProgressPercent }}%)
+          </span>
+        </div>
+        <el-progress
+          :percentage="imageProgressPercent"
           :stroke-width="10"
+          :status="jobStatus?.currentStage === 'DINO' || jobStatus?.currentStage === 'INIT' ? undefined : 'success'"
         />
+
+        <div v-if="jobStatus" class="job-metrics" style="margin-top: 8px;">
+          <span>保留 {{ jobStatus.keptDetections || 0 }}</span>
+          <span>舍弃 {{ jobStatus.discardedDetections || 0 }}</span>
+        </div>
       </div>
 
       <div v-if="isCompleted" class="completion-notice">
@@ -80,7 +137,7 @@
           title="自动标注已完成！" 
           type="success" 
           :closable="false"
-          description="请前往 Label Studio 查看标注结果。如需重新标注，请先上传新图片。"
+          description="请前往 Label Studio 查看标注结果。如需重新标注，可直接重新执行。"
         />
       </div>
 
@@ -97,10 +154,10 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { VideoPlay, Loading } from '@element-plus/icons-vue'
-import { autoAnnotationAPI } from '@/api'
+import { autoAnnotationAPI, userAPI } from '@/api'
 
 const props = defineProps({ project: { type: Object, required: true } })
 const emit = defineEmits(['refresh'])
@@ -109,6 +166,18 @@ const isStarting = ref(false)
 const consoleRef = ref(null)
 const consoleLogs = ref([])
 const hasNewImagesSinceCompletion = ref(true)
+const mode = ref('DINO_VLM')
+const scoreThreshold = ref(0.7)
+const activeJobId = ref(null)
+const jobStatus = ref(null)
+const savingVlm = ref(false)
+const testingVlm = ref(false)
+const vlmTestResult = ref(null)
+const vlmConfig = ref({
+  vlmBaseUrl: '',
+  vlmModelName: '',
+  vlmApiKey: ''
+})
 let lastKnownTotalImages = 0
 let pollTimer = null
 
@@ -118,43 +187,86 @@ const currentTime = computed(() => {
 })
 
 const isProcessing = computed(() => {
+  if (jobStatus.value && ['PENDING', 'RUNNING', 'CANCELLING'].includes(jobStatus.value.status)) return true
   return ['DETECTING', 'CLEANING', 'SYNCING', 'UPLOADING'].includes(props.project.status)
 })
 
-const isCompleted = computed(() => props.project.status === 'COMPLETED')
-const isFailed = computed(() => props.project.status === 'FAILED')
+const isCompleted = computed(() => jobStatus.value?.status === 'COMPLETED' || props.project.status === 'COMPLETED')
+const isFailed = computed(() => jobStatus.value?.status === 'FAILED' || props.project.status === 'FAILED')
+const isCancelled = computed(() => jobStatus.value?.status === 'CANCELLED')
 
 const isButtonDisabled = computed(() => {
   if (isProcessing.value || isStarting.value) return true
-  if (isCompleted.value && !hasNewImagesSinceCompletion.value) return true
   return false
 })
 
 const buttonText = computed(() => {
+  if (jobStatus.value && ['PENDING', 'RUNNING', 'CANCELLING'].includes(jobStatus.value.status)) {
+    return currentStepText.value || '自动标注进行中...'
+  }
   switch (props.project.status) {
     case 'DETECTING': return 'DINO检测中...'
     case 'CLEANING': return 'VLM清洗中...'
     case 'SYNCING': return '同步到Label Studio中...'
     case 'COMPLETED':
-      return hasNewImagesSinceCompletion.value ? '重新执行自动标注' : '已完成（上传新图片后可再次执行）'
+      return '重新执行自动标注'
     case 'FAILED': return '重新执行自动标注'
     default: return '一键自动标注'
   }
 })
 
 const actionHint = computed(() => {
-  if (isProcessing.value) return '标注正在后台执行，请耐心等待...'
-  if (isCompleted.value && !hasNewImagesSinceCompletion.value) return '所有图片已处理完成，上传新图片后可再次执行'
+  if (isProcessing.value) return '标注正在后台执行，可关闭页面后回来查看进度'
   if (isCompleted.value) return '上次标注已完成，可重新执行'
-  return '默认处理全部图片，包含 DINO 检测 + VLM 智能清洗'
+  return mode.value === 'DINO_VLM'
+    ? '默认处理全部图片，包含 DINO 检测 + VLM 智能清洗'
+    : `默认处理全部图片，仅保留 score >= ${scoreThreshold.value} 的检测框`
 })
 
 const progressPercent = computed(() => {
+  if (jobStatus.value?.progressPercent != null) {
+    return Math.round(jobStatus.value.progressPercent)
+  }
   const map = { 'UPLOADING': 10, 'DETECTING': 30, 'CLEANING': 60, 'SYNCING': 85, 'COMPLETED': 100, 'FAILED': 0 }
   return map[props.project.status] || 0
 })
 
+const imageProgressPercent = computed(() => {
+  if (jobStatus.value?.imageProgressPercent != null) {
+    return Math.min(100, Math.round(jobStatus.value.imageProgressPercent))
+  }
+  if (!jobStatus.value) return 0
+  const processed = jobStatus.value.processedImages || 0
+  const total = jobStatus.value.totalImages || props.project.totalImages || 0
+  if (total <= 0) return 0
+  return Math.min(100, Math.round(processed * 100 / total))
+})
+
+const stageLabel = computed(() => {
+  const stage = jobStatus.value?.currentStage
+  const map = {
+    INIT: '初始化',
+    DINO: 'DINO 目标检测',
+    VLM: 'VLM 智能清洗',
+    THRESHOLD_FILTER: '阈值过滤',
+    SYNC: '同步到 Label Studio'
+  }
+  return map[stage] || '准备中'
+})
+
 const currentStepText = computed(() => {
+  if (jobStatus.value?.currentStage) {
+    const processed = jobStatus.value.processedImages || 0
+    const total = jobStatus.value.totalImages || props.project.totalImages || 0
+    const stageMap = {
+      INIT: '任务初始化中...',
+      DINO: total > 0 ? `DINO 目标检测中... ${processed}/${total} 张` : 'DINO 目标检测中...',
+      VLM: 'VLM 智能清洗中...',
+      THRESHOLD_FILTER: 'DINO 置信度过滤中...',
+      SYNC: '同步标注到 Label Studio...'
+    }
+    return stageMap[jobStatus.value.currentStage] || ''
+  }
   const map = {
     'UPLOADING': '上传图片中...',
     'DETECTING': 'DINO 目标检测中...',
@@ -195,6 +307,7 @@ const STATUS_LOGS = {
 }
 
 let lastLoggedStatus = null
+let lastLoggedProcessed = 0
 
 const logStatusTransition = (fromStatus, toStatus) => {
   const fromIdx = STATUS_FLOW.indexOf(fromStatus)
@@ -221,6 +334,7 @@ const logStatusTransition = (fromStatus, toStatus) => {
 
 watch(() => props.project.status, (newStatus, oldStatus) => {
   if (newStatus === oldStatus) return
+  if (activeJobId.value) return
   
   if (newStatus === 'FAILED') {
     addLog('标注过程出现错误，请查看后端日志', 'error', '❌')
@@ -240,9 +354,7 @@ watch(() => props.project.totalImages, (newTotal) => {
 
 const startPolling = () => {
   if (pollTimer) return
-  pollTimer = setInterval(() => {
-    emit('refresh')
-  }, 2000)
+  pollTimer = setInterval(pollJobOrProject, 2000)
 }
 
 const stopPolling = () => {
@@ -252,21 +364,138 @@ const stopPolling = () => {
   }
 }
 
+const pollJobOrProject = async () => {
+  try {
+    if (activeJobId.value) {
+      const res = await autoAnnotationAPI.getJob(activeJobId.value)
+      jobStatus.value = res.data
+      syncLogsFromJob()
+      if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(jobStatus.value.status)) {
+        stopPolling()
+      }
+    }
+  } finally {
+    emit('refresh')
+  }
+}
+
+const syncLogsFromJob = () => {
+  if (!jobStatus.value) return
+  const stage = jobStatus.value.currentStage
+  if (stage && stage !== lastLoggedStatus) {
+    const stageLogs = {
+      INIT: '任务已创建，正在初始化...',
+      DINO: '开始 Grounding DINO 目标检测...',
+      VLM: '开始 VLM 智能清洗与验证...',
+      THRESHOLD_FILTER: `按 score >= ${scoreThreshold.value} 过滤 DINO 检测框...`,
+      SYNC: '正在同步标注结果到 Label Studio...'
+    }
+    if (stageLogs[stage]) addLog(stageLogs[stage], 'info', '⚙️')
+    lastLoggedStatus = stage
+    if (stage === 'DINO') {
+      lastLoggedProcessed = 0
+    }
+  }
+  if (stage === 'DINO') {
+    const processed = jobStatus.value.processedImages || 0
+    const total = jobStatus.value.totalImages || props.project.totalImages || 0
+    const step = Math.max(10, Math.ceil((total || 100) / 20))
+    if (processed > 0 && (processed - lastLoggedProcessed >= step || processed === total)) {
+      addLog(`DINO 已检测 ${processed}/${total} 张`, 'info', '🔎')
+      lastLoggedProcessed = processed
+    }
+  }
+  if (jobStatus.value.status === 'COMPLETED') {
+    addLog(`自动标注完成，保留 ${jobStatus.value.keptDetections || 0} 个检测框`, 'success', '✅')
+    lastKnownTotalImages = props.project.totalImages || 0
+    hasNewImagesSinceCompletion.value = false
+  } else if (jobStatus.value.status === 'FAILED') {
+    addLog(`任务失败: ${jobStatus.value.errorMessage || '未知错误'}`, 'error', '❌')
+  } else if (jobStatus.value.status === 'CANCELLED') {
+    addLog('任务已取消', 'warn', '⚠️')
+  }
+}
+
+const loadVlmConfig = async () => {
+  try {
+    const res = await userAPI.getModelConfig()
+    const data = res.data || {}
+    vlmConfig.value = {
+      vlmBaseUrl: data.vlmBaseUrl || data.vlm_base_url || '',
+      vlmModelName: data.vlmModelName || data.vlm_model_name || '',
+      vlmApiKey: data.vlmApiKey || data.vlm_api_key || ''
+    }
+  } catch (error) {
+    console.warn('Load VLM config failed', error)
+  }
+}
+
+const saveVlmConfig = async () => {
+  savingVlm.value = true
+  try {
+    await userAPI.updateModelConfig(vlmConfig.value)
+    vlmTestResult.value = null
+    ElMessage.success('VLM 配置已保存')
+  } finally {
+    savingVlm.value = false
+  }
+}
+
+const testVlmConnectivity = async () => {
+  testingVlm.value = true
+  try {
+    const res = await userAPI.testVlmModelConfig()
+    vlmTestResult.value = res.data?.success ? 'ok' : 'fail'
+    if (vlmTestResult.value === 'ok') ElMessage.success('VLM 连通正常')
+    else ElMessage.error('VLM 连通失败，请检查配置')
+  } catch {
+    vlmTestResult.value = 'fail'
+  } finally {
+    testingVlm.value = false
+  }
+}
+
+const restoreLatestJob = async () => {
+  try {
+    const res = await autoAnnotationAPI.getLatestJob(props.project.id)
+    if (res.data && res.data.jobId) {
+      jobStatus.value = res.data
+      activeJobId.value = res.data.jobId
+      if (['PENDING', 'RUNNING', 'CANCELLING'].includes(res.data.status)) {
+        consoleLogs.value = []
+        addLog('已恢复后台自动标注任务进度', 'info', '↩️')
+        startPolling()
+      }
+    }
+  } catch (error) {
+    console.warn('Restore latest job failed', error)
+  }
+}
+
 const startAutoAnnotation = async () => {
   try {
     isStarting.value = true
     await ElMessageBox.confirm(
-      `即将启动一键自动标注流程：\n- 项目：${props.project.name}\n- 类别数：${props.project.labels?.length || 0}\n- 范围：全部图片\n- VLM 智能清洗：开启\n\n此操作将在后台执行，请勿关闭页面。`,
+      mode.value === 'DINO_VLM'
+        ? `即将启动自动标注流程：\n- 模式：DINO + VLM 清洗\n- 项目：${props.project.name}\n- 类别数：${props.project.labels?.length || 0}\n- 范围：全部图片`
+        : `即将启动自动标注流程：\n- 模式：DINO 阈值过滤\n- 阈值：score >= ${scoreThreshold.value}\n- 项目：${props.project.name}\n- 范围：全部图片`,
       '确认启动', 
       { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning', distinguishCancelAndClose: true }
     )
     
     consoleLogs.value = []
     lastLoggedStatus = null
+    lastLoggedProcessed = 0
+    jobStatus.value = null
     addLog('正在启动自动标注流程...', 'info', '🚀')
-    addLog(`项目: ${props.project.name} | 类别: ${props.project.labels?.join(', ')} | VLM清洗: 开启`, 'info', '📋')
+    addLog(`项目: ${props.project.name} | 类别: ${props.project.labels?.join(', ')} | 模式: ${mode.value === 'DINO_VLM' ? 'DINO + VLM' : 'DINO 阈值过滤'}`, 'info', '📋')
     
-    await autoAnnotationAPI.startAutoAnnotation(props.project.id, { processRange: 'all' })
+    const res = await autoAnnotationAPI.startAutoAnnotation(props.project.id, {
+      processRange: 'all',
+      mode: mode.value,
+      scoreThreshold: scoreThreshold.value
+    })
+    activeJobId.value = res.data?.jobId || null
     
     addLog('后端任务已创建，等待执行...', 'success', '✅')
     ElMessage.success({ message: '自动标注已启动！', duration: 3000 })
@@ -285,6 +514,19 @@ const startAutoAnnotation = async () => {
   }
 }
 
+const cancelCurrentJob = async () => {
+  if (!activeJobId.value) return
+  await ElMessageBox.confirm('确认取消当前自动标注任务？', '取消任务', { type: 'warning' })
+  await autoAnnotationAPI.cancelJob(activeJobId.value)
+  ElMessage.success('已提交取消请求')
+  await pollJobOrProject()
+}
+
+onMounted(() => {
+  loadVlmConfig()
+  restoreLatestJob()
+})
+
 onUnmounted(() => {
   stopPolling()
 })
@@ -302,11 +544,18 @@ onUnmounted(() => {
 .labels-inline { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .action-center { text-align: center; padding: 12px 0; }
 .action-hint { margin: 12px 0 0; font-size: 12px; color: var(--gray-400); }
+.mode-settings { margin-bottom: 16px; }
+.setting-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.setting-label { width: 96px; font-size: 13px; color: var(--gray-600); font-weight: 500; }
+.vlm-config { border-top: 1px solid var(--gray-100); padding-top: 12px; }
 
 .progress-header { display: flex; justify-content: space-between; align-items: center; }
+.stage-indicator { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 12px; background: var(--gray-50); border-radius: var(--radius-sm); }
+.stage-progress-hint { font-size: 12px; color: var(--gray-500); }
 .progress-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .progress-label { font-size: 13px; color: var(--gray-700); font-weight: 500; }
 .progress-percent { font-size: 16px; color: var(--brand-600); font-weight: 600; }
+.job-metrics { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; font-size: 12px; color: var(--gray-500); }
 .completion-notice { margin-top: 16px; }
 .error-notice { margin-top: 16px; }
 

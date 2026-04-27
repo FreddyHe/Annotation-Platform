@@ -55,6 +55,12 @@ public class AlgorithmServiceImpl implements AlgorithmService {
             requestBody.put("api_key", request.getApiKey());
             requestBody.put("endpoint", request.getEndpoint());
             requestBody.put("task_id", request.getTaskId());
+            if (request.getBoxThreshold() != null) {
+                requestBody.put("box_threshold", request.getBoxThreshold());
+            }
+            if (request.getTextThreshold() != null) {
+                requestBody.put("text_threshold", request.getTextThreshold());
+            }
             
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
             

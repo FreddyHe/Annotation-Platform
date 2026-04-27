@@ -30,6 +30,10 @@ public class ProjectDetailResponse {
     @JsonProperty("labelStudioProjectId")
     private Long lsProjectId;
 
+    private Long currentRoundId;
+    private String projectType;
+    private String lsProjectStatus;
+
     @Data
     @Builder
     @NoArgsConstructor

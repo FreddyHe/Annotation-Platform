@@ -17,8 +17,7 @@
         </el-statistic>
       </el-card>
       <el-card shadow="never" class="stat-card">
-        <el-statistic title="审核进度" :value="reviewProgress" :precision="1">
-          <template #suffix><span>%</span></template>
+        <el-statistic title="有预测任务" :value="stats.tasksWithPredictions">
           <template #prefix><el-icon><TrendCharts /></el-icon></template>
         </el-statistic>
       </el-card>
@@ -68,11 +67,12 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="annotationCount" label="标注数量" width="120" align="center">
+      <el-table-column prop="displayCount" label="框数" width="150" align="center">
         <template #default="{ row }">
           <div style="display: flex; align-items: center; justify-content: center; gap: 6px;">
             <el-icon :size="18" color="#409EFF"><Location /></el-icon>
-            <span style="font-weight: 600; color: #409EFF;">{{ row.annotationCount }}</span>
+            <span style="font-weight: 600; color: #409EFF;">{{ row.displayCount }}</span>
+            <el-tag size="small" :type="row.isReviewed ? 'success' : 'info'">{{ row.isReviewed ? '人工' : '预测' }}</el-tag>
           </div>
         </template>
       </el-table-column>
@@ -133,7 +133,11 @@ const results = ref([])
 const stats = ref({
   totalTasks: 0,
   reviewedTasks: 0,
-  pendingTasks: 0
+  pendingTasks: 0,
+  tasksWithPredictions: 0,
+  totalPredictions: 0,
+  totalPredictionResults: 0,
+  totalAnnotationResults: 0
 })
 const filterStatus = ref('')
 const searchText = ref('')
@@ -180,7 +184,10 @@ const loadReviewStats = async () => {
   try {
     loading.value = true
     const response = await projectAPI.getReviewStats(props.project.id)
-    stats.value = response.data
+    stats.value = {
+      ...stats.value,
+      ...response.data
+    }
   } catch (error) {
     ElMessage.error('加载审核统计失败：' + (error.message || '未知错误'))
   } finally {
@@ -199,10 +206,12 @@ const loadResults = async () => {
     const response = await projectAPI.getReviewResults(props.project.id)
     results.value = response.data.tasks || []
     
-    // 计算统计数据
     stats.value.totalTasks = results.value.length
     stats.value.reviewedTasks = results.value.filter(r => r.isReviewed).length
     stats.value.pendingTasks = stats.value.totalTasks - stats.value.reviewedTasks
+    stats.value.tasksWithPredictions = results.value.filter(r => (r.predictionCount || 0) > 0).length
+    stats.value.totalPredictionResults = results.value.reduce((sum, r) => sum + Number(r.predictionCount || 0), 0)
+    stats.value.totalAnnotationResults = results.value.reduce((sum, r) => sum + Number(r.annotationCount || 0), 0)
   } catch (error) {
     ElMessage.error('加载审核结果失败：' + (error.message || '未知错误'))
   } finally {
@@ -245,7 +254,7 @@ onMounted(() => {
 
 .stats-overview {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 16px;
 }

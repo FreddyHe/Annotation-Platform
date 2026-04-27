@@ -28,6 +28,17 @@ public interface DetectionResultRepository extends JpaRepository<DetectionResult
     @Query("SELECT dr FROM DetectionResult dr WHERE dr.image.project.id = :projectId AND dr.type = :type")
     List<DetectionResult> findByProjectIdAndType(@Param("projectId") Long projectId, @Param("type") DetectionResult.ResultType type);
 
+    @Query("""
+            SELECT dr
+            FROM DetectionResult dr
+            JOIN FETCH dr.image img
+            JOIN FETCH img.project p
+            WHERE p.id = :projectId AND dr.type = :type
+            """)
+    List<DetectionResult> findByProjectIdAndTypeWithImage(
+            @Param("projectId") Long projectId,
+            @Param("type") DetectionResult.ResultType type);
+
     @Query("SELECT COUNT(dr) FROM DetectionResult dr WHERE dr.image.project.id = :projectId")
     long countByProjectId(@Param("projectId") Long projectId);
 

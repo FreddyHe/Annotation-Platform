@@ -24,11 +24,7 @@
         </el-menu-item>
         <el-menu-item index="/model-training">
           <el-icon><Cpu /></el-icon>
-          <template #title>单类别模型训练</template>
-        </el-menu-item>
-        <el-menu-item index="/single-class-detection">
-          <el-icon><Monitor /></el-icon>
-          <template #title>单类别检测</template>
+          <template #title>单类别训练与检测</template>
         </el-menu-item>
         <el-menu-item index="/feasibility">
           <el-icon><DataAnalysis /></el-icon>

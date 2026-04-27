@@ -8,11 +8,17 @@ import com.annotation.platform.service.upload.FileUploadService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 @Slf4j
 @RestController
@@ -21,6 +27,9 @@ import java.util.Map;
 public class FileUploadController {
 
     private final FileUploadService fileUploadService;
+
+    @Value("${app.file.upload.base-path}")
+    private String basePath;
 
     @PostMapping("/chunk")
     public Result<String> uploadChunk(
@@ -82,12 +91,41 @@ public class FileUploadController {
         return Result.success(result);
     }
 
+    @PostMapping("/training-dataset")
+    public Result<Map<String, String>> uploadTrainingDataset(@RequestParam("file") MultipartFile file) {
+        log.info("接收训练数据集上传: filename={}, size={}", file.getOriginalFilename(), file.getSize());
+        if (file.isEmpty()) {
+            return Result.error("400", "文件为空");
+        }
+        String originalFilename = file.getOriginalFilename();
+        if (originalFilename == null || !originalFilename.toLowerCase().endsWith(".zip")) {
+            return Result.error("400", "训练数据集目前仅支持 ZIP 压缩包");
+        }
+
+        try {
+            Path uploadDir = Paths.get(basePath, "custom_model_datasets");
+            Files.createDirectories(uploadDir);
+            String safeName = originalFilename.replaceAll("[^a-zA-Z0-9._-]", "_");
+            String filename = System.currentTimeMillis() + "_" + UUID.randomUUID().toString().substring(0, 8) + "_" + safeName;
+            Path target = uploadDir.resolve(filename);
+            file.transferTo(target.toFile());
+
+            Map<String, String> result = new HashMap<>();
+            result.put("path", "custom_model_datasets/" + filename);
+            result.put("absolutePath", target.toAbsolutePath().toString());
+            result.put("filename", filename);
+            return Result.success(result);
+        } catch (Exception e) {
+            log.error("训练数据集上传失败", e);
+            return Result.error("500", "训练数据集上传失败: " + e.getMessage());
+        }
+    }
+
     @GetMapping("/view")
     public void viewFile(@RequestParam String path, jakarta.servlet.http.HttpServletResponse response) {
         log.info("查看文件: {}", path);
         try {
-            String basePath = "/root/autodl-fs/uploads";
-            java.io.File file = new java.io.File(basePath, path);
+            File file = new File(basePath, path);
             
             if (!file.exists() || !file.isFile()) {
                 response.setStatus(jakarta.servlet.http.HttpServletResponse.SC_NOT_FOUND);

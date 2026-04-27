@@ -36,13 +36,13 @@ const routes = [
       {
         path: 'model-training',
         name: 'ModelTraining',
-        component: () => import('@/views/ModelTraining.vue'),
-        meta: { title: '单类别模型训练', icon: 'Cpu' }
+        component: () => import('@/views/SingleClassWorkflow.vue'),
+        meta: { title: '单类别训练与检测', icon: 'Cpu' }
       },
       {
         path: 'single-class-detection',
         name: 'SingleClassDetection',
-        component: () => import('@/views/SingleClassDetection.vue'),
+        component: () => import('@/views/SingleClassWorkflow.vue'),
         meta: { title: '单类别检测', icon: 'Monitor' }
       },
       {

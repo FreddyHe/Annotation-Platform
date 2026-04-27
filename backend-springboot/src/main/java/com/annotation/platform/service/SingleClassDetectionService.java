@@ -2,6 +2,8 @@ package com.annotation.platform.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.annotation.platform.entity.SingleClassDetectionRecord;
+import com.annotation.platform.repository.SingleClassDetectionRecordRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -9,11 +11,13 @@ import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 
 import java.io.File;
+import java.util.List;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -21,11 +25,14 @@ import java.util.Map;
 @Service
 public class SingleClassDetectionService {
 
-    @Value("${algorithm.service.url:http://localhost:8001}")
+    @Value("${app.algorithm.url:http://localhost:8001}")
     private String algorithmServiceUrl;
 
     @Autowired
     private RestTemplate restTemplate;
+
+    @Autowired
+    private SingleClassDetectionRecordRepository recordRepository;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -73,6 +80,62 @@ public class SingleClassDetectionService {
         }
 
         return result;
+    }
+
+    public SingleClassDetectionRecord saveDetectionRecord(
+            Long userId,
+            String modelId,
+            String modelName,
+            String modelPath,
+            Integer classId,
+            String className,
+            String imagePath,
+            Double confidenceThreshold,
+            Double iouThreshold,
+            Map<String, Object> result
+    ) {
+        try {
+            Object detectionsObj = result.get("detections");
+            int count = 0;
+            double averageConfidence = 0.0;
+            if (detectionsObj instanceof List<?> detections) {
+                count = detections.size();
+                averageConfidence = detections.stream()
+                        .filter(item -> item instanceof Map)
+                        .map(item -> (Map<?, ?>) item)
+                        .mapToDouble(item -> item.get("confidence") instanceof Number ? ((Number) item.get("confidence")).doubleValue() : 0.0)
+                        .average()
+                        .orElse(0.0);
+            }
+
+            SingleClassDetectionRecord record = SingleClassDetectionRecord.builder()
+                    .userId(userId)
+                    .modelId(modelId)
+                    .modelName(modelName)
+                    .modelPath(modelPath)
+                    .classId(classId)
+                    .className(className)
+                    .imagePath(imagePath)
+                    .detectionCount(count)
+                    .averageConfidence(averageConfidence)
+                    .confidenceThreshold(confidenceThreshold)
+                    .iouThreshold(iouThreshold)
+                    .resultJson(objectMapper.writeValueAsString(result))
+                    .build();
+            return recordRepository.save(record);
+        } catch (Exception e) {
+            log.warn("保存单类别检测历史失败: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    public List<SingleClassDetectionRecord> listDetectionHistory(Long userId) {
+        return recordRepository.findTop20ByUserIdOrderByCreatedAtDesc(userId);
+    }
+
+    @Transactional
+    public void clearDetectionHistory(Long userId) {
+        recordRepository.deleteByUserId(userId);
     }
 
     public Map<String, Object> getModelInfo() throws Exception {

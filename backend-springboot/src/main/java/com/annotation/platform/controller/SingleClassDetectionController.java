@@ -1,7 +1,9 @@
 package com.annotation.platform.controller;
 
 import com.annotation.platform.common.Result;
+import com.annotation.platform.entity.SingleClassDetectionRecord;
 import com.annotation.platform.service.SingleClassDetectionService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,6 +16,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Map;
+import java.util.List;
 import java.util.UUID;
 
 @Slf4j
@@ -27,7 +30,7 @@ public class SingleClassDetectionController {
     @Value("${file.upload.base-path:/root/autodl-fs/uploads}")
     private String uploadBasePath;
 
-    @Value("${yolo.model.path:/root/autodl-tmp/xingmu_jiancepingtai/runs/detect/train7/weights/best.pt}")
+    @Value("${app.yolo.model.path:/root/autodl-fs/xingmu_jiancepingtai/runs/detect/train7/weights/best.pt}")
     private String defaultModelPath;
 
     @PostMapping("/single-class")
@@ -35,13 +38,27 @@ public class SingleClassDetectionController {
             @RequestParam("image") MultipartFile image,
             @RequestParam("class_id") String classIdStr,
             @RequestParam(value = "model_path", required = false) String modelPath,
+            @RequestParam(value = "model_id", required = false) String modelId,
+            @RequestParam(value = "model_name", required = false) String modelName,
+            @RequestParam(value = "class_name", required = false) String className,
             @RequestParam(value = "confidence_threshold", defaultValue = "0.5") String confidenceThresholdStr,
-            @RequestParam(value = "iou_threshold", defaultValue = "0.45") String iouThresholdStr
+            @RequestParam(value = "iou_threshold", defaultValue = "0.45") String iouThresholdStr,
+            HttpServletRequest request
     ) {
         try {
             Integer classId = Integer.parseInt(classIdStr);
             Double confidenceThreshold = Double.parseDouble(confidenceThresholdStr);
             Double iouThreshold = Double.parseDouble(iouThresholdStr);
+            if (confidenceThreshold < 0 || confidenceThreshold > 1 || iouThreshold < 0 || iouThreshold > 1) {
+                return Result.error("400", "阈值必须在0到1之间");
+            }
+            if (image.isEmpty()) {
+                return Result.error("400", "请上传图片");
+            }
+            String contentType = image.getContentType();
+            if (contentType == null || !contentType.startsWith("image/")) {
+                return Result.error("400", "仅支持图片文件");
+            }
             
             log.info("Received single class detection request: class_id={}, conf={}, iou={}", 
                     classId, confidenceThreshold, iouThreshold);
@@ -51,7 +68,10 @@ public class SingleClassDetectionController {
             }
 
             String originalFilename = image.getOriginalFilename();
-            String fileExtension = originalFilename.substring(originalFilename.lastIndexOf("."));
+            String fileExtension = ".jpg";
+            if (originalFilename != null && originalFilename.lastIndexOf(".") >= 0) {
+                fileExtension = originalFilename.substring(originalFilename.lastIndexOf("."));
+            }
             String uniqueFilename = UUID.randomUUID().toString() + fileExtension;
 
             Path uploadDir = Paths.get(uploadBasePath, "single_class_detection");
@@ -67,6 +87,21 @@ public class SingleClassDetectionController {
                     confidenceThreshold,
                     iouThreshold
             );
+            SingleClassDetectionRecord record = singleClassDetectionService.saveDetectionRecord(
+                    currentUserId(request),
+                    modelId,
+                    modelName,
+                    modelPath,
+                    classId,
+                    className,
+                    filePath.toString(),
+                    confidenceThreshold,
+                    iouThreshold,
+                    result
+            );
+            if (record != null) {
+                result.put("record_id", record.getId());
+            }
 
             return Result.success(result);
         } catch (IOException e) {
@@ -82,10 +117,27 @@ public class SingleClassDetectionController {
     public Result<Map<String, Object>> getModelInfo() {
         try {
             Map<String, Object> modelInfo = singleClassDetectionService.getModelInfo();
+            modelInfo.put("model_path", defaultModelPath);
             return Result.success(modelInfo);
         } catch (Exception e) {
             log.error("Failed to get model info", e);
             return Result.error("500", "Failed to get model info: " + e.getMessage());
         }
+    }
+
+    @GetMapping("/single-class/history")
+    public Result<List<SingleClassDetectionRecord>> listDetectionHistory(HttpServletRequest request) {
+        return Result.success(singleClassDetectionService.listDetectionHistory(currentUserId(request)));
+    }
+
+    @DeleteMapping("/single-class/history")
+    public Result<Void> clearDetectionHistory(HttpServletRequest request) {
+        singleClassDetectionService.clearDetectionHistory(currentUserId(request));
+        return Result.success();
+    }
+
+    private Long currentUserId(HttpServletRequest request) {
+        Object userId = request.getAttribute("userId");
+        return userId instanceof Long ? (Long) userId : 1L;
     }
 }

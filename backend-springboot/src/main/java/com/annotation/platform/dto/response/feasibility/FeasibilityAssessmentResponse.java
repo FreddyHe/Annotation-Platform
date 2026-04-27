@@ -21,6 +21,17 @@ public class FeasibilityAssessmentResponse {
     private String rawRequirement;
     private String structuredRequirement;
     private List<String> imageUrls;
+    private Integer datasetSize;
+    private Integer categoryCount;
+    private Integer samplesPerCategory;
+    private String imageQuality;
+    private Integer annotationCompleteness;
+    private String targetSize;
+    private String backgroundComplexity;
+    private String interClassSimilarity;
+    private Integer expectedAccuracy;
+    private String trainingResource;
+    private Integer timeBudgetDays;
     private AssessmentStatus status;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

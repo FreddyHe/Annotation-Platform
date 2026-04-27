@@ -991,6 +991,17 @@ class FeasibilityReportRequest(BaseModel):
     assessmentName: str = Field(..., description="Assessment name")
     rawRequirement: str = Field(..., description="Original requirement description")
     structuredRequirement: Optional[str] = Field(None, description="Structured requirement JSON")
+    datasetSize: Optional[int] = Field(None, description="Total available dataset size")
+    categoryCount: Optional[int] = Field(None, description="Expected category count")
+    samplesPerCategory: Optional[int] = Field(None, description="Samples per category")
+    imageQuality: Optional[str] = Field(None, description="Image quality level")
+    annotationCompleteness: Optional[int] = Field(None, description="Annotation completeness percentage")
+    targetSize: Optional[str] = Field(None, description="Target size level")
+    backgroundComplexity: Optional[str] = Field(None, description="Background complexity level")
+    interClassSimilarity: Optional[str] = Field(None, description="Inter-class similarity level")
+    expectedAccuracy: Optional[int] = Field(None, description="Expected accuracy percentage")
+    trainingResource: Optional[str] = Field(None, description="Available training resource")
+    timeBudgetDays: Optional[int] = Field(None, description="Time budget in days")
     categories: List[Dict[str, Any]] = Field(..., description="Category assessment results")
     ovdResults: List[Dict[str, Any]] = Field(default_factory=list, description="OVD test results")
     vlmResults: List[Dict[str, Any]] = Field(default_factory=list, description="VLM evaluation results")
@@ -1036,6 +1047,17 @@ async def generate_feasibility_report(request: FeasibilityReportRequest):
 # 项目基本信息
 - 项目名称：{request.assessmentName}
 - 原始需求：{request.rawRequirement}
+- 数据量：{request.datasetSize if request.datasetSize is not None else '未填写'}
+- 类别数量：{request.categoryCount if request.categoryCount is not None else '未填写'}
+- 单类别样本数：{request.samplesPerCategory if request.samplesPerCategory is not None else '未填写'}
+- 图片质量：{request.imageQuality or '未填写'}
+- 标注完整度：{request.annotationCompleteness if request.annotationCompleteness is not None else '未填写'}%
+- 目标尺寸：{request.targetSize or '未填写'}
+- 背景复杂度：{request.backgroundComplexity or '未填写'}
+- 类间相似度：{request.interClassSimilarity or '未填写'}
+- 预期精度：{request.expectedAccuracy if request.expectedAccuracy is not None else '未填写'}%
+- 训练资源：{request.trainingResource or '未填写'}
+- 时间预算：{request.timeBudgetDays if request.timeBudgetDays is not None else '未填写'}天
 
 # 需求解析结果
 {request.structuredRequirement or '未提供结构化需求'}

@@ -6,22 +6,24 @@ import shutil
 import logging
 import yaml
 import glob
+import zipfile
 from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/training", tags=["training"])
 
 BASE_DATASET_DIR = "/root/autodl-fs/custom_datasets"
 BASE_MODEL_DIR = "/root/autodl-fs/custom_models"
+UPLOAD_BASE_DIR = "/root/autodl-fs/uploads"
 os.makedirs(BASE_DATASET_DIR, exist_ok=True)
 os.makedirs(BASE_MODEL_DIR, exist_ok=True)
 
 
 class ParseRequest(BaseModel):
-    download_command: str
+    download_command: Optional[str] = None
 
 
 class DownloadRequest(BaseModel):
@@ -29,12 +31,24 @@ class DownloadRequest(BaseModel):
     download_command: str
 
 
+class InspectDatasetRequest(BaseModel):
+    dataset_source: str = "ROBOFLOW"
+    dataset_uri: Optional[str] = None
+    download_command: Optional[str] = None
+
+
 class TrainRequest(BaseModel):
     task_id: str
     model_name: str
-    download_command: str
+    dataset_source: str = "ROBOFLOW"
+    dataset_uri: Optional[str] = None
+    download_command: Optional[str] = None
     epochs: int = 50
     batch_size: int = 16
+    image_size: int = 640
+    learning_rate: float = 0.01
+    use_pretrained: bool = True
+    automl: bool = False
     callback_url: Optional[str] = None
 
 
@@ -46,14 +60,41 @@ class TrainStatus(BaseModel):
     model_path: Optional[str] = None
     classes: Optional[list] = None
     map_score: Optional[float] = None
+    precision_score: Optional[float] = None
+    recall_score: Optional[float] = None
+    logs: Optional[List[str]] = None
 
 
 # 内存状态存储
 _task_status: Dict[str, TrainStatus] = {}
 
 
+def _update_status(
+    task_id: str,
+    status: str,
+    message: str,
+    progress: float,
+    **kwargs
+) -> None:
+    previous_logs = []
+    if task_id in _task_status and _task_status[task_id].logs:
+        previous_logs = list(_task_status[task_id].logs)
+    if not previous_logs or previous_logs[-1] != message:
+        previous_logs.append(message)
+    _task_status[task_id] = TrainStatus(
+        task_id=task_id,
+        status=status,
+        message=message,
+        progress=progress,
+        logs=previous_logs,
+        **kwargs
+    )
+
+
 def parse_download_command(raw_cmd: str) -> dict:
     """解析三种格式的下载命令：URL、curl、Python SDK"""
+    if not raw_cmd:
+        raise ValueError("下载命令为空")
     raw = raw_cmd.strip()
 
     url_pattern = r'https://universe\.roboflow\.com/ds/\S+\?key=\S+'
@@ -96,27 +137,8 @@ async def download_dataset(parsed: dict, dest_dir: str) -> str:
     if parsed["type"] in ["url", "curl"]:
         url = parsed["url"]
         zip_path = os.path.join(dest_dir, "dataset.zip")
-        
-        cmd = f'wget -q -O "{zip_path}" "{url}"'
-        logger.info(f"下载命令: {cmd}")
-        
-        proc = await asyncio.create_subprocess_shell(
-            cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await proc.communicate()
-        
-        if proc.returncode != 0:
-            raise RuntimeError(f"下载失败: {stderr.decode()}")
-        
-        unzip_cmd = f'cd "{dest_dir}" && unzip -o -q dataset.zip'
-        proc = await asyncio.create_subprocess_shell(
-            unzip_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        await proc.communicate()
+        await _download_file(url, zip_path)
+        _safe_extract_zip(zip_path, dest_dir)
         
         if os.path.exists(zip_path):
             os.remove(zip_path)
@@ -154,18 +176,176 @@ dataset = version.download("{parsed['format']}", location="{dest_dir}")
     raise ValueError(f"不支持的下载类型: {parsed['type']}")
 
 
+def _safe_extract_zip(zip_path: str, dest_dir: str) -> str:
+    os.makedirs(dest_dir, exist_ok=True)
+    dest_abs = os.path.abspath(dest_dir)
+    with zipfile.ZipFile(zip_path) as archive:
+        for member in archive.infolist():
+            member_path = os.path.abspath(os.path.join(dest_dir, member.filename))
+            if not member_path.startswith(dest_abs + os.sep) and member_path != dest_abs:
+                raise ValueError(f"ZIP包含不安全路径: {member.filename}")
+        archive.extractall(dest_dir)
+    return dest_dir
+
+
+async def _download_file(url: str, dest_path: str) -> None:
+    logger.info(f"下载数据集URL: {url}")
+    proc = await asyncio.create_subprocess_exec(
+        "curl",
+        "-L",
+        "--fail",
+        "--connect-timeout",
+        "20",
+        "--max-time",
+        "300",
+        "-o",
+        dest_path,
+        url,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise RuntimeError(f"数据集下载失败: {stderr.decode()}")
+
+
+async def _download_url_dataset(url: str, dest_dir: str) -> str:
+    os.makedirs(dest_dir, exist_ok=True)
+    zip_path = os.path.join(dest_dir, "dataset.zip")
+    await _download_file(url, zip_path)
+    return _safe_extract_zip(zip_path, dest_dir)
+
+
+def _resolve_local_dataset_path(dataset_uri: str) -> str:
+    if not dataset_uri:
+        raise ValueError("数据集路径为空")
+    if dataset_uri.startswith("/"):
+        return dataset_uri
+    return os.path.join(UPLOAD_BASE_DIR, dataset_uri)
+
+
+def _copy_or_extract_local_dataset(dataset_uri: str, dest_dir: str) -> str:
+    source_path = _resolve_local_dataset_path(dataset_uri)
+    if not os.path.exists(source_path):
+        raise FileNotFoundError(f"数据集路径不存在: {source_path}")
+    if os.path.isdir(source_path):
+        target_dir = os.path.join(dest_dir, "local_dataset")
+        if os.path.exists(target_dir):
+            shutil.rmtree(target_dir)
+        shutil.copytree(source_path, target_dir)
+        return target_dir
+    if zipfile.is_zipfile(source_path):
+        return _safe_extract_zip(source_path, dest_dir)
+    raise ValueError("本地数据集仅支持目录或ZIP压缩包")
+
+
+async def prepare_dataset(req: TrainRequest, dataset_dir: str) -> str:
+    source = (req.dataset_source or "ROBOFLOW").upper()
+    if source == "ROBOFLOW":
+        parsed = parse_download_command(req.download_command)
+        return await download_dataset(parsed, dataset_dir)
+    if source == "URL_ZIP":
+        if not req.dataset_uri:
+            raise ValueError("URL_ZIP 数据源需要 dataset_uri")
+        return await _download_url_dataset(req.dataset_uri, dataset_dir)
+    if source == "UPLOAD_ZIP":
+        if not req.dataset_uri:
+            raise ValueError(f"{source} 数据源需要 dataset_uri")
+        return _copy_or_extract_local_dataset(req.dataset_uri, dataset_dir)
+    raise ValueError(f"不支持的数据源: {source}")
+
+
 def find_data_yaml(dataset_dir: str) -> Optional[str]:
-    """递归查找 data.yaml 文件"""
+    """递归查找 YOLO 数据集 YAML，优先使用 data.yaml。"""
+    yaml_candidates = []
     for root, dirs, files in os.walk(dataset_dir):
         for file in files:
             if file == "data.yaml":
                 return os.path.join(root, file)
+            if file.endswith((".yaml", ".yml")):
+                yaml_candidates.append(os.path.join(root, file))
+    for yaml_path in yaml_candidates:
+        try:
+            with open(yaml_path) as f:
+                cfg = yaml.safe_load(f) or {}
+            if cfg.get("names") is not None and (cfg.get("train") is not None or cfg.get("val") is not None or cfg.get("valid") is not None):
+                return yaml_path
+        except Exception:
+            continue
     return None
+
+
+def find_yolo_directory(dataset_dir: str) -> Optional[str]:
+    for root, dirs, files in os.walk(dataset_dir):
+        if "images" in dirs and "labels" in dirs:
+            return root
+    return None
+
+
+def read_label_class_ids(labels_dir: str) -> List[int]:
+    class_ids = set()
+    if not labels_dir or not os.path.exists(labels_dir):
+        return []
+    for label_path in glob.glob(os.path.join(labels_dir, "**", "*.txt"), recursive=True):
+        try:
+            with open(label_path) as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if not parts:
+                        continue
+                    class_ids.add(int(float(parts[0])))
+        except Exception:
+            continue
+    return sorted(class_ids)
+
+
+def create_yolo_yaml_from_directory(dataset_dir: str) -> Optional[str]:
+    yolo_root = find_yolo_directory(dataset_dir)
+    if not yolo_root:
+        return None
+
+    images_root = os.path.join(yolo_root, "images")
+    labels_root = os.path.join(yolo_root, "labels")
+    class_ids = read_label_class_ids(labels_root)
+    max_class_id = max(class_ids) if class_ids else 0
+    names = {idx: f"class_{idx}" for idx in range(max_class_id + 1)}
+
+    train_dir = os.path.join(images_root, "train")
+    val_dir = os.path.join(images_root, "val")
+    valid_dir = os.path.join(images_root, "valid")
+    if not os.path.exists(train_dir):
+        train_dir = images_root
+    if not os.path.exists(val_dir):
+        val_dir = valid_dir if os.path.exists(valid_dir) else train_dir
+
+    data_yaml = os.path.join(yolo_root, "data.yaml")
+    with open(data_yaml, "w") as f:
+        yaml.dump({
+            "path": yolo_root,
+            "train": os.path.relpath(train_dir, yolo_root),
+            "val": os.path.relpath(val_dir, yolo_root),
+            "nc": len(names),
+            "names": names
+        }, f, allow_unicode=True, default_flow_style=False)
+    return data_yaml
+
+
+def iter_class_names(names: Any) -> List[tuple]:
+    if isinstance(names, list):
+        return [(idx, name) for idx, name in enumerate(names)]
+    if isinstance(names, dict):
+        def sort_key(item):
+            try:
+                return int(item[0])
+            except Exception:
+                return str(item[0])
+        return [(int(k), v) for k, v in sorted(names.items(), key=sort_key)]
+    return []
 
 
 def detect_dataset_format(dataset_dir: str) -> str:
     """检测数据集格式：YOLO/COCO/VOC/UNKNOWN"""
-    if find_data_yaml(dataset_dir):
+    if find_data_yaml(dataset_dir) or find_yolo_directory(dataset_dir):
         return "YOLO"
     
     for root, dirs, files in os.walk(dataset_dir):
@@ -186,6 +366,284 @@ def detect_dataset_format(dataset_dir: str) -> str:
                 return "VOC"
     
     return "UNKNOWN"
+
+
+def _image_files_under(path: str) -> List[str]:
+    if not path or not os.path.exists(path):
+        return []
+    patterns = ["*.jpg", "*.jpeg", "*.png", "*.bmp", "*.webp"]
+    files = []
+    for pattern in patterns:
+        files.extend(glob.glob(os.path.join(path, "**", pattern), recursive=True))
+        files.extend(glob.glob(os.path.join(path, "**", pattern.upper()), recursive=True))
+    return sorted(set(files))
+
+
+def _resolve_yaml_paths(base_dir: str, value: Any) -> List[str]:
+    if value is None:
+        return []
+    values = value if isinstance(value, list) else [value]
+    resolved = []
+    for item in values:
+        item_str = str(item)
+        if item_str.startswith("/") and os.path.exists(item_str):
+            resolved.append(item_str)
+        else:
+            resolved.append(os.path.join(base_dir, item_str))
+    return resolved
+
+
+def _infer_label_path(image_path: str) -> str:
+    label_path = image_path.replace(os.sep + "images" + os.sep, os.sep + "labels" + os.sep)
+    return os.path.splitext(label_path)[0] + ".txt"
+
+
+def inspect_yolo_dataset(data_yaml: str) -> dict:
+    with open(data_yaml) as f:
+        cfg = yaml.safe_load(f) or {}
+
+    dataset_root = cfg.get("path") or os.path.dirname(data_yaml)
+    if not os.path.isabs(dataset_root):
+        dataset_root = os.path.abspath(os.path.join(os.path.dirname(data_yaml), dataset_root))
+    yaml_dir = os.path.dirname(data_yaml)
+    if not os.path.exists(dataset_root):
+        dataset_root = yaml_dir
+
+    def has_split_images(root: str) -> bool:
+        for split in ["train", "val", "valid", "test"]:
+            for split_path in _resolve_yaml_paths(root, cfg.get(split)):
+                if os.path.isfile(split_path):
+                    return True
+                if _image_files_under(split_path):
+                    return True
+        return False
+
+    if not has_split_images(dataset_root) and has_split_images(yaml_dir):
+        dataset_root = yaml_dir
+
+    classes = [
+        {"class_id": class_id, "name": str(name)}
+        for class_id, name in iter_class_names(cfg.get("names", {}))
+    ]
+    split_summary = {}
+    total_images = 0
+    total_labels = 0
+    missing_labels = 0
+
+    for split in ["train", "val", "valid", "test"]:
+        split_paths = _resolve_yaml_paths(dataset_root, cfg.get(split))
+        split_images = []
+        for split_path in split_paths:
+            if os.path.isfile(split_path):
+                with open(split_path) as f:
+                    split_images.extend([line.strip() for line in f if line.strip()])
+            else:
+                split_images.extend(_image_files_under(split_path))
+
+        label_count = 0
+        missing_count = 0
+        for image_path in split_images:
+            abs_image = image_path if os.path.isabs(image_path) else os.path.join(dataset_root, image_path)
+            if os.path.exists(_infer_label_path(abs_image)):
+                label_count += 1
+            else:
+                missing_count += 1
+
+        if split_images:
+            split_summary[split] = {
+                "images": len(split_images),
+                "labels": label_count,
+                "missingLabels": missing_count
+            }
+            total_images += len(split_images)
+            total_labels += label_count
+            missing_labels += missing_count
+
+    warnings = []
+    if not classes:
+        warnings.append("data.yaml 缺少 names 类别定义")
+    if total_images == 0:
+        warnings.append("未找到训练/验证图片")
+    if missing_labels > 0:
+        warnings.append(f"有 {missing_labels} 张图片缺少对应标签文件")
+    if "val" not in split_summary and "valid" not in split_summary:
+        warnings.append("未检测到验证集，训练将难以评估泛化效果")
+
+    return {
+        "format": "YOLO",
+        "valid": bool(classes and total_images > 0 and missing_labels < total_images),
+        "dataYaml": data_yaml,
+        "datasetRoot": dataset_root,
+        "classes": classes,
+        "classCount": len(classes),
+        "imageCount": total_images,
+        "labelCount": total_labels,
+        "missingLabelCount": missing_labels,
+        "splits": split_summary,
+        "warnings": warnings
+    }
+
+
+def inspect_coco_dataset(dataset_dir: str) -> dict:
+    json_files = glob.glob(os.path.join(dataset_dir, "**", "*.json"), recursive=True)
+    best = None
+    for json_path in json_files:
+        try:
+            with open(json_path) as f:
+                data = json.load(f)
+            if "images" in data and "annotations" in data and "categories" in data:
+                best = (json_path, data)
+                break
+        except Exception:
+            continue
+
+    if not best:
+        return {
+            "format": "COCO",
+            "valid": False,
+            "warnings": ["未找到有效 COCO JSON 标注文件"],
+            "classes": [],
+            "classCount": 0,
+            "imageCount": 0,
+            "labelCount": 0
+        }
+
+    json_path, data = best
+    classes = [
+        {"class_id": int(cat.get("id", idx)), "name": str(cat.get("name", f"class_{idx}"))}
+        for idx, cat in enumerate(data.get("categories", []))
+    ]
+    image_count = len(data.get("images", []))
+    annotation_count = len(data.get("annotations", []))
+    warnings = []
+    if not classes:
+        warnings.append("COCO JSON 缺少 categories")
+    if image_count == 0:
+        warnings.append("COCO JSON 缺少 images")
+    if annotation_count == 0:
+        warnings.append("COCO JSON 缺少 annotations")
+
+    return {
+        "format": "COCO",
+        "valid": bool(classes and image_count > 0 and annotation_count > 0),
+        "annotationFile": json_path,
+        "classes": classes,
+        "classCount": len(classes),
+        "imageCount": image_count,
+        "labelCount": annotation_count,
+        "warnings": warnings
+    }
+
+
+def inspect_voc_dataset(dataset_dir: str) -> dict:
+    xml_files = glob.glob(os.path.join(dataset_dir, "**", "*.xml"), recursive=True)
+    images = _image_files_under(dataset_dir)
+    warnings = []
+    if not xml_files:
+        warnings.append("未找到 VOC XML 标注文件")
+    if not images:
+        warnings.append("未找到图片文件")
+    warnings.append("VOC 训练前需要转换为 YOLO 格式")
+    return {
+        "format": "VOC",
+        "valid": bool(xml_files and images),
+        "classes": [],
+        "classCount": 0,
+        "imageCount": len(images),
+        "labelCount": len(xml_files),
+        "warnings": warnings
+    }
+
+
+def inspect_dataset_dir(dataset_dir: str) -> dict:
+    fmt = detect_dataset_format(dataset_dir)
+    if fmt == "YOLO":
+        data_yaml = find_data_yaml(dataset_dir) or create_yolo_yaml_from_directory(dataset_dir)
+        return inspect_yolo_dataset(data_yaml)
+    if fmt == "COCO":
+        return inspect_coco_dataset(dataset_dir)
+    if fmt == "VOC":
+        return inspect_voc_dataset(dataset_dir)
+    return {
+        "format": "UNKNOWN",
+        "valid": False,
+        "classes": [],
+        "classCount": 0,
+        "imageCount": len(_image_files_under(dataset_dir)),
+        "labelCount": 0,
+        "warnings": ["无法识别数据集格式，请提供 YOLO data.yaml 或 COCO JSON 标注"]
+    }
+
+
+def choose_automl_params(inspection: dict) -> dict:
+    image_count = int(inspection.get("imageCount") or 0)
+    class_count = int(inspection.get("classCount") or 1)
+    splits = inspection.get("splits") or {}
+    has_validation = bool(splits.get("val") or splits.get("valid"))
+
+    if image_count <= 20:
+        epochs = 10
+    elif image_count <= 100:
+        epochs = 30
+    elif image_count <= 500:
+        epochs = 60
+    else:
+        epochs = 80
+
+    if not has_validation:
+        epochs = max(epochs, 30)
+
+    if image_count <= 80 or class_count >= 12:
+        batch_size = 4
+    elif image_count <= 400 or class_count >= 6:
+        batch_size = 8
+    else:
+        batch_size = 16
+
+    return {
+        "epochs": epochs,
+        "batch_size": batch_size,
+        "image_size": 640,
+        "learning_rate": 0.003 if batch_size <= 4 else 0.005 if batch_size <= 8 else 0.01,
+        "use_pretrained": True
+    }
+
+
+def parse_yolo_metrics(output_dir: str) -> dict:
+    """Read Ultralytics results.csv when available."""
+    import csv
+
+    candidates = glob.glob(os.path.join(output_dir, "**", "results.csv"), recursive=True)
+    if not candidates:
+        return {}
+
+    results_csv = candidates[0]
+    try:
+        with open(results_csv, newline="") as f:
+            rows = list(csv.DictReader(f))
+        if not rows:
+            return {}
+        last = rows[-1]
+
+        def read_metric(*names):
+            for name in names:
+                value = last.get(name)
+                if value is not None and str(value).strip() != "":
+                    try:
+                        return float(value)
+                    except ValueError:
+                        continue
+            return None
+
+        return {
+            "map_score": read_metric("metrics/mAP50(B)", "metrics/mAP50", "map50"),
+            "precision_score": read_metric("metrics/precision(B)", "metrics/precision", "precision"),
+            "recall_score": read_metric("metrics/recall(B)", "metrics/recall", "recall"),
+            "results_csv": results_csv,
+        }
+    except Exception as e:
+        logger.warning(f"解析训练指标失败: {e}")
+        return {}
 
 
 def convert_coco_to_yolo(dataset_dir: str, output_dir: str) -> str:
@@ -308,7 +766,14 @@ async def download_and_convert_endpoint(req: DownloadRequest):
             with open(data_yaml_path) as f:
                 cfg = yaml.safe_load(f)
             names = cfg.get("names", {})
-            classes = [{"class_id": int(k), "name": v} for k, v in sorted(names.items(), key=lambda x: int(x[0]))]
+            classes = [{"class_id": class_id, "name": name} for class_id, name in iter_class_names(names)]
+        elif fmt == "YOLO":
+            data_yaml_path = create_yolo_yaml_from_directory(actual_dir)
+            if data_yaml_path:
+                with open(data_yaml_path) as f:
+                    cfg = yaml.safe_load(f)
+                names = cfg.get("names", {})
+                classes = [{"class_id": class_id, "name": name} for class_id, name in iter_class_names(names)]
 
         return {
             "success": True,
@@ -325,7 +790,53 @@ async def download_and_convert_endpoint(req: DownloadRequest):
         return {"success": False, "message": str(e)}
 
 
-async def run_yolo_training(data_yaml: str, output_dir: str, epochs: int, batch_size: int) -> dict:
+@router.post("/inspect-dataset")
+async def inspect_dataset_endpoint(req: InspectDatasetRequest):
+    """准备并检查训练数据集结构，不启动训练。"""
+    import uuid
+
+    inspect_id = f"inspect_{uuid.uuid4().hex[:12]}"
+    inspect_dir = os.path.join(BASE_DATASET_DIR, inspect_id)
+    try:
+        train_req = TrainRequest(
+            task_id=inspect_id,
+            model_name="dataset-inspection",
+            dataset_source=req.dataset_source,
+            dataset_uri=req.dataset_uri,
+            download_command=req.download_command,
+        )
+        actual_dir = await prepare_dataset(train_req, inspect_dir)
+        result = inspect_dataset_dir(actual_dir)
+        result["datasetDir"] = actual_dir
+        return {"success": True, "data": result}
+    except Exception as e:
+        logger.error(f"数据集预检失败: {e}", exc_info=True)
+        return {
+            "success": False,
+            "message": str(e),
+            "data": {
+                "valid": False,
+                "format": "UNKNOWN",
+                "warnings": [str(e)]
+            }
+        }
+    finally:
+        try:
+            if os.path.exists(inspect_dir):
+                shutil.rmtree(inspect_dir)
+        except Exception as cleanup_error:
+            logger.warning(f"清理预检目录失败: {cleanup_error}")
+
+
+async def run_yolo_training(
+    data_yaml: str,
+    output_dir: str,
+    epochs: int,
+    batch_size: int,
+    image_size: int,
+    learning_rate: float,
+    use_pretrained: bool
+) -> dict:
     """执行 YOLO 训练"""
     with open(data_yaml) as f:
         data_cfg = yaml.safe_load(f)
@@ -334,10 +845,11 @@ async def run_yolo_training(data_yaml: str, output_dir: str, epochs: int, batch_
     train_cmd = (
         f"yolo detect train "
         f"data={data_yaml} "
-        f"model=yolov8n.pt "
+        f"model={'yolov8n.pt' if use_pretrained else 'yolov8n.yaml'} "
         f"epochs={epochs} "
         f"batch={batch_size} "
-        f"imgsz=640 "
+        f"imgsz={image_size} "
+        f"lr0={learning_rate} "
         f"project={output_dir} "
         f"name=train "
         f"exist_ok=True "
@@ -368,10 +880,19 @@ async def run_yolo_training(data_yaml: str, output_dir: str, epochs: int, batch_
         else:
             raise RuntimeError("训练完成但未找到 best.pt")
 
-    classes = [{"class_id": int(k), "name": v, "cn_name": v}
-               for k, v in sorted(names.items(), key=lambda x: int(x[0]))]
+    classes = [{"class_id": class_id, "name": name, "cn_name": name}
+               for class_id, name in iter_class_names(names)]
 
-    return {"model_path": best_pt, "classes": classes, "map_score": None}
+    metrics = parse_yolo_metrics(output_dir)
+
+    return {
+        "model_path": best_pt,
+        "classes": classes,
+        "map_score": metrics.get("map_score"),
+        "precision_score": metrics.get("precision_score"),
+        "recall_score": metrics.get("recall_score"),
+        "results_csv": metrics.get("results_csv")
+    }
 
 
 async def run_full_pipeline(req: TrainRequest):
@@ -381,49 +902,79 @@ async def run_full_pipeline(req: TrainRequest):
     model_dir = os.path.join(BASE_MODEL_DIR, task_id)
 
     try:
-        _task_status[task_id] = TrainStatus(
-            task_id=task_id, status="DOWNLOADING", message="解析下载命令..."
-        )
-        parsed = parse_download_command(req.download_command)
+        _update_status(task_id, "DOWNLOADING", f"准备数据源: {req.dataset_source}...", 0.1)
+        actual_dir = await prepare_dataset(req, dataset_dir)
 
-        _task_status[task_id] = TrainStatus(
-            task_id=task_id, status="DOWNLOADING", message="下载数据集中..."
-        )
-        actual_dir = await download_dataset(parsed, dataset_dir)
-
-        _task_status[task_id] = TrainStatus(
-            task_id=task_id, status="CONVERTING", message="检测数据集格式..."
-        )
+        _update_status(task_id, "CONVERTING", "检测数据集格式...", 0.35)
         fmt = detect_dataset_format(actual_dir)
 
+        inspection = None
         if fmt == "YOLO":
-            data_yaml = find_data_yaml(actual_dir)
+            data_yaml = find_data_yaml(actual_dir) or create_yolo_yaml_from_directory(actual_dir)
+            if not data_yaml:
+                raise RuntimeError("未找到 YOLO YAML，也无法从 images/labels 自动生成")
             with open(data_yaml) as f:
                 cfg = yaml.safe_load(f)
             cfg["path"] = os.path.dirname(data_yaml)
             with open(data_yaml, "w") as f:
                 yaml.dump(cfg, f, allow_unicode=True, default_flow_style=False)
+            inspection = inspect_yolo_dataset(data_yaml)
         elif fmt == "COCO":
-            _task_status[task_id] = TrainStatus(
-                task_id=task_id, status="CONVERTING", message="COCO → YOLO 转换中..."
-            )
+            _update_status(task_id, "CONVERTING", "COCO → YOLO 转换中...", 0.45)
             yolo_dir = os.path.join(dataset_dir, "yolo_converted")
             data_yaml = convert_coco_to_yolo(actual_dir, yolo_dir)
+            inspection = inspect_yolo_dataset(data_yaml)
         else:
             raise RuntimeError(f"不支持的数据集格式: {fmt}")
 
-        _task_status[task_id] = TrainStatus(
-            task_id=task_id, status="TRAINING", message=f"YOLO 训练中 (epochs={req.epochs})..."
-        )
-        result = await run_yolo_training(data_yaml, model_dir, req.epochs, req.batch_size)
+        train_params = {
+            "epochs": req.epochs,
+            "batch_size": req.batch_size,
+            "image_size": req.image_size,
+            "learning_rate": req.learning_rate,
+            "use_pretrained": req.use_pretrained
+        }
+        if req.automl:
+            train_params = choose_automl_params(inspection or {})
+            _update_status(
+                task_id,
+                "CONVERTING",
+                (
+                    "AutoML 已读取 "
+                    f"{inspection.get('classCount', 0) if inspection else 0} 个类别、"
+                    f"{inspection.get('imageCount', 0) if inspection else 0} 张图片，"
+                    f"选择 epochs={train_params['epochs']}, batch={train_params['batch_size']}, "
+                    f"imgsz={train_params['image_size']}"
+                ),
+                0.52
+            )
 
-        _task_status[task_id] = TrainStatus(
-            task_id=task_id,
-            status="COMPLETED",
-            message=f"训练完成！mAP50: {result.get('map_score', 'N/A')}",
+        _update_status(
+            task_id,
+            "TRAINING",
+            f"YOLO 训练中 (epochs={train_params['epochs']}, imgsz={train_params['image_size']})...",
+            0.6
+        )
+        result = await run_yolo_training(
+            data_yaml,
+            model_dir,
+            train_params["epochs"],
+            train_params["batch_size"],
+            train_params["image_size"],
+            train_params["learning_rate"],
+            train_params["use_pretrained"]
+        )
+
+        _update_status(
+            task_id,
+            "COMPLETED",
+            f"训练完成！mAP50: {result.get('map_score', 'N/A')}",
+            1.0,
             model_path=result["model_path"],
             classes=result["classes"],
-            map_score=result.get("map_score")
+            map_score=result.get("map_score"),
+            precision_score=result.get("precision_score"),
+            recall_score=result.get("recall_score")
         )
 
         if req.callback_url:
@@ -434,14 +985,15 @@ async def run_full_pipeline(req: TrainRequest):
                     "status": "COMPLETED",
                     "modelPath": result["model_path"],
                     "classes": result["classes"],
-                    "mapScore": result.get("map_score")
+                    "mapScore": result.get("map_score"),
+                    "precisionScore": result.get("precision_score"),
+                    "recallScore": result.get("recall_score"),
+                    "resultsCsv": result.get("results_csv")
                 }, timeout=10)
 
     except Exception as e:
         logger.error(f"[{task_id}] 流水线失败: {e}", exc_info=True)
-        _task_status[task_id] = TrainStatus(
-            task_id=task_id, status="FAILED", message=str(e)
-        )
+        _update_status(task_id, "FAILED", str(e), _task_status.get(task_id, TrainStatus(task_id=task_id, status="FAILED", message="", progress=0)).progress or 0)
         if req.callback_url:
             try:
                 import httpx
@@ -456,9 +1008,7 @@ async def run_full_pipeline(req: TrainRequest):
 @router.post("/start")
 async def start_training(req: TrainRequest, background_tasks: BackgroundTasks):
     """提交训练任务（后台异步执行）"""
-    _task_status[req.task_id] = TrainStatus(
-        task_id=req.task_id, status="DOWNLOADING", message="正在解析下载命令..."
-    )
+    _update_status(req.task_id, "DOWNLOADING", "正在解析下载命令...", 0.05)
     background_tasks.add_task(run_full_pipeline, req)
     return {"success": True, "taskId": req.task_id, "message": "训练任务已提交"}
 

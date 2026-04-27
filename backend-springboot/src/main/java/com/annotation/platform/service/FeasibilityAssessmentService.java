@@ -87,6 +87,17 @@ public class FeasibilityAssessmentService {
                 .assessmentName(request.getAssessmentName())
                 .rawRequirement(request.getRawRequirement())
                 .imageUrls(imageUrlsJson)
+                .datasetSize(request.getDatasetSize())
+                .categoryCount(request.getCategoryCount())
+                .samplesPerCategory(request.getSamplesPerCategory())
+                .imageQuality(request.getImageQuality())
+                .annotationCompleteness(request.getAnnotationCompleteness())
+                .targetSize(request.getTargetSize())
+                .backgroundComplexity(request.getBackgroundComplexity())
+                .interClassSimilarity(request.getInterClassSimilarity())
+                .expectedAccuracy(request.getExpectedAccuracy())
+                .trainingResource(request.getTrainingResource())
+                .timeBudgetDays(request.getTimeBudgetDays())
                 .status(AssessmentStatus.CREATED)
                 .createdBy(user)
                 .organization(organization)
@@ -939,6 +950,17 @@ public class FeasibilityAssessmentService {
                 .rawRequirement(assessment.getRawRequirement())
                 .structuredRequirement(assessment.getStructuredRequirement())
                 .imageUrls(imageUrls)
+                .datasetSize(assessment.getDatasetSize())
+                .categoryCount(assessment.getCategoryCount())
+                .samplesPerCategory(assessment.getSamplesPerCategory())
+                .imageQuality(assessment.getImageQuality())
+                .annotationCompleteness(assessment.getAnnotationCompleteness())
+                .targetSize(assessment.getTargetSize())
+                .backgroundComplexity(assessment.getBackgroundComplexity())
+                .interClassSimilarity(assessment.getInterClassSimilarity())
+                .expectedAccuracy(assessment.getExpectedAccuracy())
+                .trainingResource(assessment.getTrainingResource())
+                .timeBudgetDays(assessment.getTimeBudgetDays())
                 .status(assessment.getStatus())
                 .createdAt(assessment.getCreatedAt())
                 .updatedAt(assessment.getUpdatedAt())
@@ -1152,6 +1174,17 @@ public class FeasibilityAssessmentService {
         assessmentInfo.put("status", assessment.getStatus());
         assessmentInfo.put("createdAt", assessment.getCreatedAt());
         assessmentInfo.put("completedAt", assessment.getCompletedAt());
+        assessmentInfo.put("datasetSize", assessment.getDatasetSize());
+        assessmentInfo.put("categoryCount", assessment.getCategoryCount());
+        assessmentInfo.put("samplesPerCategory", assessment.getSamplesPerCategory());
+        assessmentInfo.put("imageQuality", assessment.getImageQuality());
+        assessmentInfo.put("annotationCompleteness", assessment.getAnnotationCompleteness());
+        assessmentInfo.put("targetSize", assessment.getTargetSize());
+        assessmentInfo.put("backgroundComplexity", assessment.getBackgroundComplexity());
+        assessmentInfo.put("interClassSimilarity", assessment.getInterClassSimilarity());
+        assessmentInfo.put("expectedAccuracy", assessment.getExpectedAccuracy());
+        assessmentInfo.put("trainingResource", assessment.getTrainingResource());
+        assessmentInfo.put("timeBudgetDays", assessment.getTimeBudgetDays());
         report.put("assessmentInfo", assessmentInfo);
 
         List<Map<String, Object>> categoryReports = new java.util.ArrayList<>();
@@ -1304,6 +1337,17 @@ public class FeasibilityAssessmentService {
         requestBody.put("structuredRequirement", assessment.getStructuredRequirement());
         requestBody.put("datasetMatchLevel", assessment.getDatasetMatchLevel() != null ? assessment.getDatasetMatchLevel().name() : null);
         requestBody.put("userJudgmentNotes", assessment.getUserJudgmentNotes());
+        requestBody.put("datasetSize", assessment.getDatasetSize());
+        requestBody.put("categoryCount", assessment.getCategoryCount());
+        requestBody.put("samplesPerCategory", assessment.getSamplesPerCategory());
+        requestBody.put("imageQuality", assessment.getImageQuality());
+        requestBody.put("annotationCompleteness", assessment.getAnnotationCompleteness());
+        requestBody.put("targetSize", assessment.getTargetSize());
+        requestBody.put("backgroundComplexity", assessment.getBackgroundComplexity());
+        requestBody.put("interClassSimilarity", assessment.getInterClassSimilarity());
+        requestBody.put("expectedAccuracy", assessment.getExpectedAccuracy());
+        requestBody.put("trainingResource", assessment.getTrainingResource());
+        requestBody.put("timeBudgetDays", assessment.getTimeBudgetDays());
 
         // Prepare categories data
         List<Map<String, Object>> categoriesData = categories.stream()

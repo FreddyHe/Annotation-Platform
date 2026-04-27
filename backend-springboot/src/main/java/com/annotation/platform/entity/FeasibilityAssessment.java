@@ -36,6 +36,39 @@ public class FeasibilityAssessment {
     @Column(name = "image_urls", columnDefinition = "TEXT")
     private String imageUrls;
 
+    @Column(name = "dataset_size")
+    private Integer datasetSize;
+
+    @Column(name = "category_count")
+    private Integer categoryCount;
+
+    @Column(name = "samples_per_category")
+    private Integer samplesPerCategory;
+
+    @Column(name = "image_quality", length = 50)
+    private String imageQuality;
+
+    @Column(name = "annotation_completeness")
+    private Integer annotationCompleteness;
+
+    @Column(name = "target_size", length = 50)
+    private String targetSize;
+
+    @Column(name = "background_complexity", length = 50)
+    private String backgroundComplexity;
+
+    @Column(name = "inter_class_similarity", length = 50)
+    private String interClassSimilarity;
+
+    @Column(name = "expected_accuracy")
+    private Integer expectedAccuracy;
+
+    @Column(name = "training_resource", length = 100)
+    private String trainingResource;
+
+    @Column(name = "time_budget_days")
+    private Integer timeBudgetDays;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
     @Builder.Default

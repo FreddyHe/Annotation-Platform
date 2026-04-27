@@ -17,6 +17,19 @@ public class CustomModel {
     @Column(nullable = false, length = 200)
     private String modelName;
 
+    @Column
+    private Long projectId;
+
+    @Column(length = 120)
+    private String targetClassName;
+
+    @Column(length = 50)
+    @Builder.Default
+    private String datasetSource = "ROBOFLOW";
+
+    @Column(length = 1000)
+    private String datasetUri;
+
     @Column(length = 500)
     private String modelPath;
 
@@ -34,10 +47,24 @@ public class CustomModel {
 
     private Integer epochs;
     private Integer batchSize;
+    private Integer imageSize;
+    private Double learningRate;
+
+    @Builder.Default
+    private Boolean usePretrained = true;
+
+    @Builder.Default
+    private Double progress = 0.0;
+
     private Double mapScore;
+    private Double precisionScore;
+    private Double recallScore;
 
     @Column(length = 2000)
     private String downloadCommand;
+
+    @Column(columnDefinition = "TEXT")
+    private String trainingLog;
 
     @Column(length = 50)
     private String datasetFormat;

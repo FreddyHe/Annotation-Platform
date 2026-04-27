@@ -18,8 +18,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { feasibilityAPI } from '@/api/feasibility'
 const router = useRouter(); const assessments = ref([]); const loading = ref(false)
-const getStatusType = (status) => ({ CREATED: 'info', PARSING: 'primary', PARSED: 'primary', OVD_TESTING: 'primary', OVD_TESTED: 'primary', EVALUATING: 'warning', EVALUATED: 'warning', ESTIMATING: 'warning', COMPLETED: 'success', FAILED: 'danger' }[status] || 'info')
-const getStatusText = (status) => ({ CREATED: '已创建', PARSING: '解析中', PARSED: '已解析', OVD_TESTING: 'OVD测试中', OVD_TESTED: 'OVD已测试', EVALUATING: '评估中', EVALUATED: '已评估', ESTIMATING: '估算中', COMPLETED: '已完成', FAILED: '失败' }[status] || status)
+const getStatusType = (status) => ({ CREATED: 'info', PARSING: 'primary', PARSED: 'primary', OVD_TESTING: 'primary', OVD_TESTED: 'primary', EVALUATING: 'warning', EVALUATED: 'warning', DATASET_SEARCHED: 'warning', AWAITING_USER_JUDGMENT: 'warning', ESTIMATING: 'warning', COMPLETED: 'success', FAILED: 'danger' }[status] || 'info')
+const getStatusText = (status) => ({ CREATED: '已创建', PARSING: '解析中', PARSED: '已解析', OVD_TESTING: 'OVD测试中', OVD_TESTED: 'OVD已测试', EVALUATING: '评估中', EVALUATED: '已评估', DATASET_SEARCHED: '已检索数据集', AWAITING_USER_JUDGMENT: '已提交判断', ESTIMATING: '估算中', COMPLETED: '已完成', FAILED: '失败' }[status] || status)
 const formatDate = (dateStr) => { if (!dateStr) return '-'; return new Date(dateStr).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }
 const loadAssessments = async () => { loading.value = true; try { const res = await feasibilityAPI.listAssessments(); assessments.value = res.data || [] } catch (error) { console.error('加载评估列表失败:', error) } finally { loading.value = false } }
 const handleCreate = () => { router.push('/feasibility/create') }

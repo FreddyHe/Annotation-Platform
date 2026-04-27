@@ -20,6 +20,68 @@
       <el-step title="实施规划" />
     </el-steps>
 
+    <el-card class="insight-card" v-if="assessment.id">
+      <template #header>
+        <div class="card-header">
+          <span>评估结论与风险提示</span>
+          <el-tag :type="riskLevel.type">{{ riskLevel.text }}</el-tag>
+        </div>
+      </template>
+
+      <div class="insight-layout">
+        <div class="input-profile">
+          <div v-for="item in inputProfile" :key="item.label" class="profile-item">
+            <span>{{ item.label }}</span>
+            <strong>{{ item.value }}</strong>
+          </div>
+        </div>
+
+        <div class="metric-grid">
+          <div v-for="metric in evaluationMetrics" :key="metric.key" class="metric-card">
+            <div class="metric-top">
+              <span>{{ metric.label }}</span>
+              <strong>{{ metric.score }}</strong>
+            </div>
+            <el-progress :percentage="metric.score" :status="metric.status" :stroke-width="8" />
+            <small>{{ metric.note }}</small>
+          </div>
+        </div>
+
+        <el-alert
+          :title="primaryConclusion.title"
+          :description="primaryConclusion.description"
+          :type="primaryConclusion.type"
+          show-icon
+          :closable="false"
+        />
+
+        <div class="advice-grid">
+          <div>
+            <h4>风险提示</h4>
+            <el-empty v-if="riskItems.length === 0" description="暂无显著风险" :image-size="64" />
+            <ul v-else>
+              <li v-for="item in riskItems" :key="item">{{ item }}</li>
+            </ul>
+          </div>
+          <div>
+            <h4>建议输出</h4>
+            <ul>
+              <li v-for="item in recommendationItems" :key="item">{{ item }}</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="next-actions">
+          <el-button type="primary" :disabled="!canEnterTraining" @click="goTrainingWithAssessment">
+            进入单类别训练与检测
+          </el-button>
+          <el-button v-if="assessment.status === 'CREATED'" @click="handleParse" :loading="parsing">
+            开始需求解析
+          </el-button>
+        </div>
+      </div>
+    </el-card>
+
     <!-- Step 1: 需求解析 -->
     <el-card class="step-card" v-if="currentStep >= 0">
       <template #header>
@@ -603,12 +665,13 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, CircleCheck, Warning, InfoFilled } from '@element-plus/icons-vue'
 import { feasibilityAPI } from '@/api/feasibility'
 
 const route = useRoute()
+const router = useRouter()
 const assessmentId = computed(() => route.params.id)
 
 const loading = ref(false)
@@ -667,8 +730,8 @@ const canEstimate = computed(() => assessment.value.status === 'AWAITING_USER_JU
 const canGenPlan = computed(() => {
   // 全桶A时，评估完成后即可生成报告
   if (isAllBucketA.value && assessment.value.status === 'EVALUATED') return true
-  // 非全桶A时，需要完成资源估算后才能生成报告（包括COMPLETED状态）
-  return ['ESTIMATING', 'AWAITING_USER_JUDGMENT', 'COMPLETED'].includes(assessment.value.status)
+  // 非全桶A时，需要完成资源估算后才能生成报告
+  return assessment.value.status === 'COMPLETED'
 })
 
 const roboflowSearchUrl = computed(() => {
@@ -730,6 +793,104 @@ const shouldShowResourceEstimation = computed(() => {
   return currentStep.value >= 3 && ['AWAITING_USER_JUDGMENT', 'ESTIMATING', 'COMPLETED'].includes(assessment.value.status)
 })
 
+const inputProfile = computed(() => [
+  { label: '数据量', value: formatNullableNumber(assessment.value.datasetSize, '张') },
+  { label: '类别数量', value: formatNullableNumber(assessment.value.categoryCount, '类') },
+  { label: '单类样本', value: formatNullableNumber(assessment.value.samplesPerCategory, '张') },
+  { label: '图片质量', value: enumText(assessment.value.imageQuality) },
+  { label: '标注完整度', value: assessment.value.annotationCompleteness != null ? `${assessment.value.annotationCompleteness}%` : '-' },
+  { label: '目标尺寸', value: enumText(assessment.value.targetSize) },
+  { label: '背景复杂度', value: enumText(assessment.value.backgroundComplexity) },
+  { label: '类间相似度', value: enumText(assessment.value.interClassSimilarity) },
+  { label: '预期精度', value: assessment.value.expectedAccuracy != null ? `${assessment.value.expectedAccuracy}%` : '-' },
+  { label: '训练资源', value: resourceText(assessment.value.trainingResource) },
+  { label: '时间预算', value: formatNullableNumber(assessment.value.timeBudgetDays, '天') }
+])
+
+const evaluationMetrics = computed(() => {
+  const dataScore = scoreDataSufficiency()
+  const annotationScore = scoreAnnotationQuality()
+  const detectabilityScore = scoreDetectability()
+  const classScore = scoreClassDifficulty()
+  const resourceScore = scoreResourceFit()
+  const riskScore = Math.round((dataScore + annotationScore + detectabilityScore + classScore + resourceScore) / 5)
+
+  return [
+    metric('data', '数据充分性', dataScore, dataScore >= 70 ? '样本量基本可支撑训练' : '样本量偏少，训练不稳定风险较高'),
+    metric('annotation', '标注质量', annotationScore, annotationScore >= 75 ? '标注质量风险可控' : '需补齐或清洗标注'),
+    metric('detectability', '目标可检测性', detectabilityScore, detectabilityScore >= 70 ? '目标视觉特征较明确' : '目标小或背景干扰较强'),
+    metric('class', '类别区分难度', classScore, classScore >= 70 ? '类别边界相对清晰' : '类间相似度高，需细化标注策略'),
+    metric('resource', '资源匹配度', resourceScore, resourceScore >= 70 ? '资源与时间预算基本匹配' : '资源或周期可能不足'),
+    metric('risk', '综合可行性', riskScore, riskScore >= 75 ? '建议进入验证或训练' : '建议先补数据和降低风险')
+  ]
+})
+
+const riskLevel = computed(() => {
+  const score = evaluationMetrics.value.find(item => item.key === 'risk')?.score || 0
+  if (score >= 80) return { text: '低风险', type: 'success' }
+  if (score >= 60) return { text: '中风险', type: 'warning' }
+  return { text: '高风险', type: 'danger' }
+})
+
+const primaryConclusion = computed(() => {
+  if (isAllBucketA.value && categories.value.length > 0) {
+    return {
+      type: 'success',
+      title: '建议直接进行 OVD 配置与校验',
+      description: '当前类别已被评估为 OVD 可用，可优先生成实施计划并进行小规模人工抽检。'
+    }
+  }
+  if (['CUSTOM_LOW', 'CUSTOM_MEDIUM', 'CUSTOM_HIGH'].some(bucket => categories.value.some(cat => cat.feasibilityBucket === bucket))) {
+    return {
+      type: riskLevel.value.type === 'danger' ? 'warning' : 'success',
+      title: '建议进入定制训练验证',
+      description: '已形成数据集匹配度和资源估算，可将目标类别带入单类别训练与检测模块进行训练闭环。'
+    }
+  }
+  if (riskLevel.value.type === 'danger') {
+    return {
+      type: 'warning',
+      title: '建议先补充数据或清洗标注',
+      description: '当前输入条件存在明显风险，直接训练可能出现过拟合或检测效果不稳定。'
+    }
+  }
+  return {
+    type: 'info',
+    title: '建议先完成评估工作流',
+    description: '完成需求解析、OVD测试和VLM评估后，可得到更可靠的训练策略和资源估算。'
+  }
+})
+
+const riskItems = computed(() => {
+  const items = []
+  if ((assessment.value.samplesPerCategory || 0) < 200) items.push('单类别样本数不足，存在过拟合风险')
+  if ((assessment.value.annotationCompleteness || 0) < 80) items.push('标注完整度不足，训练前需要补齐或质检')
+  if (assessment.value.imageQuality === 'LOW') items.push('图片质量偏低，检测框稳定性可能受影响')
+  if (assessment.value.targetSize === 'SMALL') items.push('目标尺寸较小，建议提高图片尺寸或补充近景样本')
+  if (assessment.value.backgroundComplexity === 'HIGH') items.push('背景复杂度高，需覆盖更多负样本和复杂场景')
+  if (assessment.value.interClassSimilarity === 'HIGH') items.push('类间相似度高，需细化类别定义和标注边界')
+  if ((assessment.value.expectedAccuracy || 0) >= 90 && riskLevel.value.type !== 'success') items.push('预期精度较高，当前数据条件可能难以一次达标')
+  return items
+})
+
+const recommendationItems = computed(() => {
+  const items = []
+  if ((assessment.value.samplesPerCategory || 0) < 500) items.push('优先补充每类样本到 500 张以上，再启动正式训练')
+  if ((assessment.value.annotationCompleteness || 0) < 90) items.push('训练前进行标注抽检，统一漏标、错标和框选标准')
+  if (assessment.value.targetSize === 'SMALL') items.push('训练参数建议使用 960 或 1280 图片尺寸进行验证')
+  if (assessment.value.backgroundComplexity === 'HIGH') items.push('验证集应包含高干扰背景和异常光照场景')
+  if (assessment.value.trainingResource === 'NONE') items.push('当前资源不适合定制训练，可先使用 OVD 或外部训练资源')
+  if (!items.length) items.push('可先做小样本训练验证，再根据误检/漏检补充数据')
+  if (!isAllBucketA.value && ['AWAITING_USER_JUDGMENT', 'ESTIMATING', 'COMPLETED'].includes(assessment.value.status)) {
+    items.push('使用资源估算结果配置训练轮数、图片尺寸和数据补充计划')
+  }
+  return items
+})
+
+const canEnterTraining = computed(() => {
+  return categories.value.some(cat => ['CUSTOM_LOW', 'CUSTOM_MEDIUM', 'CUSTOM_HIGH', 'PENDING'].includes(cat.feasibilityBucket))
+})
+
 const getStatusType = (status) => {
   const typeMap = {
     CREATED: 'info',
@@ -765,6 +926,79 @@ const getStatusText = (status) => {
   }
   return textMap[status] || status
 }
+
+const metric = (key, label, score, note) => ({
+  key,
+  label,
+  score,
+  note,
+  status: score >= 80 ? 'success' : score >= 60 ? undefined : 'exception'
+})
+
+const scoreDataSufficiency = () => {
+  const samples = assessment.value.samplesPerCategory || 0
+  if (samples >= 1000) return 95
+  if (samples >= 500) return 82
+  if (samples >= 200) return 62
+  if (samples > 0) return 40
+  return 25
+}
+
+const scoreAnnotationQuality = () => {
+  let score = assessment.value.annotationCompleteness ?? 60
+  if (assessment.value.imageQuality === 'HIGH') score += 8
+  if (assessment.value.imageQuality === 'LOW') score -= 18
+  return clampScore(score)
+}
+
+const scoreDetectability = () => {
+  let score = 78
+  if (assessment.value.targetSize === 'LARGE') score += 10
+  if (assessment.value.targetSize === 'SMALL') score -= 24
+  if (assessment.value.backgroundComplexity === 'HIGH') score -= 18
+  if (assessment.value.backgroundComplexity === 'LOW') score += 8
+  return clampScore(score)
+}
+
+const scoreClassDifficulty = () => {
+  let score = 82
+  if (assessment.value.interClassSimilarity === 'HIGH') score -= 28
+  if (assessment.value.interClassSimilarity === 'LOW') score += 8
+  if ((assessment.value.categoryCount || 1) > 20) score -= 12
+  return clampScore(score)
+}
+
+const scoreResourceFit = () => {
+  let score = 70
+  if (assessment.value.trainingResource === 'MULTI_GPU') score += 18
+  if (assessment.value.trainingResource === 'SINGLE_PRO_GPU') score += 10
+  if (assessment.value.trainingResource === 'NONE') score -= 28
+  if ((assessment.value.timeBudgetDays || 0) < 14) score -= 18
+  if ((assessment.value.expectedAccuracy || 0) >= 90) score -= 8
+  return clampScore(score)
+}
+
+const clampScore = (score) => Math.max(0, Math.min(100, Math.round(score)))
+
+const formatNullableNumber = (value, suffix) => {
+  if (value === null || value === undefined) return '-'
+  return `${value}${suffix}`
+}
+
+const enumText = (value) => ({
+  HIGH: '高',
+  MEDIUM: '中',
+  LOW: '低',
+  LARGE: '大',
+  SMALL: '小'
+}[value] || value || '-')
+
+const resourceText = (value) => ({
+  NONE: '无 GPU / 仅评估',
+  SINGLE_CONSUMER_GPU: '单卡消费级 GPU',
+  SINGLE_PRO_GPU: '单卡专业 GPU',
+  MULTI_GPU: '多卡 GPU'
+}[value] || value || '-')
 
 const formatDate = (dateStr) => {
   if (!dateStr) return '-'
@@ -1094,6 +1328,18 @@ const handleExportReport = () => {
   ElMessage.success('导出成功')
 }
 
+const goTrainingWithAssessment = () => {
+  const target = categories.value.find(cat => cat.feasibilityBucket !== 'OVD_AVAILABLE') || categories.value[0]
+  router.push({
+    path: '/model-training',
+    query: {
+      tab: 'train',
+      targetClassName: target?.categoryNameEn || target?.categoryName || '',
+      assessmentId: assessmentId.value
+    }
+  })
+}
+
 onMounted(async () => {
   await loadAssessment()
   
@@ -1154,7 +1400,104 @@ onMounted(async () => {
   margin-bottom: 20px;
 }
 
+.insight-card {
+  margin-bottom: 20px;
+}
+
+.insight-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.input-profile {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.profile-item {
+  padding: 12px;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-md);
+  background: var(--gray-50);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.profile-item span,
+.metric-card small {
+  font-size: 12px;
+  color: var(--gray-500);
+}
+
+.profile-item strong {
+  color: var(--gray-900);
+  font-size: 14px;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+}
+
+.metric-card {
+  padding: 12px;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-md);
+  background: #fff;
+}
+
+.metric-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.metric-top span {
+  color: var(--gray-700);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.metric-top strong {
+  color: var(--gray-900);
+  font-size: 20px;
+}
+
+.advice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.advice-grid h4 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: var(--gray-800);
+}
+
+.advice-grid ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--gray-700);
+  line-height: 1.8;
+}
+
+.next-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
 .card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   font-size: 18px;
   font-weight: 500;
 }
@@ -1469,5 +1812,16 @@ onMounted(async () => {
   background-color: #f9f9f9;
   border-left: 4px solid #409eff;
   color: #666;
+}
+
+@media (max-width: 860px) {
+  .advice-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .next-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
 }
 </style>

@@ -18,6 +18,11 @@
 
 ## 问题记录
 
+### 2026-04-29: 文档清理与下一轮开发计划归档
+- **根因**: 根目录长期积累了多份阶段性开发计划、调试转储和临时思考文档，容易让后续 Agent 误读旧计划；`.context/CONVENTIONS.md` 中远端仓库和默认分支信息也与当前 Git 状态不一致。
+- **修复**: 删除旧的阶段性文档与 `project_dump.txt`，保留 `incremental_multiclass_closed_loop_proposal.md` 作为下一轮开发入口；新增 `.context/NEXT_DEVELOPMENT_PLAN.md`，并更新 `CLAUDE.md` 的上下文索引、`.context/CONVENTIONS.md` 的 Git 信息和单类别 AutoML 约定、`.context/ARCHITECTURE.md` 的单类别 AutoML 接口说明。
+- **教训**: 阶段性文档完成后要么归档到 `.context`，要么删除，不能长期散落在根目录；提交前必须核对真实 `git remote -v`、当前分支和 worktree 状态，不能沿用过期约定。
+
 ### 2026-04-25: 数据飞轮增量批次与边端模式语义偏差
 - **根因**: LOW_B 同步逻辑有数据就立即创建/追加增量 Label Studio 项目，和“攒满批次再建待审项目”的业务规则不一致；训练预览没有先补偿同步 HIGH/LOW_A，导致主项目可训练 prediction 可能为空；边端推理只有回流采集模式，缺少纯推理不入库/不回传路径；`inference_data_points` 未记录所属增量子项目。
 - **修复**: LOW_B 改为仅在未同步数据足以补满/创建完整批次时写入增量项目；训练预览和训练启动前先同步未入 LS 的 HIGH/LOW_A，并刷新增量项目审核状态；新增 `ls_sub_project_id` 字段；边端推理新增 `PURE_INFERENCE` 模式，只走临时文件和算法推理，不写数据池、不触发 VLM/LS 同步。

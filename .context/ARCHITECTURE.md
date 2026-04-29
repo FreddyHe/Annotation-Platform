@@ -337,13 +337,36 @@ Spring Boot 接口（全部需JWT认证）：
 - 流程：`EVALUATED` → 点击"资源估算" → `DATASET_SEARCHED` → 用户判断 → `AWAITING_USER_JUDGMENT` → 资源估算 → `COMPLETED`
 - 特点：执行数据集检索，等待用户判断数据集匹配度后再进行资源估算
 
-## 单类别模型训练（阶段6，2026-03-24新增）
+## 单类别 AutoML 训练与检测（2026-04-29更新）
 
 Spring Boot 自定义模型训练接口（需JWT认证）：
-- `POST /api/v1/custom-models/train` - 创建训练任务（从Roboflow下载数据集并训练）
+- `POST /api/v1/custom-models/train` - 创建 AutoML 训练任务
+- `POST /api/v1/custom-models/inspect-dataset` - 预检训练数据集并读取格式、类别、图片数、标签数、split 与 warning
 - `GET  /api/v1/custom-models` - 获取当前用户所有训练任务
 - `GET  /api/v1/custom-models/{id}/status` - 获取训练状态（触发后端同步算法服务最新状态）
 - `GET  /api/v1/custom-models/available` - 获取所有已完成的自定义模型（供检测页面使用）
+- `GET  /api/v1/custom-models/{id}/logs` - 获取训练日志
+- `POST /api/v1/custom-models/{id}/retry` - 重试训练任务
+- `DELETE /api/v1/custom-models/{id}` - 删除模型与类别映射
+- `POST /api/v1/upload/training-dataset` - 上传训练 ZIP 数据集
+- `GET  /api/v1/detection/single-class/history` - 查询单类别检测历史
+- `DELETE /api/v1/detection/single-class/history` - 清空单类别检测历史
+
+算法服务训练接口：
+- `POST /api/v1/training/inspect-dataset` - 下载/解压/读取数据集，不启动训练
+- `POST /api/v1/training/start` - 异步提交训练流水线，支持 `automl=true`
+- `GET  /api/v1/training/status/{taskId}` - 查询训练状态
+
+支持数据来源：
+- `ROBOFLOW`：Roboflow 下载命令、URL 或 SDK 片段
+- `URL_ZIP`：公开 HTTP/HTTPS ZIP
+- `UPLOAD_ZIP`：用户上传 ZIP
+
+训练配置原则：
+- 前端不暴露关联项目、目标类别、模型名称、epochs、batch、imageSize、学习率等手工输入
+- 类别、模型名和目标类别由数据集预检结果自动生成
+- AutoML 策略根据图片数、类别数和是否有验证集选择 epochs、batch、imageSize、learningRate
+- 服务端不再向用户暴露 `LOCAL_PATH` 数据来源
 
 训练任务状态流转：
 ```
@@ -352,8 +375,8 @@ PENDING → DOWNLOADING → CONVERTING → TRAINING → COMPLETED
 ```
 
 前端页面：
-- `/model-training` - 单类别模型训练页面（新建任务 + 任务列表）
-- `/single-class-detection` - 单类别检测页面（已改造支持多模型选择）
+- `/model-training` - 单类别训练与检测统一页面（训练配置、训练任务、模型库、检测）
+- `/single-class-detection` - 兼容旧路径，仍指向统一页面
   - 支持内置VisDrone模型（10类）
   - 支持用户自定义训练模型
   - 通过 `?modelId=X` 参数可自动选中指定模型

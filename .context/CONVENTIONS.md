@@ -4,9 +4,9 @@
 
 ### 仓库信息
 
-- **远程仓库**: `gitee.com:freddywards/annotation-platform.git`
+- **远程仓库**: `git@github.com:FreddyHe/Annotation-Platform.git`
 - **本地路径**: `/root/autodl-fs/Annotation-Platform/`
-- **默认分支**: `master`
+- **默认分支**: `main`
 
 ### 提交格式
 
@@ -35,7 +35,7 @@
 cd /root/autodl-fs/Annotation-Platform
 git add .
 git commit -m "<type>: <描述>"
-git push origin master
+git push origin main
 ```
 
 ## 代码风格
@@ -175,11 +175,11 @@ const stepMap = {
 - 估算按钮：仅在 `EVALUATED` 时可用
 - 生成计划按钮：在 `EVALUATED` 或 `ESTIMATING` 时可用
 
-## 单类别模型训练模块约定（2026-03-24新增）
+## 单类别 AutoML 训练与检测模块约定（2026-04-29更新）
 
 ### API 封装规范
 
-- 模块API文件：`src/api/customModel.js`
+- 模块 API 文件：`src/api/customModel.js`
 - 导出函数形式（不使用对象包装）：
   ```javascript
   export function createTrainingTask(data) { ... }
@@ -188,14 +188,12 @@ const stepMap = {
 
 ### 页面组件规范
 
-- **ModelTraining.vue**: 左右分栏布局（el-row + el-col）
-  - 左栏（span=10）：新建训练任务表单
-  - 右栏（span=14）：训练任务列表表格 + 选中行详情
-- **SingleClassDetection.vue**: 改造为支持多模型
-  - 新增"检测模型"下拉框（分组显示：内置模型 + 自定义训练模型）
-  - 原"模型选择"改名为"检测类别"
-  - 使用 `computed` 动态计算当前模型的类别列表和模型路径
-  - 使用 `watch` 监听模型切换，自动选中第一个类别
+- **SingleClassWorkflow.vue**: 统一承载“训练配置 / 训练任务 / 模型库 / 单类别检测”
+  - `/model-training` 与旧 `/single-class-detection` 都指向该页面
+  - 训练配置页只让用户选择数据来源并提供 Roboflow 命令、公开 URL ZIP 或上传 ZIP
+  - 不让用户手填关联项目、目标类别、模型名称或训练参数
+  - 系统预检数据集后自动读取类别、图片数、标签数，并用 AutoML 策略生成训练参数
+  - 删除“服务器本地路径”作为用户可选数据来源，避免暴露服务端文件系统
 
 ### 状态轮询规范
 
@@ -209,7 +207,7 @@ const stepMap = {
 
 - 训练完成后点击"去检测"按钮跳转：
   ```javascript
-  router.push({ path: '/single-class-detection', query: { modelId: model.id } })
+  router.push({ path: '/model-training', query: { tab: 'detect', modelId: model.id } })
   ```
 - 检测页面根据 `route.query.modelId` 自动选中对应模型：
   ```javascript

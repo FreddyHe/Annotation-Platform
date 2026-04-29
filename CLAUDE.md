@@ -36,6 +36,7 @@
 | `.context/SETUP.md` | 服务启动命令、状态检查、LS 数据库查询 | 需要启动/重启服务时 |
 | `.context/LESSONS.md` | 已解决问题摘要、踩坑记录 | 改代码前必读 |
 | `.context/CONVENTIONS.md` | Git 提交规范、代码风格 | 提交代码前必读 |
+| `.context/NEXT_DEVELOPMENT_PLAN.md` | 下一轮开发计划入口与主题摘要 | 规划下一轮功能时 |
 
 
 ## 维护规则

@@ -4,12 +4,14 @@ import com.annotation.platform.common.Result;
 import com.annotation.platform.dto.request.AutoAnnotationStartRequest;
 import com.annotation.platform.entity.AutoAnnotationJob;
 import com.annotation.platform.entity.Project;
-import com.annotation.platform.repository.ProjectRepository;
+import com.annotation.platform.service.ProjectAccessService;
 import com.annotation.platform.service.algorithm.AutoAnnotationService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -21,7 +23,7 @@ import java.util.Map;
 public class AutoAnnotationController {
 
     private final AutoAnnotationService autoAnnotationService;
-    private final ProjectRepository projectRepository;
+    private final ProjectAccessService projectAccessService;
 
     /**
      * 启动自动标注流程
@@ -45,10 +47,11 @@ public class AutoAnnotationController {
 
         log.info("Received request to start auto annotation: projectId={}, processRange={}, mode={}",
                 projectId, startRequest.getProcessRange(), startRequest.getMode());
-        
+
+        projectAccessService.requireProjectAccess(projectId, httpRequest);
+        Long userId = projectAccessService.currentUserId(httpRequest);
+
         try {
-            Long userId = (Long) httpRequest.getAttribute("userId");
-            
             AutoAnnotationJob job = autoAnnotationService.createJob(projectId, userId, startRequest);
             autoAnnotationService.startAutoAnnotationJob(job.getId());
             
@@ -59,6 +62,8 @@ public class AutoAnnotationController {
             
             return Result.success(response);
             
+        } catch (org.springframework.security.access.AccessDeniedException | com.annotation.platform.exception.ResourceNotFoundException e) {
+            throw e;
         } catch (Exception e) {
             log.error("Failed to start auto annotation: {}", e.getMessage(), e);
             return Result.error("Failed to start auto annotation: " + e.getMessage());
@@ -69,20 +74,19 @@ public class AutoAnnotationController {
      * 查询自动标注任务状态
      */
     @GetMapping("/status/{taskId}")
-    public Result<Map<String, Object>> getTaskStatus(@PathVariable String taskId) {
+    public Result<Map<String, Object>> getTaskStatus(@PathVariable String taskId, HttpServletRequest httpRequest) {
         log.info("Querying task status: taskId={}", taskId);
         
         try {
             if (taskId.startsWith("job-")) {
                 Long jobId = Long.parseLong(taskId.replace("job-", ""));
+                projectAccessService.requireAutoAnnotationJobInCurrentOrg(jobId, httpRequest);
                 return Result.success(autoAnnotationService.getJobStatus(jobId));
             }
 
             // 从 taskId 中提取 projectId (格式: project-{projectId})
             Long projectId = Long.parseLong(taskId.replace("project-", ""));
-            
-            Project project = projectRepository.findById(projectId)
-                    .orElseThrow(() -> new RuntimeException("Project not found: " + projectId));
+            Project project = projectAccessService.requireProjectInCurrentOrg(projectId, httpRequest);
             
             Map<String, Object> statusData = new HashMap<>();
             statusData.put("taskId", taskId);
@@ -113,6 +117,8 @@ public class AutoAnnotationController {
             
             return Result.success(statusData);
             
+        } catch (org.springframework.security.access.AccessDeniedException | com.annotation.platform.exception.ResourceNotFoundException e) {
+            throw e;
         } catch (Exception e) {
             log.error("Failed to get task status: {}", e.getMessage(), e);
             return Result.error("Failed to get task status: " + e.getMessage());
@@ -123,32 +129,35 @@ public class AutoAnnotationController {
      * 获取自动标注任务结果
      */
     @GetMapping("/results/{taskId}")
-    public Result<Object> getTaskResults(@PathVariable String taskId) {
+    public Result<Object> getTaskResults(@PathVariable String taskId, HttpServletRequest httpRequest) {
         log.info("Querying task results: taskId={}", taskId);
         
-        try {
-            // 这里应该调用 AlgorithmService 的 getTaskResults 方法
-            return Result.success("Task results query not implemented yet");
-            
-        } catch (Exception e) {
-            log.error("Failed to get task results: {}", e.getMessage(), e);
-            return Result.error("Failed to get task results: " + e.getMessage());
+        if (taskId.startsWith("job-")) {
+            Long jobId = Long.parseLong(taskId.replace("job-", ""));
+            projectAccessService.requireAutoAnnotationJobInCurrentOrg(jobId, httpRequest);
+        } else {
+            Long projectId = Long.parseLong(taskId.replace("project-", ""));
+            projectAccessService.requireProjectAccess(projectId, httpRequest);
         }
+        throw new ResponseStatusException(HttpStatus.NOT_IMPLEMENTED, "自动标注结果查询接口尚未实现，请使用项目图片列表或导出功能查看结果");
     }
 
     @GetMapping("/jobs/{jobId}")
-    public Result<Map<String, Object>> getJob(@PathVariable Long jobId) {
+    public Result<Map<String, Object>> getJob(@PathVariable Long jobId, HttpServletRequest httpRequest) {
+        projectAccessService.requireAutoAnnotationJobInCurrentOrg(jobId, httpRequest);
         return Result.success(autoAnnotationService.getJobStatus(jobId));
     }
 
     @GetMapping("/projects/{projectId}/jobs/latest")
-    public Result<Map<String, Object>> getLatestProjectJob(@PathVariable Long projectId) {
+    public Result<Map<String, Object>> getLatestProjectJob(@PathVariable Long projectId, HttpServletRequest httpRequest) {
+        projectAccessService.requireProjectAccess(projectId, httpRequest);
         Map<String, Object> status = autoAnnotationService.getLatestJobStatus(projectId);
         return Result.success(status);
     }
 
     @PostMapping("/jobs/{jobId}/cancel")
-    public Result<Map<String, Object>> cancelJob(@PathVariable Long jobId) {
+    public Result<Map<String, Object>> cancelJob(@PathVariable Long jobId, HttpServletRequest httpRequest) {
+        projectAccessService.requireAutoAnnotationJobInCurrentOrg(jobId, httpRequest);
         return Result.success(autoAnnotationService.cancelJob(jobId));
     }
 }

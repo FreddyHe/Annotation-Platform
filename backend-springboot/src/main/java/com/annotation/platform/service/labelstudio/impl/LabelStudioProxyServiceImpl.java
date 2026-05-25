@@ -265,12 +265,9 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
                 lsToken = adminToken;
             }
 
-            // 关键日志：检查项目标签列表
             List<String> projectLabels = project.getLabels();
-            log.info("[DEBUG] syncProjectToLS - project.getLabels() 返回值: {}", projectLabels);
             
             String labelConfig = generateLabelConfig(projectLabels);
-            log.info("[DEBUG] syncProjectToLS - 生成的 label_config XML:\n{}", labelConfig);
 
             if (organization.getLsOrgId() != null && createdBy != null && createdBy.getLsUserId() != null) {
                 updateUserActiveOrganizationInLSDB(createdBy.getLsUserId(), organization.getLsOrgId());
@@ -288,7 +285,6 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
             projectData.put("description", "Project from Annotation Platform");
             projectData.put("label_config", labelConfig);
             
-            log.info("[DEBUG] syncProjectToLS - 发送到 Label Studio 的完整 projectData: {}", JSON.toJSONString(projectData));
             if (organization.getLsOrgId() != null) {
                 projectData.put("organization", organization.getLsOrgId());
             }
@@ -406,8 +402,7 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
             }
 
             String labelConfig = generateLabelConfig(labels);
-            log.info("[DEBUG] updateProjectLabelConfig - lsProjectId={}, 新标签列表: {}", lsProjectId, labels);
-            log.info("[DEBUG] updateProjectLabelConfig - 生成的新 label_config:\n{}", labelConfig);
+            log.info("更新 Label Studio 项目 label_config: lsProjectId={}, labelCount={}", lsProjectId, labels != null ? labels.size() : 0);
 
             String url = String.format("%s/api/projects/%d", labelStudioUrl, lsProjectId);
             HttpHeaders headers = new HttpHeaders();
@@ -957,10 +952,8 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
     }
 
     private String generateLabelConfig(List<String> labels) {
-        log.info("[DEBUG] generateLabelConfig - 输入 labels: {}", labels);
-        
         if (labels == null || labels.isEmpty()) {
-            log.warn("[DEBUG] generateLabelConfig - labels 为空，返回空配置");
+            log.warn("generateLabelConfig labels 为空，返回空配置");
             return "<View></View>";
         }
 
@@ -976,17 +969,25 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
 
         for (int i = 0; i < labels.size(); i++) {
             String color = colors[i % colors.length];
-            String labelValue = labels.get(i);
-            log.info("[DEBUG] generateLabelConfig - 添加标签: value={}, color={}", labelValue, color);
+            String labelValue = escapeXmlAttribute(labels.get(i));
             sb.append("    <Label value=\"").append(labelValue).append("\" background=\"").append(color).append("\"/>\n");
         }
 
         sb.append("  </RectangleLabels>\n");
         sb.append("</View>");
-        
-        String result = sb.toString();
-        log.info("[DEBUG] generateLabelConfig - 生成的完整 XML:\n{}", result);
-        return result;
+        return sb.toString();
+    }
+
+    private String escapeXmlAttribute(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replace("&", "&amp;")
+                .replace("\"", "&quot;")
+                .replace("'", "&apos;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;");
     }
 
     private void updateOrganizationCreatedByInLSDB(Long lsOrgId, Long lsUserId) {

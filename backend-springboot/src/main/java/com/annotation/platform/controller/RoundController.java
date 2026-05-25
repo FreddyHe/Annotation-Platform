@@ -9,7 +9,7 @@ import com.annotation.platform.entity.Project;
 import com.annotation.platform.entity.User;
 import com.annotation.platform.repository.InferenceDataPointRepository;
 import com.annotation.platform.repository.ModelTrainingRecordRepository;
-import com.annotation.platform.repository.ProjectRepository;
+import com.annotation.platform.service.ProjectAccessService;
 import com.annotation.platform.service.RoundService;
 import com.annotation.platform.service.TrainingService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -33,28 +33,32 @@ public class RoundController {
     private final com.annotation.platform.service.FormatConverterService formatConverterService;
     private final ModelTrainingRecordRepository trainingRecordRepository;
     private final InferenceDataPointRepository inferenceDataPointRepository;
-    private final ProjectRepository projectRepository;
+    private final ProjectAccessService projectAccessService;
 
     @GetMapping
-    public Result<List<Map<String, Object>>> listRounds(@PathVariable Long projectId) {
+    public Result<List<Map<String, Object>>> listRounds(@PathVariable Long projectId, HttpServletRequest httpRequest) {
+        projectAccessService.requireProjectAccess(projectId, httpRequest);
         return Result.success(roundService.listRounds(projectId).stream()
                 .map(roundService::toResponse)
                 .collect(Collectors.toList()));
     }
 
     @GetMapping("/current")
-    public Result<Map<String, Object>> currentRound(@PathVariable Long projectId) {
+    public Result<Map<String, Object>> currentRound(@PathVariable Long projectId, HttpServletRequest httpRequest) {
+        projectAccessService.requireProjectAccess(projectId, httpRequest);
         return Result.success(roundService.toResponse(roundService.currentRound(projectId)));
     }
 
     @PostMapping("/close-current")
-    public Result<Map<String, Object>> closeCurrentRound(@PathVariable Long projectId) {
+    public Result<Map<String, Object>> closeCurrentRound(@PathVariable Long projectId, HttpServletRequest httpRequest) {
+        projectAccessService.requireProjectAccess(projectId, httpRequest);
         IterationRound next = roundService.closeCurrentRound(projectId);
         return Result.success(roundService.toResponse(next));
     }
 
     @GetMapping("/{roundId}/training-preview")
-    public Result<Map<String, Object>> trainingPreview(@PathVariable Long projectId, @PathVariable Long roundId) {
+    public Result<Map<String, Object>> trainingPreview(@PathVariable Long projectId, @PathVariable Long roundId, HttpServletRequest httpRequest) {
+        projectAccessService.requireProjectAccess(projectId, httpRequest);
         return Result.success(roundService.trainingPreview(projectId, roundId));
     }
 
@@ -67,6 +71,7 @@ public class RoundController {
             HttpServletRequest httpRequest
     ) {
         try {
+            projectAccessService.requireProjectAccess(projectId, httpRequest);
             if (request == null) {
                 request = new TrainingStartRequest();
             }
@@ -111,6 +116,8 @@ public class RoundController {
                     "totalImages", dataset.getTrainImages() + dataset.getValImages(),
                     "totalAnnotations", dataset.getTotalAnnotations()
             ));
+        } catch (org.springframework.security.access.AccessDeniedException | com.annotation.platform.exception.ResourceNotFoundException e) {
+            throw e;
         } catch (Exception e) {
             log.error("Failed to trigger retrain", e);
             return Result.error("500", "Failed to trigger retrain: " + e.getMessage());

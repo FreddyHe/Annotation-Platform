@@ -19,7 +19,11 @@ public interface AnnotationTaskRepository extends JpaRepository<AnnotationTask, 
 
     Page<AnnotationTask> findByProjectId(Long projectId, Pageable pageable);
 
+    Page<AnnotationTask> findByProjectOrganizationId(Long organizationId, Pageable pageable);
+
     List<AnnotationTask> findByProjectIdOrderByStartedAtDesc(Long projectId);
+
+    List<AnnotationTask> findByProjectOrganizationIdOrderByStartedAtDesc(Long organizationId);
 
     Page<AnnotationTask> findByProjectIdAndStatus(Long projectId, AnnotationTask.TaskStatus status, Pageable pageable);
 

@@ -1,6 +1,6 @@
 <template>
   <div class="data-manager">
-    <p class="section-desc">上传、浏览和抽取项目图片数据</p>
+    <p class="section-desc">上传和浏览项目图片数据</p>
 
     <div class="stat-grid">
       <el-card shadow="never" class="mini-stat">
@@ -27,7 +27,7 @@
       <el-tab-pane label="图片列表" name="images">
         <ImageList :project-id="project.id" />
       </el-tab-pane>
-      <el-tab-pane label="视频抽帧" name="video">
+      <el-tab-pane v-if="enableVideoExtract" label="视频抽帧" name="video">
         <VideoExtract :project-id="project.id" @extracted="handleExtracted" />
       </el-tab-pane>
     </el-tabs>
@@ -44,6 +44,7 @@ import VideoExtract from '@/components/VideoExtract.vue'
 const props = defineProps({ project: { type: Object, required: true } })
 const emit = defineEmits(['refresh'])
 const activeTab = ref((props.project?.totalImages || 0) > 0 ? 'images' : 'upload')
+const enableVideoExtract = false
 const stats = ref({ totalImages: 0, processedImages: 0 })
 
 const loadStats = async () => {

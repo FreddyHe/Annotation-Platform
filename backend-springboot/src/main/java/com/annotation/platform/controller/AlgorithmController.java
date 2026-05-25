@@ -7,6 +7,7 @@ import com.annotation.platform.dto.request.algorithm.RunYoloDetectionRequest;
 import com.annotation.platform.dto.response.algorithm.TaskStatusResponse;
 import com.annotation.platform.entity.AnnotationTask;
 import com.annotation.platform.repository.AnnotationTaskRepository;
+import com.annotation.platform.service.ProjectAccessService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +30,7 @@ import java.util.stream.Collectors;
 public class AlgorithmController {
 
     private final AnnotationTaskRepository annotationTaskRepository;
+    private final ProjectAccessService projectAccessService;
 
     @GetMapping("/tasks")
     public Result<Map<String, Object>> getTasks(
@@ -36,7 +38,8 @@ public class AlgorithmController {
             @RequestParam(required = false) String taskType,
             @RequestParam(required = false) String status,
             @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size,
+            HttpServletRequest httpRequest) {
 
         log.info("查询任务列表: projectId={}, taskType={}, status={}, page={}, size={}", 
                 projectId, taskType, status, page, size);
@@ -45,6 +48,7 @@ public class AlgorithmController {
         
         Page<AnnotationTask> taskPage;
         if (projectId != null) {
+            projectAccessService.requireProjectAccess(projectId, httpRequest);
             if (taskType != null && !taskType.isEmpty() && status != null && !status.isEmpty()) {
                 taskPage = annotationTaskRepository.findByProjectIdAndStatus(
                     projectId, 
@@ -73,7 +77,18 @@ public class AlgorithmController {
                 taskPage = annotationTaskRepository.findByProjectId(projectId, pageable);
             }
         } else {
-            taskPage = annotationTaskRepository.findAll(pageable);
+            Long organizationId = projectAccessService.currentOrganizationId(httpRequest);
+            List<AnnotationTask> tasks = annotationTaskRepository.findByProjectOrganizationIdOrderByStartedAtDesc(organizationId);
+            if (taskType != null && !taskType.isEmpty()) {
+                tasks = tasks.stream().filter(t -> t.getType().name().equals(taskType)).collect(Collectors.toList());
+            }
+            if (status != null && !status.isEmpty()) {
+                tasks = tasks.stream().filter(t -> t.getStatus().name().equals(status)).collect(Collectors.toList());
+            }
+            int start = Math.max(0, (page - 1) * size);
+            int end = Math.min(tasks.size(), start + size);
+            List<AnnotationTask> content = start >= tasks.size() ? List.of() : tasks.subList(start, end);
+            taskPage = new org.springframework.data.domain.PageImpl<>(content, pageable, tasks.size());
         }
 
         Map<String, Object> response = new HashMap<>();
@@ -109,6 +124,7 @@ public class AlgorithmController {
             HttpServletRequest httpRequest) {
 
         Long userId = (Long) httpRequest.getAttribute("userId");
+        projectAccessService.requireProjectAccess(request.getProjectId(), httpRequest);
         log.info("运行 DINO 检测: userId={}, projectId={}, labels={}", userId, request.getProjectId(), request.getLabels());
 
         TaskStatusResponse response = TaskStatusResponse.builder()
@@ -137,6 +153,7 @@ public class AlgorithmController {
             HttpServletRequest httpRequest) {
 
         Long userId = (Long) httpRequest.getAttribute("userId");
+        projectAccessService.requireProjectAccess(request.getProjectId(), httpRequest);
         log.info("运行 VLM 清洗: userId={}, projectId={}, model={}", userId, request.getProjectId(), request.getModel());
 
         TaskStatusResponse response = TaskStatusResponse.builder()
@@ -165,6 +182,7 @@ public class AlgorithmController {
             HttpServletRequest httpRequest) {
 
         Long userId = (Long) httpRequest.getAttribute("userId");
+        projectAccessService.requireProjectAccess(request.getProjectId(), httpRequest);
         log.info("运行 YOLO 检测: userId={}, projectId={}, labels={}", userId, request.getProjectId(), request.getLabels());
 
         TaskStatusResponse response = TaskStatusResponse.builder()
@@ -189,8 +207,9 @@ public class AlgorithmController {
     }
 
     @GetMapping("/yolo/status/{taskId}")
-    public Result<TaskStatusResponse> getYoloTaskStatus(@PathVariable Long taskId) {
+    public Result<TaskStatusResponse> getYoloTaskStatus(@PathVariable Long taskId, HttpServletRequest httpRequest) {
         log.info("查询 YOLO 任务状态: taskId={}", taskId);
+        requireTaskAccess(taskId, httpRequest);
 
         TaskStatusResponse response = TaskStatusResponse.builder()
                 .id(taskId)
@@ -207,8 +226,9 @@ public class AlgorithmController {
     }
 
     @GetMapping("/yolo/results/{taskId}")
-    public Result<Map<String, Object>> getYoloTaskResults(@PathVariable Long taskId) {
+    public Result<Map<String, Object>> getYoloTaskResults(@PathVariable Long taskId, HttpServletRequest httpRequest) {
         log.info("获取 YOLO 任务结果: taskId={}", taskId);
+        requireTaskAccess(taskId, httpRequest);
 
         Map<String, Object> results = new HashMap<>();
         results.put("taskId", taskId);
@@ -219,14 +239,16 @@ public class AlgorithmController {
     }
 
     @PostMapping("/yolo/cancel/{taskId}")
-    public Result<Void> cancelYoloTask(@PathVariable Long taskId) {
+    public Result<Void> cancelYoloTask(@PathVariable Long taskId, HttpServletRequest httpRequest) {
         log.info("取消 YOLO 任务: taskId={}", taskId);
+        requireTaskAccess(taskId, httpRequest);
         return Result.success();
     }
 
     @GetMapping("/dino/status/{taskId}")
-    public Result<TaskStatusResponse> getDinoTaskStatus(@PathVariable Long taskId) {
+    public Result<TaskStatusResponse> getDinoTaskStatus(@PathVariable Long taskId, HttpServletRequest httpRequest) {
         log.info("查询 DINO 任务状态: taskId={}", taskId);
+        requireTaskAccess(taskId, httpRequest);
 
         TaskStatusResponse response = TaskStatusResponse.builder()
                 .id(taskId)
@@ -243,8 +265,9 @@ public class AlgorithmController {
     }
 
     @GetMapping("/dino/results/{taskId}")
-    public Result<Map<String, Object>> getDinoTaskResults(@PathVariable Long taskId) {
+    public Result<Map<String, Object>> getDinoTaskResults(@PathVariable Long taskId, HttpServletRequest httpRequest) {
         log.info("获取 DINO 任务结果: taskId={}", taskId);
+        requireTaskAccess(taskId, httpRequest);
 
         Map<String, Object> results = new HashMap<>();
         results.put("taskId", taskId);
@@ -255,14 +278,16 @@ public class AlgorithmController {
     }
 
     @PostMapping("/dino/cancel/{taskId}")
-    public Result<Void> cancelDinoTask(@PathVariable Long taskId) {
+    public Result<Void> cancelDinoTask(@PathVariable Long taskId, HttpServletRequest httpRequest) {
         log.info("取消 DINO 任务: taskId={}", taskId);
+        requireTaskAccess(taskId, httpRequest);
         return Result.success();
     }
 
     @GetMapping("/vlm/status/{taskId}")
-    public Result<TaskStatusResponse> getVlmTaskStatus(@PathVariable Long taskId) {
+    public Result<TaskStatusResponse> getVlmTaskStatus(@PathVariable Long taskId, HttpServletRequest httpRequest) {
         log.info("查询 VLM 任务状态: taskId={}", taskId);
+        requireTaskAccess(taskId, httpRequest);
 
         TaskStatusResponse response = TaskStatusResponse.builder()
                 .id(taskId)
@@ -279,8 +304,9 @@ public class AlgorithmController {
     }
 
     @GetMapping("/vlm/results/{taskId}")
-    public Result<Map<String, Object>> getVlmTaskResults(@PathVariable Long taskId) {
+    public Result<Map<String, Object>> getVlmTaskResults(@PathVariable Long taskId, HttpServletRequest httpRequest) {
         log.info("获取 VLM 任务结果: taskId={}", taskId);
+        requireTaskAccess(taskId, httpRequest);
 
         Map<String, Object> results = new HashMap<>();
         results.put("taskId", taskId);
@@ -291,8 +317,19 @@ public class AlgorithmController {
     }
 
     @PostMapping("/vlm/cancel/{taskId}")
-    public Result<Void> cancelVlmTask(@PathVariable Long taskId) {
+    public Result<Void> cancelVlmTask(@PathVariable Long taskId, HttpServletRequest httpRequest) {
         log.info("取消 VLM 任务: taskId={}", taskId);
+        requireTaskAccess(taskId, httpRequest);
         return Result.success();
+    }
+
+    private AnnotationTask requireTaskAccess(Long taskId, HttpServletRequest httpRequest) {
+        AnnotationTask task = annotationTaskRepository.findById(taskId)
+                .orElseThrow(() -> new com.annotation.platform.exception.ResourceNotFoundException("AnnotationTask", "id", taskId));
+        if (task.getProject() == null || task.getProject().getId() == null) {
+            throw new com.annotation.platform.exception.ResourceNotFoundException("Project", "taskId", taskId);
+        }
+        projectAccessService.requireProjectAccess(task.getProject().getId(), httpRequest);
+        return task;
     }
 }

@@ -1,0 +1,40 @@
+export const PROJECT_STATUS = {
+  DRAFT: 'DRAFT',
+  UPLOADING: 'UPLOADING',
+  DETECTING: 'DETECTING',
+  CLEANING: 'CLEANING',
+  SYNCING: 'SYNCING',
+  COMPLETED: 'COMPLETED',
+  FAILED: 'FAILED'
+}
+
+export const PROJECT_PROCESSING_STATUSES = [
+  PROJECT_STATUS.UPLOADING,
+  PROJECT_STATUS.DETECTING,
+  PROJECT_STATUS.CLEANING,
+  PROJECT_STATUS.SYNCING
+]
+
+export const PROJECT_STATUS_TEXT = {
+  [PROJECT_STATUS.DRAFT]: '草稿',
+  [PROJECT_STATUS.UPLOADING]: '上传中',
+  [PROJECT_STATUS.DETECTING]: '检测中',
+  [PROJECT_STATUS.CLEANING]: '清洗中',
+  [PROJECT_STATUS.SYNCING]: '同步中',
+  [PROJECT_STATUS.COMPLETED]: '已完成',
+  [PROJECT_STATUS.FAILED]: '失败'
+}
+
+export const PROJECT_STATUS_TYPE = {
+  [PROJECT_STATUS.DRAFT]: 'info',
+  [PROJECT_STATUS.UPLOADING]: 'warning',
+  [PROJECT_STATUS.DETECTING]: 'primary',
+  [PROJECT_STATUS.CLEANING]: 'primary',
+  [PROJECT_STATUS.SYNCING]: 'primary',
+  [PROJECT_STATUS.COMPLETED]: 'success',
+  [PROJECT_STATUS.FAILED]: 'danger'
+}
+
+export const getProjectStatusText = (status) => PROJECT_STATUS_TEXT[status] || status || '-'
+export const getProjectStatusType = (status) => PROJECT_STATUS_TYPE[status] || 'info'
+export const isProjectProcessing = (status) => PROJECT_PROCESSING_STATUSES.includes(status)

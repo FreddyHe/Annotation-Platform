@@ -33,6 +33,9 @@ public interface ModelTrainingRecordRepository extends JpaRepository<ModelTraini
     @Query("SELECT m FROM ModelTrainingRecord m WHERE m.status = 'COMPLETED' ORDER BY m.map50 DESC")
     List<ModelTrainingRecord> findCompletedOrderByMap50Desc();
 
+    @Query("SELECT m FROM ModelTrainingRecord m JOIN m.project p WHERE p.organization.id = :organizationId AND m.status = 'COMPLETED' ORDER BY m.map50 DESC")
+    List<ModelTrainingRecord> findCompletedByOrganizationIdOrderByMap50Desc(@Param("organizationId") Long organizationId);
+
     @Query("SELECT COUNT(m) FROM ModelTrainingRecord m WHERE m.projectId = :projectId")
     long countByProjectId(@Param("projectId") Long projectId);
 

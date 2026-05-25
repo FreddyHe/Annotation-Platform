@@ -6,8 +6,8 @@ import com.annotation.platform.dto.request.algorithm.RunVlmCleaningRequest;
 import com.annotation.platform.dto.response.algorithm.TaskStatusResponse;
 import com.annotation.platform.entity.Project;
 import com.annotation.platform.entity.User;
-import com.annotation.platform.repository.ProjectRepository;
 import com.annotation.platform.repository.UserRepository;
+import com.annotation.platform.service.ProjectAccessService;
 import com.annotation.platform.service.labelstudio.LabelStudioProxyService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -26,7 +26,7 @@ public class LabelStudioController {
 
     private final LabelStudioProxyService labelStudioProxyService;
     private final UserRepository userRepository;
-    private final ProjectRepository projectRepository;
+    private final ProjectAccessService projectAccessService;
 
     @GetMapping("/login-url")
     public Result<String> getLoginUrl(
@@ -36,8 +36,8 @@ public class LabelStudioController {
 
         Long userId = (Long) request.getAttribute("userId");
         if ((returnUrl == null || returnUrl.isBlank()) && projectId != null) {
-            Project project = projectRepository.findById(projectId).orElse(null);
-            if (project != null && project.getLsProjectId() != null) {
+            Project project = projectAccessService.requireProjectInCurrentOrg(projectId, request);
+            if (project.getLsProjectId() != null) {
                 returnUrl = "/projects/" + project.getLsProjectId() + "/data";
             }
         }
@@ -56,7 +56,7 @@ public class LabelStudioController {
     @PostMapping("/sync-project/{projectId}")
     public Result<Void> syncProject(@PathVariable Long projectId, HttpServletRequest request) {
         Long userId = (Long) request.getAttribute("userId");
-        Project project = projectRepository.findById(projectId).orElseThrow();
+        Project project = projectAccessService.requireProjectInCurrentOrg(projectId, request);
         labelStudioProxyService.syncProjectToLS(project, userId);
         return Result.success();
     }

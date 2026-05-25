@@ -41,7 +41,12 @@ const handleLabelCountChange = (value) => {
 const handleSave = async () => {
   if (!props.project || !props.project.id || props.project.id === 'null') return
   try {
-    saving.value = true; const labelsMap = {}; labels.value.forEach(label => { if (label.name) labelsMap[label.name] = label.definition })
+    saving.value = true
+    const labelsMap = {}
+    labels.value.forEach(label => {
+      const name = (label.name || '').trim()
+      if (name) labelsMap[name] = (label.definition || '').trim()
+    })
     if (Object.keys(labelsMap).length === 0) { ElMessage.warning('请至少定义一个类别'); return }
     await projectAPI.updateProject(props.project.id, { labels: Object.keys(labelsMap), labelDefinitions: labelsMap })
     ElMessage.success('类别定义保存成功'); emit('refresh')

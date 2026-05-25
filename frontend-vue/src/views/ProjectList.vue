@@ -22,14 +22,15 @@
         </el-table-column>
         <el-table-column prop="totalImages" label="图片数" />
         <el-table-column prop="processedImages" label="已处理" />
-        <el-table-column prop="createdAt" label="创建时间" />
-        <el-table-column label="操作" width="200">
+        <el-table-column prop="createdAt" label="创建时间" width="180">
+          <template #default="{ row }">
+            {{ formatDate(row.createdAt) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="140">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="viewProject(row.id)">
               查看
-            </el-button>
-            <el-button type="primary" link size="small" @click="editProject(row.id)">
-              编辑
             </el-button>
             <el-button type="danger" link size="small" @click="deleteProject(row.id)">
               删除
@@ -105,6 +106,7 @@ import { ref, reactive, nextTick, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { projectAPI } from '@/api/index'
+import { getProjectStatusText, getProjectStatusType } from '@/utils/projectStatus'
 
 const router = useRouter()
 
@@ -127,7 +129,7 @@ const projectForm = reactive({
 const projectRules = {
   name: [
     { required: true, message: '请输入项目名称', trigger: 'blur' },
-    { min: 1, max: 100, message: '长度在 1 到 100 个字符', trigger: 'blur' }
+    { min: 3, max: 100, message: '长度在 3 到 100 个字符', trigger: 'blur' }
   ],
   labels: [
     { required: true, message: '至少需要一个标签', trigger: 'change' }
@@ -138,25 +140,11 @@ const labelInputVisible = ref(false)
 const labelInputValue = ref('')
 
 const getStatusType = (status) => {
-  const typeMap = {
-    'DRAFT': 'info',
-    'UPLOADING': 'warning',
-    'PROCESSING': 'primary',
-    'COMPLETED': 'success',
-    'FAILED': 'danger'
-  }
-  return typeMap[status] || 'info'
+  return getProjectStatusType(status)
 }
 
 const getStatusText = (status) => {
-  const textMap = {
-    'DRAFT': '草稿',
-    'UPLOADING': '上传中',
-    'PROCESSING': '处理中',
-    'COMPLETED': '已完成',
-    'FAILED': '失败'
-  }
-  return textMap[status] || status
+  return getProjectStatusText(status)
 }
 
 const handleCreate = () => {
@@ -175,12 +163,15 @@ const showLabelInput = () => {
 }
 
 const addLabel = () => {
-  if (labelInputValue.value) {
-    if (projectForm.labels.includes(labelInputValue.value)) {
+  const nextLabel = labelInputValue.value.trim()
+  if (nextLabel) {
+    if (projectForm.labels.includes(nextLabel)) {
       ElMessage.warning('标签已存在')
+      labelInputValue.value = ''
+      labelInputVisible.value = false
       return
     }
-    projectForm.labels.push(labelInputValue.value)
+    projectForm.labels.push(nextLabel)
     labelInputValue.value = ''
   }
   labelInputVisible.value = false
@@ -196,11 +187,16 @@ const submitCreate = async () => {
   try {
     await projectFormRef.value.validate()
     
+    const labels = [...new Set(projectForm.labels.map(label => label.trim()).filter(Boolean))]
+    if (labels.length === 0) {
+      ElMessage.warning('至少需要一个标签')
+      return
+    }
     creating.value = true
-    
+
     const response = await projectAPI.createProject({
-      name: projectForm.name,
-      labels: projectForm.labels
+      name: projectForm.name.trim(),
+      labels
     })
     
     creating.value = false
@@ -220,10 +216,6 @@ const submitCreate = async () => {
 
 const viewProject = (id) => {
   router.push(`/projects/${id}`)
-}
-
-const editProject = (id) => {
-  ElMessage.info('编辑项目功能开发中')
 }
 
 const deleteProject = async (id) => {
@@ -266,8 +258,14 @@ const loadProjects = async () => {
     })
     
     if (response.success) {
-      projects.value = response.data || []
-      total.value = projects.value.length
+      const data = response.data || {}
+      if (Array.isArray(data)) {
+        projects.value = data
+        total.value = data.length
+      } else {
+        projects.value = data.content || []
+        total.value = data.pageable?.totalElements ?? projects.value.length
+      }
     }
   } catch (error) {
     console.error('加载项目列表失败:', error)
@@ -275,6 +273,19 @@ const loadProjects = async () => {
   } finally {
     loading.value = false
   }
+}
+
+const formatDate = (dateString) => {
+  if (!dateString) return '-'
+  const date = new Date(dateString)
+  if (Number.isNaN(date.getTime())) return '-'
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
 }
 
 onMounted(() => {

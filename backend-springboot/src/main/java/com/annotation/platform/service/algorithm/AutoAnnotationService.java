@@ -10,6 +10,7 @@ import com.annotation.platform.entity.AutoAnnotationJob;
 import com.annotation.platform.entity.DetectionResult;
 import com.annotation.platform.entity.Project;
 import com.annotation.platform.entity.ProjectImage;
+import com.annotation.platform.exception.BusinessException;
 import com.annotation.platform.repository.AnnotationTaskRepository;
 import com.annotation.platform.repository.AutoAnnotationJobRepository;
 import com.annotation.platform.repository.DetectionResultRepository;
@@ -67,6 +68,16 @@ public class AutoAnnotationService {
     public AutoAnnotationJob createJob(Long projectId, Long userId, AutoAnnotationStartRequest request) {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new RuntimeException("Project not found: " + projectId));
+
+        if (autoAnnotationJobRepository.existsByProjectIdAndStatusIn(
+                projectId,
+                List.of(
+                        AutoAnnotationJob.JobStatus.PENDING,
+                        AutoAnnotationJob.JobStatus.RUNNING,
+                        AutoAnnotationJob.JobStatus.CANCELLING
+                ))) {
+            throw new BusinessException("当前项目已有自动标注任务正在执行，请等待完成或取消后再重试");
+        }
 
         Double scoreThreshold = clamp(request.getScoreThreshold() == null ? 0.7 : request.getScoreThreshold(), 0.0, 1.0);
         AutoAnnotationJob job = AutoAnnotationJob.builder()
@@ -162,7 +173,7 @@ public class AutoAnnotationService {
         } catch (Exception e) {
             if (isCancelled(jobId)) {
                 markJobCancelled(jobId);
-                updateProjectStatus(projectId, Project.ProjectStatus.FAILED);
+                updateProjectStatus(projectId, Project.ProjectStatus.DRAFT);
                 log.warn("Auto annotation job cancelled: jobId={}", jobId);
             } else {
                 markJobFailed(jobId, e.getMessage());

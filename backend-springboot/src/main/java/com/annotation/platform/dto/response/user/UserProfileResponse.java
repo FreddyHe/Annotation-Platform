@@ -38,7 +38,6 @@ public class UserProfileResponse {
     private Boolean lsSyncStatus;
     private Long lsUserId;
     private String lsEmail;
-    private String lsPassword;
 
     @Data
     @Builder

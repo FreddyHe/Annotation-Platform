@@ -57,6 +57,7 @@ public class ProjectController {
     private final com.annotation.platform.repository.ProjectConfigRepository projectConfigRepository;
     private final com.annotation.platform.repository.AutoAnnotationJobRepository autoAnnotationJobRepository;
     private final com.annotation.platform.service.IncrementalProjectService incrementalProjectService;
+    private final com.annotation.platform.service.ProjectAccessService projectAccessService;
 
     @Value("${app.file.upload.base-path}")
     private String uploadBasePath;
@@ -66,10 +67,12 @@ public class ProjectController {
             @Valid @RequestBody CreateProjectRequest request,
             HttpServletRequest httpRequest) {
 
-        Long userId = (Long) httpRequest.getAttribute("userId");
-        Long organizationId = (Long) httpRequest.getAttribute("organizationId");
+        Long userId = projectAccessService.currentUserId(httpRequest);
+        Long organizationId = projectAccessService.currentOrganizationId(httpRequest);
+        String projectName = request.getName() != null ? request.getName().trim() : null;
+        List<String> labels = normalizeLabels(request.getLabels());
 
-        log.info("创建项目: name={}, userId={}, orgId={}", request.getName(), userId, organizationId);
+        log.info("创建项目: name={}, userId={}, orgId={}", projectName, userId, organizationId);
 
         Organization organization = organizationRepository.findById(organizationId)
                 .orElseThrow(() -> new com.annotation.platform.exception.ResourceNotFoundException("Organization", "id", organizationId));
@@ -77,13 +80,13 @@ public class ProjectController {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new com.annotation.platform.exception.ResourceNotFoundException("User", "id", userId));
 
-        if (projectRepository.existsByNameAndOrganizationId(request.getName(), organizationId)) {
+        if (projectRepository.existsByNameAndOrganizationId(projectName, organizationId)) {
             throw new com.annotation.platform.exception.BusinessException("项目名称已存在");
         }
 
         Project project = Project.builder()
-                .name(request.getName())
-                .labels(request.getLabels())
+                .name(projectName)
+                .labels(labels)
                 .organization(organization)
                 .createdBy(user)
                 .status(Project.ProjectStatus.DRAFT)
@@ -117,8 +120,7 @@ public class ProjectController {
         if (id == null) {
             log.error("项目ID为null，请求参数: {}", request.getParameterMap());
         }
-        Project project = projectRepository.findById(id)
-                .orElseThrow(() -> new com.annotation.platform.exception.ResourceNotFoundException("Project", "id", id));
+        Project project = projectAccessService.requireProjectInCurrentOrg(id, request);
 
         ProjectDetailResponse response = convertToDetailResponse(project);
         return Result.success(response);
@@ -126,33 +128,40 @@ public class ProjectController {
 
     @GetMapping
     @Transactional
-    public Result<List<ProjectDetailResponse>> getProjects(
+    public Result<java.util.Map<String, Object>> getProjects(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) String status,
             HttpServletRequest httpRequest) {
 
-        Long organizationId = (Long) httpRequest.getAttribute("organizationId");
+        Long organizationId = projectAccessService.currentOrganizationId(httpRequest);
         
-        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        int safePage = Math.max(page, 0);
+        int safeSize = Math.min(Math.max(size, 1), 100);
+        Pageable pageable = PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.DESC, "createdAt"));
 
         Page<Project> projects;
-        if (organizationId != null) {
-            if (status != null && !status.isBlank()) {
-                projects = projectRepository.findByOrganizationIdAndStatusOptional(organizationId, 
-                        Project.ProjectStatus.valueOf(status), pageable);
-            } else {
-                projects = projectRepository.findByOrganizationId(organizationId, pageable);
-            }
+        if (status != null && !status.isBlank()) {
+            projects = projectRepository.findByOrganizationIdAndStatusOptional(organizationId,
+                    Project.ProjectStatus.valueOf(status), pageable);
         } else {
-            projects = projectRepository.findAll(pageable);
+            projects = projectRepository.findByOrganizationId(organizationId, pageable);
         }
 
         List<ProjectDetailResponse> responses = projects.stream()
                 .map(this::convertToDetailResponse)
                 .collect(Collectors.toList());
 
-        return Result.success(responses);
+        java.util.Map<String, Object> result = new java.util.HashMap<>();
+        result.put("content", responses);
+        result.put("pageable", PageableResponse.builder()
+                .pageNumber(projects.getNumber())
+                .pageSize(projects.getSize())
+                .totalElements(projects.getTotalElements())
+                .totalPages(projects.getTotalPages())
+                .build());
+
+        return Result.success(result);
     }
 
     @PutMapping("/{id}")
@@ -163,28 +172,33 @@ public class ProjectController {
 
         log.info("更新项目: id={}", id);
 
-        Project project = projectRepository.findById(id)
-                .orElseThrow(() -> new com.annotation.platform.exception.ResourceNotFoundException("Project", "id", id));
+        Project project = projectAccessService.requireProjectInCurrentOrg(id, httpRequest);
 
         // 记录原始标签列表，用于判断是否发生变化
         List<String> oldLabels = project.getLabels();
         boolean labelsChanged = false;
 
         if (request.getName() != null && !request.getName().isBlank()) {
-            project.setName(request.getName());
+            String nextName = request.getName().trim();
+            Long organizationId = projectAccessService.currentOrganizationId(httpRequest);
+            if (projectRepository.existsByNameAndOrganizationIdAndIdNot(nextName, organizationId, id)) {
+                throw new com.annotation.platform.exception.BusinessException("项目名称已存在");
+            }
+            project.setName(nextName);
         }
 
         if (request.getLabels() != null) {
+            List<String> normalizedLabels = normalizeLabels(request.getLabels());
             // 检查标签是否发生变化
-            if (oldLabels == null || !oldLabels.equals(request.getLabels())) {
+            if (oldLabels == null || !oldLabels.equals(normalizedLabels)) {
                 labelsChanged = true;
-                log.info("[DEBUG] 项目标签发生变化: projectId={}, 旧标签={}, 新标签={}", id, oldLabels, request.getLabels());
+                log.info("项目标签发生变化: projectId={}, oldLabels={}, newLabels={}", id, oldLabels, normalizedLabels);
             }
-            project.setLabels(request.getLabels());
+            project.setLabels(normalizedLabels);
         }
 
         if (request.getLabelDefinitions() != null) {
-            project.setLabelDefinitions(request.getLabelDefinitions());
+            project.setLabelDefinitions(normalizeLabelDefinitions(request.getLabelDefinitions()));
         }
 
         Project updatedProject = projectRepository.save(project);
@@ -213,10 +227,9 @@ public class ProjectController {
     public Result<Void> deleteProject(@PathVariable Long id, HttpServletRequest httpRequest) {
         log.info("删除项目: id={}", id);
 
-        Long userId = (Long) httpRequest.getAttribute("userId");
+        Long userId = projectAccessService.currentUserId(httpRequest);
 
-        Project project = projectRepository.findById(id)
-                .orElseThrow(() -> new com.annotation.platform.exception.ResourceNotFoundException("Project", "id", id));
+        Project project = projectAccessService.requireProjectInCurrentOrg(id, httpRequest);
 
         // 1. 先删除 DetectionResult（因为它外键引用了 AnnotationTask 和 ProjectImage）
         long deletedResults = detectionResultRepository.countByProjectId(id);
@@ -258,6 +271,7 @@ public class ProjectController {
 
         // 4. 最后删除 Project（会级联删除 AnnotationTask 和 ModelTrainingRecord）
         projectRepository.delete(project);
+        cleanupProjectUploadDirectory(id);
         return Result.success();
     }
 
@@ -267,7 +281,10 @@ public class ProjectController {
             @PathVariable Long id,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
-            @RequestParam(required = false) Integer pageSize) {
+            @RequestParam(required = false) Integer pageSize,
+            HttpServletRequest httpRequest) {
+
+        projectAccessService.requireProjectAccess(id, httpRequest);
 
         List<ProjectImage> images = projectImageRepository.findProjectImagesNativeByType(id);
         
@@ -377,9 +394,8 @@ public class ProjectController {
 
     @GetMapping("/{id}/stats")
     @Transactional(rollbackFor = Exception.class)
-    public Result<java.util.Map<String, Object>> getProjectStats(@PathVariable Long id) {
-        Project project = projectRepository.findById(id)
-                .orElseThrow(() -> new com.annotation.platform.exception.ResourceNotFoundException("Project", "id", id));
+    public Result<java.util.Map<String, Object>> getProjectStats(@PathVariable Long id, HttpServletRequest httpRequest) {
+        Project project = projectAccessService.requireProjectInCurrentOrg(id, httpRequest);
 
         long totalImages = projectImageRepository.countByProjectId(id);
         long uploadedImages = projectImageRepository.countByProjectIdAndStatus(
@@ -478,9 +494,8 @@ public class ProjectController {
     }
 
     @GetMapping("/{id}/ls-health")
-    public Result<java.util.Map<String, Object>> getLsHealth(@PathVariable Long id) {
-        Project project = projectRepository.findById(id)
-                .orElseThrow(() -> new com.annotation.platform.exception.ResourceNotFoundException("Project", "id", id));
+    public Result<java.util.Map<String, Object>> getLsHealth(@PathVariable Long id, HttpServletRequest httpRequest) {
+        Project project = projectAccessService.requireProjectInCurrentOrg(id, httpRequest);
         Long userId = project.getCreatedBy() != null ? project.getCreatedBy().getId() : null;
         boolean alive = incrementalProjectService.isLsProjectAlive(project.getLsProjectId(), userId, project);
         if (project.getLsProjectId() != null) {
@@ -500,25 +515,29 @@ public class ProjectController {
 
     @PostMapping("/{id}/repair-ls-binding")
     public Result<java.util.Map<String, Object>> repairLsBinding(@PathVariable Long id, HttpServletRequest httpRequest) {
-        Long userId = (Long) httpRequest.getAttribute("userId");
+        projectAccessService.requireProjectAccess(id, httpRequest);
+        Long userId = projectAccessService.currentUserId(httpRequest);
         return Result.success(incrementalProjectService.repairMainLsBinding(id, userId));
     }
 
     @GetMapping("/{id}/incrementals")
     public Result<java.util.Map<String, Object>> getIncrementalProjects(@PathVariable Long id, HttpServletRequest httpRequest) {
-        Long userId = (Long) httpRequest.getAttribute("userId");
+        projectAccessService.requireProjectAccess(id, httpRequest);
+        Long userId = projectAccessService.currentUserId(httpRequest);
         return Result.success(incrementalProjectService.getIncrementalProjectsStatus(id, userId));
     }
 
     @GetMapping("/{id}/training/preview")
     public Result<java.util.Map<String, Object>> trainingPreview(@PathVariable Long id, HttpServletRequest httpRequest) {
-        Long userId = (Long) httpRequest.getAttribute("userId");
+        projectAccessService.requireProjectAccess(id, httpRequest);
+        Long userId = projectAccessService.currentUserId(httpRequest);
         return Result.success(incrementalProjectService.trainingDatasetPreview(id, userId));
     }
 
     @PostMapping("/{id}/flywheel/sync")
     public Result<java.util.Map<String, Object>> syncFlywheelData(@PathVariable Long id, HttpServletRequest httpRequest) {
-        Long userId = (Long) httpRequest.getAttribute("userId");
+        projectAccessService.requireProjectAccess(id, httpRequest);
+        Long userId = projectAccessService.currentUserId(httpRequest);
         return Result.success(incrementalProjectService.syncPendingDataToLabelStudio(id, userId));
     }
 
@@ -529,8 +548,7 @@ public class ProjectController {
         
         log.info("获取审核统计: projectId={}", id);
         
-        Project project = projectRepository.findById(id)
-                .orElseThrow(() -> new com.annotation.platform.exception.ResourceNotFoundException("Project", "id", id));
+        Project project = projectAccessService.requireProjectInCurrentOrg(id, httpRequest);
         
         if (project.getLsProjectId() == null) {
             throw new com.annotation.platform.exception.BusinessException(
@@ -539,7 +557,7 @@ public class ProjectController {
             );
         }
         
-        Long userId = (Long) httpRequest.getAttribute("userId");
+        Long userId = projectAccessService.currentUserId(httpRequest);
         
         try {
             java.util.Map<String, Object> reviewStats = labelStudioProxyService.getProjectReviewStats(
@@ -563,8 +581,7 @@ public class ProjectController {
         
         log.info("获取审核结果: projectId={}", id);
         
-        Project project = projectRepository.findById(id)
-                .orElseThrow(() -> new com.annotation.platform.exception.ResourceNotFoundException("Project", "id", id));
+        Project project = projectAccessService.requireProjectInCurrentOrg(id, httpRequest);
         
         if (project.getLsProjectId() == null) {
             throw new com.annotation.platform.exception.BusinessException(
@@ -573,7 +590,7 @@ public class ProjectController {
             );
         }
         
-        Long userId = (Long) httpRequest.getAttribute("userId");
+        Long userId = projectAccessService.currentUserId(httpRequest);
         
         try {
             java.util.Map<String, Object> reviewResults = labelStudioProxyService.getProjectReviewResults(
@@ -594,11 +611,10 @@ public class ProjectController {
             @RequestBody java.util.Map<String, Object> request,
             HttpServletRequest httpRequest) {
         
-        String format = (String) request.get("format");
+        String format = sanitizeExportFormat((String) request.get("format"));
         log.info("导出标注结果: projectId={}, format={}", id, format);
         
-        Project project = projectRepository.findById(id)
-                .orElseThrow(() -> new com.annotation.platform.exception.ResourceNotFoundException("Project", "id", id));
+        Project project = projectAccessService.requireProjectInCurrentOrg(id, httpRequest);
         
         if (project.getLsProjectId() == null) {
             throw new com.annotation.platform.exception.BusinessException(
@@ -607,7 +623,7 @@ public class ProjectController {
             );
         }
         
-        Long userId = (Long) httpRequest.getAttribute("userId");
+        Long userId = projectAccessService.currentUserId(httpRequest);
         
         try {
             // 从 Label Studio 获取标注数据
@@ -623,12 +639,13 @@ public class ProjectController {
             // 根据格式转换数据
             String exportData = convertToFormat(annotations, format, project);
             
-            // 生成下载URL（这里简化处理，实际应该保存文件并返回下载链接）
+            String exportFilename = writeExportFile(project, format, exportData);
+
             java.util.Map<String, Object> response = new java.util.HashMap<>();
-            response.put("downloadUrl", "data:application/json;charset=utf-8," + 
-                java.net.URLEncoder.encode(exportData, "UTF-8"));
+            response.put("downloadUrl", "/api/v1/projects/" + id + "/exports/" + exportFilename);
+            response.put("filename", exportFilename);
             response.put("itemCount", annotations.size());
-            response.put("fileSize", exportData.length());
+            response.put("fileSize", exportData.getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
             response.put("format", format);
             
             log.info("导出成功: projectId={}, format={}, count={}", id, format, annotations.size());
@@ -636,6 +653,122 @@ public class ProjectController {
         } catch (Exception e) {
             log.error("导出失败: projectId={}, error={}", id, e.getMessage(), e);
             throw new com.annotation.platform.exception.BusinessException("导出失败: " + e.getMessage());
+        }
+    }
+
+    @GetMapping("/{id}/exports/{filename:.+}")
+    public org.springframework.http.ResponseEntity<org.springframework.core.io.Resource> downloadExport(
+            @PathVariable Long id,
+            @PathVariable String filename,
+            HttpServletRequest httpRequest) throws java.io.IOException {
+        projectAccessService.requireProjectAccess(id, httpRequest);
+
+        String safeFilename = sanitizeExportFilename(filename);
+        java.nio.file.Path exportDir = java.nio.file.Paths.get(uploadBasePath, "exports", String.valueOf(id))
+                .toAbsolutePath()
+                .normalize();
+        java.nio.file.Path target = exportDir.resolve(safeFilename).normalize();
+        if (!target.startsWith(exportDir) || !java.nio.file.Files.isRegularFile(target)) {
+            throw new com.annotation.platform.exception.ResourceNotFoundException("Export", "filename", filename);
+        }
+
+        org.springframework.core.io.Resource resource = new org.springframework.core.io.UrlResource(target.toUri());
+        return org.springframework.http.ResponseEntity.ok()
+                .contentType(org.springframework.http.MediaType.parseMediaType(exportContentType(safeFilename)))
+                .header(
+                        org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
+                        org.springframework.http.ContentDisposition.attachment()
+                                .filename(safeFilename, java.nio.charset.StandardCharsets.UTF_8)
+                                .build()
+                                .toString()
+                )
+                .body(resource);
+    }
+
+    private String sanitizeExportFormat(String format) {
+        if (format == null || format.isBlank()) {
+            return "json";
+        }
+        String normalized = format.trim().toLowerCase();
+        if (!java.util.Set.of("json", "coco", "yolo", "voc", "csv").contains(normalized)) {
+            throw new IllegalArgumentException("不支持的导出格式: " + format);
+        }
+        return normalized;
+    }
+
+    private String writeExportFile(Project project, String format, String exportData) throws java.io.IOException {
+        String extension = exportExtension(format);
+        String timestamp = java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss").format(LocalDateTime.now());
+        String projectName = project.getName() == null ? "project" : project.getName().replaceAll("[^a-zA-Z0-9._-]", "_");
+        String filename = sanitizeExportFilename(projectName + "_" + format + "_" + timestamp + "." + extension);
+        java.nio.file.Path exportDir = java.nio.file.Paths.get(uploadBasePath, "exports", String.valueOf(project.getId()))
+                .toAbsolutePath()
+                .normalize();
+        java.nio.file.Files.createDirectories(exportDir);
+        java.nio.file.Path target = exportDir.resolve(filename).normalize();
+        if (!target.startsWith(exportDir)) {
+            throw new com.annotation.platform.exception.BusinessException("导出文件路径非法");
+        }
+        java.nio.file.Files.writeString(target, exportData, java.nio.charset.StandardCharsets.UTF_8);
+        return filename;
+    }
+
+    private String sanitizeExportFilename(String filename) {
+        if (filename == null || filename.isBlank()) {
+            throw new com.annotation.platform.exception.BusinessException("导出文件名为空");
+        }
+        String baseName = java.nio.file.Paths.get(filename).getFileName().toString();
+        String safe = baseName.replaceAll("[^a-zA-Z0-9._-]", "_");
+        if (safe.isBlank() || ".".equals(safe) || "..".equals(safe)) {
+            throw new com.annotation.platform.exception.BusinessException("导出文件名非法");
+        }
+        return safe;
+    }
+
+    private String exportExtension(String format) {
+        return switch (format) {
+            case "coco", "json" -> "json";
+            case "yolo" -> "txt";
+            case "voc" -> "xml";
+            case "csv" -> "csv";
+            default -> "txt";
+        };
+    }
+
+    private String exportContentType(String filename) {
+        String lower = filename.toLowerCase();
+        if (lower.endsWith(".json")) {
+            return "application/json;charset=UTF-8";
+        }
+        if (lower.endsWith(".csv")) {
+            return "text/csv;charset=UTF-8";
+        }
+        if (lower.endsWith(".xml")) {
+            return "application/xml;charset=UTF-8";
+        }
+        return "text/plain;charset=UTF-8";
+    }
+
+    private void cleanupProjectUploadDirectory(Long projectId) {
+        java.nio.file.Path projectDir = java.nio.file.Paths.get(uploadBasePath, String.valueOf(projectId))
+                .toAbsolutePath()
+                .normalize();
+        java.nio.file.Path uploadRoot = java.nio.file.Paths.get(uploadBasePath).toAbsolutePath().normalize();
+        if (!projectDir.startsWith(uploadRoot) || !java.nio.file.Files.exists(projectDir)) {
+            return;
+        }
+        try (java.util.stream.Stream<java.nio.file.Path> paths = java.nio.file.Files.walk(projectDir)) {
+            paths.sorted(java.util.Comparator.reverseOrder())
+                    .forEach(path -> {
+                        try {
+                            java.nio.file.Files.deleteIfExists(path);
+                        } catch (java.io.IOException e) {
+                            throw new java.io.UncheckedIOException(e);
+                        }
+                    });
+            log.info("项目上传目录已清理: projectId={}, path={}", projectId, projectDir);
+        } catch (Exception e) {
+            log.warn("项目上传目录清理失败: projectId={}, path={}, error={}", projectId, projectDir, e.getMessage());
         }
     }
 
@@ -1000,8 +1133,7 @@ public class ProjectController {
         
         log.info("启动模型训练: projectId={}", id);
         
-        Project project = projectRepository.findById(id)
-                .orElseThrow(() -> new com.annotation.platform.exception.ResourceNotFoundException("Project", "id", id));
+        Project project = projectAccessService.requireProjectInCurrentOrg(id, httpRequest);
         
         if (project.getLsProjectId() == null) {
             throw new com.annotation.platform.exception.BusinessException(
@@ -1011,7 +1143,11 @@ public class ProjectController {
         }
         
         User user = (User) httpRequest.getAttribute("user");
-        Long userId = user.getId();
+        Long userId = projectAccessService.currentUserId(httpRequest);
+        if (user == null) {
+            user = userRepository.findById(userId)
+                    .orElseThrow(() -> new com.annotation.platform.exception.ResourceNotFoundException("User", "id", userId));
+        }
         
         try {
             Integer epochs = config.get("epochs") != null ? ((Number) config.get("epochs")).intValue() : 100;
@@ -1111,8 +1247,7 @@ public class ProjectController {
         
         log.debug("获取训练状态: projectId={}", id);
         
-        Project project = projectRepository.findById(id)
-                .orElseThrow(() -> new com.annotation.platform.exception.ResourceNotFoundException("Project", "id", id));
+        Project project = projectAccessService.requireProjectInCurrentOrg(id, httpRequest);
         
         // 查询该项目最新的训练记录
         java.util.List<com.annotation.platform.entity.ModelTrainingRecord> records = 
@@ -1201,8 +1336,7 @@ public class ProjectController {
         
         log.info("使用训练模型检测: projectId={}, modelId={}", id, modelId);
         
-        Project project = projectRepository.findById(id)
-                .orElseThrow(() -> new com.annotation.platform.exception.ResourceNotFoundException("Project", "id", id));
+        Project project = projectAccessService.requireProjectInCurrentOrg(id, httpRequest);
         
         try {
             String modelPath = requestedModelPath;
@@ -1344,6 +1478,35 @@ public class ProjectController {
             }
             detections.add(detection);
         }
+    }
+
+    private List<String> normalizeLabels(List<String> labels) {
+        if (labels == null) {
+            throw new com.annotation.platform.exception.BusinessException("标签不能为空");
+        }
+        java.util.LinkedHashSet<String> normalized = new java.util.LinkedHashSet<>();
+        for (String label : labels) {
+            if (label == null || label.trim().isBlank()) {
+                throw new com.annotation.platform.exception.BusinessException("标签名称不能为空");
+            }
+            normalized.add(label.trim());
+        }
+        if (normalized.isEmpty()) {
+            throw new com.annotation.platform.exception.BusinessException("至少需要一个标签");
+        }
+        return new java.util.ArrayList<>(normalized);
+    }
+
+    private java.util.Map<String, String> normalizeLabelDefinitions(java.util.Map<String, String> definitions) {
+        java.util.Map<String, String> normalized = new java.util.LinkedHashMap<>();
+        for (java.util.Map.Entry<String, String> entry : definitions.entrySet()) {
+            String key = entry.getKey();
+            if (key == null || key.trim().isBlank()) {
+                throw new com.annotation.platform.exception.BusinessException("标签定义名称不能为空");
+            }
+            normalized.put(key.trim(), entry.getValue() == null ? "" : entry.getValue().trim());
+        }
+        return normalized;
     }
 
     private ProjectDetailResponse convertToDetailResponse(Project project) {

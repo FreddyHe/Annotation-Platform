@@ -70,6 +70,7 @@ backend-springboot/target/
 frontend-vue/dist/
 frontend-vue/.vite/
 frontend-vue/node_modules/
+frontend-vue/.frontend_service_port
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

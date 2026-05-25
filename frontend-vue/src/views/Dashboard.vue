@@ -62,7 +62,11 @@
         </el-table-column>
         <el-table-column prop="totalImages" label="图片数" />
         <el-table-column prop="processedImages" label="已处理" />
-        <el-table-column prop="createdAt" label="创建时间" />
+        <el-table-column prop="createdAt" label="创建时间" width="180">
+          <template #default="{ row }">
+            {{ formatDate(row.createdAt) }}
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="120">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="viewProject(row.id)">
@@ -78,7 +82,8 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { userAPI } from '@/api'
+import { projectAPI, userAPI } from '@/api'
+import { getProjectStatusText, getProjectStatusType } from '@/utils/projectStatus'
 
 const router = useRouter()
 
@@ -92,25 +97,11 @@ const stats = ref({
 const recentProjects = ref([])
 
 const getStatusType = (status) => {
-  const typeMap = {
-    'DRAFT': 'info',
-    'UPLOADING': 'warning',
-    'PROCESSING': 'primary',
-    'COMPLETED': 'success',
-    'FAILED': 'danger'
-  }
-  return typeMap[status] || 'info'
+  return getProjectStatusType(status)
 }
 
 const getStatusText = (status) => {
-  const textMap = {
-    'DRAFT': '草稿',
-    'UPLOADING': '上传中',
-    'PROCESSING': '处理中',
-    'COMPLETED': '已完成',
-    'FAILED': '失败'
-  }
-  return textMap[status] || status
+  return getProjectStatusText(status)
 }
 
 const goToProjects = () => {
@@ -134,27 +125,33 @@ const loadStats = async () => {
 
 const loadRecentProjects = async () => {
   try {
-    const response = await fetch('/api/v1/projects?page=0&size=5', {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('token')}`
-      }
-    })
-    if (response.ok) {
-      const data = await response.json()
-      if (data.data && data.data.length > 0) {
-        recentProjects.value = data.data.map(project => ({
-          id: project.id,
-          name: project.name,
-          status: project.status,
-          totalImages: project.totalImages || 0,
-          processedImages: project.processedImages || 0,
-          createdAt: project.createdAt
-        }))
-      }
-    }
+    const response = await projectAPI.getProjects({ page: 0, size: 5 })
+    const data = response.data || {}
+    const projects = Array.isArray(data) ? data : data.content || []
+    recentProjects.value = projects.map(project => ({
+      id: project.id,
+      name: project.name,
+      status: project.status,
+      totalImages: project.totalImages || 0,
+      processedImages: project.processedImages || 0,
+      createdAt: project.createdAt
+    }))
   } catch (error) {
     console.error('加载最近项目失败:', error)
   }
+}
+
+const formatDate = (dateString) => {
+  if (!dateString) return '-'
+  const date = new Date(dateString)
+  if (Number.isNaN(date.getTime())) return '-'
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
 }
 
 onMounted(() => {

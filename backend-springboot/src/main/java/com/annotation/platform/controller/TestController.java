@@ -3,6 +3,8 @@ package com.annotation.platform.controller;
 import com.annotation.platform.common.Result;
 import com.annotation.platform.entity.Project;
 import com.annotation.platform.repository.ProjectRepository;
+import com.annotation.platform.service.ProjectAccessService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
@@ -14,15 +16,17 @@ import org.springframework.web.bind.annotation.*;
 public class TestController {
 
     private final ProjectRepository projectRepository;
+    private final ProjectAccessService projectAccessService;
 
     /**
      * 测试自动标注流程（使用 Mock 数据）
      */
     @GetMapping("/auto-annotation/{projectId}")
-    public Result<String> testAutoAnnotation(@PathVariable Long projectId) {
+    public Result<String> testAutoAnnotation(@PathVariable Long projectId, HttpServletRequest httpRequest) {
         log.info("Testing auto annotation flow: projectId={}", projectId);
         
         try {
+            projectAccessService.requireProjectAccess(projectId, httpRequest);
             Project project = projectRepository.findById(projectId)
                     .orElseThrow(() -> new RuntimeException("Project not found: " + projectId));
             
@@ -35,6 +39,8 @@ public class TestController {
             
             return Result.success("Auto annotation test completed");
             
+        } catch (org.springframework.security.access.AccessDeniedException | com.annotation.platform.exception.ResourceNotFoundException e) {
+            throw e;
         } catch (Exception e) {
             log.error("Auto annotation test failed: {}", e.getMessage(), e);
             return Result.error("Test failed: " + e.getMessage());

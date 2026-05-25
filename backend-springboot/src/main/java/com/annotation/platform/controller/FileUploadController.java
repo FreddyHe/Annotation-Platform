@@ -4,7 +4,9 @@ import com.annotation.platform.common.Result;
 import com.annotation.platform.dto.request.upload.MergeChunksRequest;
 import com.annotation.platform.dto.request.upload.UploadChunkRequest;
 import com.annotation.platform.dto.response.upload.UploadProgressResponse;
+import com.annotation.platform.service.ProjectAccessService;
 import com.annotation.platform.service.upload.FileUploadService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,6 +29,7 @@ import java.util.UUID;
 public class FileUploadController {
 
     private final FileUploadService fileUploadService;
+    private final ProjectAccessService projectAccessService;
 
     @Value("${app.file.upload.base-path}")
     private String basePath;
@@ -39,9 +42,11 @@ public class FileUploadController {
             @RequestParam("chunkIndex") Integer chunkIndex,
             @RequestParam("totalChunks") Integer totalChunks,
             @RequestParam("fileSize") Long fileSize,
-            @RequestParam("projectId") Long projectId) {
+            @RequestParam("projectId") Long projectId,
+            HttpServletRequest httpRequest) {
 
         log.info("接收分块: fileId={}, chunkIndex={}/{}, filename={}", fileId, chunkIndex, totalChunks, filename);
+        projectAccessService.requireProjectAccess(projectId, httpRequest);
 
         UploadChunkRequest request = UploadChunkRequest.builder()
                 .fileId(fileId)
@@ -57,26 +62,30 @@ public class FileUploadController {
     }
 
     @PostMapping("/merge")
-    public Result<String> mergeChunks(@Valid @RequestBody MergeChunksRequest request) {
+    public Result<String> mergeChunks(@Valid @RequestBody MergeChunksRequest request, HttpServletRequest httpRequest) {
         log.info("合并分块: fileId={}, filename={}", request.getFileId(), request.getFilename());
+        projectAccessService.requireProjectAccess(request.getProjectId(), httpRequest);
         String filePath = fileUploadService.mergeChunks(request);
         return Result.success(filePath);
     }
 
     @GetMapping("/progress/{fileId}")
-    public Result<UploadProgressResponse> getUploadProgress(@PathVariable String fileId) {
+    public Result<UploadProgressResponse> getUploadProgress(@PathVariable String fileId, HttpServletRequest httpRequest) {
+        requireUploadSessionAccess(fileId, httpRequest);
         UploadProgressResponse progress = fileUploadService.getUploadProgress(fileId);
         return Result.success(progress);
     }
 
     @GetMapping("/chunks/{fileId}")
-    public Result<Map<String, Object>> getUploadedChunks(@PathVariable String fileId) {
+    public Result<Map<String, Object>> getUploadedChunks(@PathVariable String fileId, HttpServletRequest httpRequest) {
+        requireUploadSessionAccess(fileId, httpRequest);
         return Result.success(fileUploadService.listUploadedChunks(fileId));
     }
 
     @DeleteMapping("/file")
-    public Result<Void> deleteFile(@RequestParam String filePath) {
+    public Result<Void> deleteFile(@RequestParam String filePath, HttpServletRequest httpRequest) {
         log.info("删除文件: {}", filePath);
+        projectAccessService.requireProjectAccess(extractProjectId(filePath), httpRequest);
         boolean deleted = fileUploadService.deleteFile(filePath);
         return deleted ? Result.success() : Result.error("删除失败");
     }
@@ -125,7 +134,13 @@ public class FileUploadController {
     public void viewFile(@RequestParam String path, jakarta.servlet.http.HttpServletResponse response) {
         log.info("查看文件: {}", path);
         try {
-            File file = new File(basePath, path);
+            Path root = Paths.get(basePath).toAbsolutePath().normalize();
+            Path target = root.resolve(path).normalize();
+            if (!target.startsWith(root)) {
+                response.setStatus(jakarta.servlet.http.HttpServletResponse.SC_BAD_REQUEST);
+                return;
+            }
+            File file = target.toFile();
             
             if (!file.exists() || !file.isFile()) {
                 response.setStatus(jakarta.servlet.http.HttpServletResponse.SC_NOT_FOUND);
@@ -152,6 +167,33 @@ public class FileUploadController {
         } catch (Exception e) {
             log.error("查看文件失败: {}", path, e);
             response.setStatus(jakarta.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    private void requireUploadSessionAccess(String fileId, HttpServletRequest request) {
+        Map<String, Object> chunks = fileUploadService.listUploadedChunks(fileId);
+        Object projectIdValue = chunks.get("projectId");
+        if (projectIdValue == null) {
+            throw new com.annotation.platform.exception.ResourceNotFoundException("UploadSession", "fileId", fileId);
+        }
+        Long projectId;
+        if (projectIdValue instanceof Number number) {
+            projectId = number.longValue();
+        } else {
+            projectId = Long.parseLong(String.valueOf(projectIdValue));
+        }
+        projectAccessService.requireProjectAccess(projectId, request);
+    }
+
+    private Long extractProjectId(String filePath) {
+        java.nio.file.Path normalized = java.nio.file.Paths.get(filePath).normalize();
+        if (normalized.isAbsolute() || normalized.getNameCount() < 2 || normalized.startsWith("..")) {
+            throw new com.annotation.platform.exception.BusinessException("文件路径非法");
+        }
+        try {
+            return Long.parseLong(normalized.getName(0).toString());
+        } catch (NumberFormatException e) {
+            throw new com.annotation.platform.exception.BusinessException("文件路径缺少项目ID");
         }
     }
 }

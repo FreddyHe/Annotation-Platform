@@ -14,28 +14,21 @@
     </el-page-header>
 
     <el-alert
-      v-if="userProfile.lsEmail && userProfile.lsPassword"
+      v-if="userProfile.lsEmail"
       type="info"
       :closable="false"
       style="margin-top: 16px;">
       <template #title>
         <div style="display: flex; align-items: center; gap: 8px;">
-          <el-icon><Key /></el-icon>
-          <span style="font-weight: 500;">Label Studio 登录凭证</span>
+          <el-icon><Link /></el-icon>
+          <span style="font-weight: 500;">Label Studio 已同步</span>
         </div>
       </template>
       <div style="display: flex; gap: 24px; margin-top: 8px;">
         <div style="display: flex; align-items: center; gap: 8px;">
           <span style="color: var(--gray-600); font-size: 13px;">邮箱:</span>
-          <el-tag size="small" style="font-family: monospace;">{{ userProfile.lsEmail }}</el-tag>
+          <el-tag size="small" style="font-family: monospace;">{{ maskEmail(userProfile.lsEmail) }}</el-tag>
           <el-button size="small" text @click="copyToClipboard(userProfile.lsEmail, '邮箱')">
-            <el-icon><DocumentCopy /></el-icon>
-          </el-button>
-        </div>
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <span style="color: var(--gray-600); font-size: 13px;">密码:</span>
-          <el-tag size="small" style="font-family: monospace;">{{ userProfile.lsPassword }}</el-tag>
-          <el-button size="small" text @click="copyToClipboard(userProfile.lsPassword, '密码')">
             <el-icon><DocumentCopy /></el-icon>
           </el-button>
         </div>
@@ -85,7 +78,8 @@ import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { projectAPI, labelStudioAPI, userAPI } from '@/api'
 import { ElMessage } from 'element-plus'
-import { Key, DocumentCopy, Link } from '@element-plus/icons-vue'
+import { DocumentCopy, Link } from '@element-plus/icons-vue'
+import { isProjectProcessing } from '@/utils/projectStatus'
 import LabelDefinition from '@/components/LabelDefinition.vue'
 import DataManager from '@/components/DataManager.vue'
 import AlgorithmTasks from '@/components/AlgorithmTasks.vue'
@@ -106,30 +100,27 @@ const project = ref({
   labels: [],
   createdAt: '',
   updatedAt: '',
-  labelStudioProjectId: null
+  lsProjectId: null
 })
 
 const userProfile = ref({
-  lsEmail: '',
-  lsPassword: ''
+  lsEmail: ''
 })
 
 const isProcessing = computed(() => {
-  return ['DETECTING', 'CLEANING', 'SYNCING', 'UPLOADING'].includes(project.value.status)
+  return isProjectProcessing(project.value.status)
 })
 
 let pollInterval = null
 
 // 当项目处于处理状态时，定时刷新项目数据
 watch(() => project.value?.status, (status) => {
-  const processingStatuses = ['DETECTING', 'CLEANING', 'SYNCING', 'UPLOADING']
-  
-  if (processingStatuses.includes(status) && !pollInterval) {
+  if (isProjectProcessing(status) && !pollInterval) {
     // 启动轮询
     pollInterval = setInterval(() => {
       loadProject()
     }, 3000)
-  } else if (!processingStatuses.includes(status) && pollInterval) {
+  } else if (!isProjectProcessing(status) && pollInterval) {
     // 停止轮询
     clearInterval(pollInterval)
     pollInterval = null
@@ -168,7 +159,6 @@ const loadUserProfile = async () => {
     const response = await userAPI.getUserProfile()
     if (response.data) {
       userProfile.value.lsEmail = response.data.lsEmail || ''
-      userProfile.value.lsPassword = response.data.lsPassword || ''
     }
   } catch (error) {
     console.error('加载用户信息失败:', error)
@@ -193,6 +183,13 @@ const copyToClipboard = async (text, label) => {
   } catch (error) {
     ElMessage.error('复制失败，请手动复制')
   }
+}
+
+const maskEmail = (email) => {
+  if (!email) return ''
+  const [name, domain] = email.split('@')
+  if (!domain) return email
+  return `${name.slice(0, 2)}***@${domain}`
 }
 
 const openLabelStudio = async () => {

@@ -51,7 +51,7 @@ const exportProgress = ref(0)
 const currentStatus = ref('')
 
 const handleExport = async () => {
-  if (!props.project || !props.project.id || !props.project.labelStudioProjectId) {
+  if (!props.project || !props.project.id || !(props.project.lsProjectId || props.project.labelStudioProjectId)) {
     ElMessage.warning('项目尚未同步到 Label Studio')
     return
   }
@@ -75,12 +75,6 @@ const handleExport = async () => {
     currentStatus.value = '正在下载文件...'
     
     if (response.data && response.data.downloadUrl) {
-      // 从 data URL 中提取实际数据
-      const dataUrl = response.data.downloadUrl
-      const encodedData = dataUrl.split(',')[1] || ''
-      const decodedData = decodeURIComponent(encodedData.replace(/\+/g, ' '))
-      
-      // 根据格式确定文件扩展名和 MIME 类型
       const formatExtensions = {
         'coco': { ext: 'json', mime: 'application/json' },
         'yolo': { ext: 'txt', mime: 'text/plain' },
@@ -90,17 +84,23 @@ const handleExport = async () => {
       }
       
       const formatInfo = formatExtensions[selectedFormat.value] || { ext: 'txt', mime: 'text/plain' }
-      
-      // 创建 Blob 并下载
-      const blob = new Blob([decodedData], { type: formatInfo.mime })
-      const url = window.URL.createObjectURL(blob)
+      const downloadUrl = response.data.downloadUrl
       const link = document.createElement('a')
-      link.href = url
-      link.download = `${props.project.name}_${selectedFormat.value}_export.${formatInfo.ext}`
+      if (downloadUrl.startsWith('data:')) {
+        const encodedData = downloadUrl.split(',')[1] || ''
+        const decodedData = decodeURIComponent(encodedData.replace(/\+/g, ' '))
+        const blob = new Blob([decodedData], { type: formatInfo.mime })
+        link.href = window.URL.createObjectURL(blob)
+      } else {
+        link.href = downloadUrl
+      }
+      link.download = response.data.filename || `${props.project.name}_${selectedFormat.value}_export.${formatInfo.ext}`
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
-      window.URL.revokeObjectURL(url)
+      if (downloadUrl.startsWith('data:')) {
+        window.URL.revokeObjectURL(link.href)
+      }
       
       exportProgress.value = 100
       currentStatus.value = '导出完成！'

@@ -54,17 +54,16 @@ public class FileUploadServiceImpl implements FileUploadService {
         try {
             validateChunkRequest(request, file);
 
-            String fileId = request.getFileId();
-            String filename = request.getFilename();
+            String fileId = sanitizeFileId(request.getFileId());
+            String filename = sanitizeFilename(request.getFilename());
             Integer chunkIndex = request.getChunkIndex();
             Integer totalChunks = request.getTotalChunks();
 
-            File chunkDir = new File(chunkPath, fileId);
-            if (!chunkDir.exists()) {
-                chunkDir.mkdirs();
-            }
+            Path chunkRoot = Paths.get(chunkPath).toAbsolutePath().normalize();
+            Path chunkDirPath = resolveInside(chunkRoot, fileId);
+            Files.createDirectories(chunkDirPath);
 
-            File chunkFile = new File(chunkDir, String.format("%s_%d", filename, chunkIndex));
+            File chunkFile = resolveInside(chunkDirPath, String.format("%s_%d", filename, chunkIndex)).toFile();
             if (chunkFile.exists() && !chunkFile.delete()) {
                 throw new IOException("无法覆盖已存在分块: " + chunkFile.getName());
             }
@@ -109,12 +108,12 @@ public class FileUploadServiceImpl implements FileUploadService {
     @Override
     @Transactional
     public String mergeChunks(MergeChunksRequest request) {
-        String fileId = request.getFileId();
-        String filename = request.getFilename();
+        String fileId = sanitizeFileId(request.getFileId());
+        String filename = sanitizeFilename(request.getFilename());
         Integer totalChunks = request.getTotalChunks();
         Long projectId = request.getProjectId();
 
-        File chunkDir = new File(chunkPath, fileId);
+        File chunkDir = resolveInside(Paths.get(chunkPath).toAbsolutePath().normalize(), fileId).toFile();
         Set<Integer> diskChunks = scanUploadedChunkIndexes(chunkDir, filename, totalChunks);
         if (diskChunks.size() != totalChunks) {
             throw new BusinessException(ErrorCode.FILE_006, 
@@ -124,12 +123,14 @@ public class FileUploadServiceImpl implements FileUploadService {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new ResourceNotFoundException("Project", "id", projectId));
 
-        File projectDir = new File(basePath, String.valueOf(projectId));
-        if (!projectDir.exists()) {
-            projectDir.mkdirs();
+        Path uploadRoot = Paths.get(basePath).toAbsolutePath().normalize();
+        Path projectDirPath = resolveInside(uploadRoot, String.valueOf(projectId));
+        File projectDir = projectDirPath.toFile();
+        if (!projectDir.exists() && !projectDir.mkdirs()) {
+            throw new BusinessException(ErrorCode.FILE_006, "项目目录创建失败");
         }
 
-        File mergedFile = new File(projectDir, filename);
+        File mergedFile = resolveInside(projectDirPath, filename).toFile();
 
         try {
             mergeFileChunks(chunkDir, filename, totalChunks, mergedFile);
@@ -154,7 +155,8 @@ public class FileUploadServiceImpl implements FileUploadService {
                 log.warn("不支持的文件类型: {}", filename);
             }
 
-            project.setTotalImages(project.getTotalImages() + imagePaths.size());
+            long totalImages = projectImageRepository.countByProjectId(projectId);
+            project.setTotalImages(Math.toIntExact(Math.min(Integer.MAX_VALUE, totalImages)));
             projectRepository.save(project);
 
             uploadProgressMap.remove(fileId);
@@ -173,6 +175,7 @@ public class FileUploadServiceImpl implements FileUploadService {
 
     @Override
     public UploadProgressResponse getUploadProgress(String fileId) {
+        fileId = sanitizeFileId(fileId);
         UploadProgress progress = uploadProgressMap.get(fileId);
         if (progress == null) {
             Map<String, Object> chunks = listUploadedChunks(fileId);
@@ -208,7 +211,8 @@ public class FileUploadServiceImpl implements FileUploadService {
 
     @Override
     public Map<String, Object> listUploadedChunks(String fileId) {
-        File chunkDir = new File(chunkPath, fileId);
+        fileId = sanitizeFileId(fileId);
+        File chunkDir = resolveInside(Paths.get(chunkPath).toAbsolutePath().normalize(), fileId).toFile();
         Map<String, Object> manifest = readManifest(chunkDir);
         String filename = manifest.get("filename") instanceof String ? (String) manifest.get("filename") : null;
         Integer totalChunks = manifest.get("totalChunks") instanceof Number
@@ -268,6 +272,13 @@ public class FileUploadServiceImpl implements FileUploadService {
             if (fileId == null || filename == null || totalChunks == null || totalChunks <= 0) {
                 continue;
             }
+            try {
+                fileId = sanitizeFileId(fileId);
+                filename = sanitizeFilename(filename);
+            } catch (BusinessException e) {
+                log.warn("跳过非法上传会话: dir={}, error={}", dir.getName(), e.getMessage());
+                continue;
+            }
             Set<Integer> chunks = scanUploadedChunkIndexes(dir, filename, totalChunks);
             UploadProgress progress = UploadProgress.builder()
                     .fileId(fileId)
@@ -289,10 +300,13 @@ public class FileUploadServiceImpl implements FileUploadService {
     @Override
     public boolean deleteFile(String filePath) {
         try {
-            Path path = Paths.get(basePath, filePath);
+            Path path = resolveRelativeUploadPath(filePath);
             return Files.deleteIfExists(path);
         } catch (IOException e) {
             log.error("删除文件失败: {}", e.getMessage(), e);
+            return false;
+        } catch (BusinessException e) {
+            log.warn("拒绝非法文件删除: filePath={}, error={}", filePath, e.getMessage());
             return false;
         }
     }
@@ -321,7 +335,79 @@ public class FileUploadServiceImpl implements FileUploadService {
         }
     }
 
+    private String sanitizeFileId(String fileId) {
+        if (fileId == null || fileId.isBlank()) {
+            throw new BusinessException(ErrorCode.FILE_004, "文件ID为空");
+        }
+        String safe = fileId.trim();
+        if (!safe.matches("[a-zA-Z0-9._-]{1,200}") || ".".equals(safe) || "..".equals(safe)) {
+            throw new BusinessException(ErrorCode.FILE_004, "文件ID非法");
+        }
+        return safe;
+    }
+
+    private String sanitizeFilename(String filename) {
+        if (filename == null || filename.isBlank()) {
+            throw new BusinessException(ErrorCode.FILE_004, "文件名为空");
+        }
+        String normalized = filename.replace('\\', '/');
+        String baseName = Paths.get(normalized).getFileName().toString();
+        String safe = baseName.replaceAll("[^a-zA-Z0-9._-]", "_");
+        if (safe.isBlank() || ".".equals(safe) || "..".equals(safe)) {
+            throw new BusinessException(ErrorCode.FILE_004, "文件名非法");
+        }
+        return safe;
+    }
+
+    private Path resolveInside(Path root, String child) {
+        Path normalizedRoot = root.toAbsolutePath().normalize();
+        Path target = normalizedRoot.resolve(child).normalize();
+        if (!target.startsWith(normalizedRoot)) {
+            throw new BusinessException(ErrorCode.FILE_004, "文件路径非法");
+        }
+        return target;
+    }
+
+    private Path resolveRelativeUploadPath(String filePath) {
+        if (filePath == null || filePath.isBlank()) {
+            throw new BusinessException(ErrorCode.FILE_004, "文件路径为空");
+        }
+        Path relative = Paths.get(filePath.replace('\\', '/')).normalize();
+        if (relative.isAbsolute() || relative.startsWith("..") || relative.getNameCount() < 2) {
+            throw new BusinessException(ErrorCode.FILE_004, "文件路径非法");
+        }
+        Path uploadRoot = Paths.get(basePath).toAbsolutePath().normalize();
+        Path target = uploadRoot.resolve(relative).normalize();
+        if (!target.startsWith(uploadRoot)) {
+            throw new BusinessException(ErrorCode.FILE_004, "文件路径非法");
+        }
+        return target;
+    }
+
+    private String uniqueFilename(Path directory, String safeFilename) {
+        Path target = resolveInside(directory, safeFilename);
+        if (!Files.exists(target)) {
+            return safeFilename;
+        }
+        int dotIndex = safeFilename.lastIndexOf('.');
+        String name = dotIndex > 0 ? safeFilename.substring(0, dotIndex) : safeFilename;
+        String ext = dotIndex > 0 ? safeFilename.substring(dotIndex) : "";
+        for (int i = 1; i <= 1000; i++) {
+            String candidate = name + "_" + i + ext;
+            if (!Files.exists(resolveInside(directory, candidate))) {
+                return candidate;
+            }
+        }
+        return UUID.randomUUID() + "_" + safeFilename;
+    }
+
     private void validateChunkRequest(UploadChunkRequest request, MultipartFile file) {
+        if (request.getFileId() == null || request.getFilename() == null
+                || request.getChunkIndex() == null || request.getTotalChunks() == null
+                || request.getFileSize() == null || request.getProjectId() == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "上传参数不完整");
+        }
+
         if (file.isEmpty()) {
             throw new BusinessException(ErrorCode.FILE_002, "分块文件为空");
         }
@@ -330,7 +416,7 @@ public class FileUploadServiceImpl implements FileUploadService {
             throw new BusinessException(ErrorCode.FILE_003, "分块大小超限");
         }
 
-        if (request.getChunkIndex() < 0 || request.getChunkIndex() >= request.getTotalChunks()) {
+        if (request.getTotalChunks() <= 0 || request.getChunkIndex() < 0 || request.getChunkIndex() >= request.getTotalChunks()) {
             throw new BusinessException(ErrorCode.FILE_005, "分块索引无效");
         }
 
@@ -344,7 +430,7 @@ public class FileUploadServiceImpl implements FileUploadService {
              BufferedOutputStream bos = new BufferedOutputStream(fos)) {
 
             for (int i = 0; i < totalChunks; i++) {
-                File chunkFile = new File(chunkDir, String.format("%s_%d", filename, i));
+                File chunkFile = resolveInside(chunkDir.toPath(), String.format("%s_%d", filename, i)).toFile();
                 if (!chunkFile.exists()) {
                     throw new IOException(String.format("分块文件不存在: %s_%d", filename, i));
                 }
@@ -367,7 +453,7 @@ public class FileUploadServiceImpl implements FileUploadService {
             return chunks;
         }
         for (int i = 0; i < totalChunks; i++) {
-            File chunkFile = new File(chunkDir, String.format("%s_%d", filename, i));
+            File chunkFile = resolveInside(chunkDir.toPath(), String.format("%s_%d", filename, i)).toFile();
             if (chunkFile.exists() && chunkFile.isFile()) {
                 chunks.add(i);
             }
@@ -376,9 +462,9 @@ public class FileUploadServiceImpl implements FileUploadService {
     }
 
     private void writeManifest(UploadProgress progress) throws IOException {
-        File chunkDir = new File(chunkPath, progress.getFileId());
-        if (!chunkDir.exists()) {
-            chunkDir.mkdirs();
+        File chunkDir = resolveInside(Paths.get(chunkPath).toAbsolutePath().normalize(), progress.getFileId()).toFile();
+        if (!chunkDir.exists() && !chunkDir.mkdirs()) {
+            throw new IOException("无法创建分块目录: " + chunkDir.getAbsolutePath());
         }
         Map<String, Object> manifest = new LinkedHashMap<>();
         manifest.put("fileId", progress.getFileId());
@@ -439,7 +525,9 @@ public class FileUploadServiceImpl implements FileUploadService {
                     continue;
                 }
                 
-                File outputFile = new File(projectDir, new File(entryName).getName());
+                String safeEntryName = sanitizeFilename(entryName);
+                String outputName = uniqueFilename(projectDir.toPath(), safeEntryName);
+                File outputFile = resolveInside(projectDir.toPath(), outputName).toFile();
                 
                 try (InputStream is = zipFileObj.getInputStream(entry);
                      FileOutputStream fos = new FileOutputStream(outputFile)) {
@@ -456,7 +544,7 @@ public class FileUploadServiceImpl implements FileUploadService {
                         .fileName(outputFile.getName())
                         .filePath(relativePath)
                         .fileSize(outputFile.length())
-                        .status(ProjectImage.ImageStatus.PENDING)
+                        .status(ProjectImage.ImageStatus.COMPLETED)
                         .uploadedAt(LocalDateTime.now())
                         .build();
                 projectImageRepository.save(projectImage);

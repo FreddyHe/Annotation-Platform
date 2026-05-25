@@ -77,7 +77,7 @@ springdoc:
 app:
   security:
     jwt:
-      secret: annotation-platform-secret-key-2024-must-be-at-least-256-bits-long-for-hs256-algorithm
+      secret: ${APP_JWT_SECRET:dev-only-change-me-at-least-256-bits-long-for-local-build}
       expiration: 604800000
       header: Authorization
       prefix: Bearer
@@ -94,7 +94,7 @@ app:
     internal-url: http://localhost:5001
     public-url: http://localhost:5001
     timeout: 30000
-    admin-token: 3dd84879dff6fd5949dc1dd76edbecccac3f8524
+    admin-token: ${LABEL_STUDIO_ADMIN_TOKEN:}
     db-path: /root/.local/share/label-studio/label_studio.sqlite3
 
   algorithm:

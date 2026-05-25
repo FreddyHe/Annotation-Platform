@@ -11,7 +11,6 @@ import com.annotation.platform.entity.User;
 import com.annotation.platform.exception.BusinessException;
 import com.annotation.platform.repository.OrganizationRepository;
 import com.annotation.platform.repository.SessionRepository;
-import com.annotation.platform.repository.UserRepository;
 import com.annotation.platform.service.auth.AuthService;
 import com.annotation.platform.service.labelstudio.LabelStudioProxyService;
 import com.annotation.platform.service.user.UserService;
@@ -35,7 +34,6 @@ public class AuthServiceImpl implements AuthService {
     private final AuthenticationManager authenticationManager;
     private final UserService userService;
     private final JwtUtils jwtUtils;
-    private final UserRepository userRepository;
     private final OrganizationRepository organizationRepository;
     private final SessionRepository sessionRepository;
     private final LabelStudioProxyService labelStudioProxyService;
@@ -53,16 +51,6 @@ public class AuthServiceImpl implements AuthService {
 
             User user = userService.findByUsername(request.getUsername());
             userService.updateLastLogin(user.getId());
-
-            if (request.getPassword() != null && !request.getPassword().isBlank()) {
-                try {
-                    user.setLsPlainPassword(request.getPassword());
-                    userRepository.save(user);
-                    log.info("登录时保存 LS 明文密码: userId={}", user.getId());
-                } catch (Exception e) {
-                    log.warn("保存 LS 明文密码失败: userId={}, error={}", user.getId(), e.getMessage());
-                }
-            }
 
             if (!user.getLsSynced() || user.getLsToken() == null) {
                 try {

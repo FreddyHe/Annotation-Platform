@@ -6,6 +6,8 @@ const request = axios.create({
   timeout: 600000
 })
 
+let unauthorizedPromptVisible = false
+
 request.interceptors.request.use(
   config => {
     const token = localStorage.getItem('token')
@@ -44,14 +46,20 @@ request.interceptors.response.use(
       
       switch (status) {
         case 401:
-          ElMessageBox.alert('登录已过期，请重新登录', '提示', {
-            confirmButtonText: '确定',
-            callback: () => {
-              localStorage.removeItem('token')
-            localStorage.removeItem('userInfo')
-            window.location.href = '/login'
-            }
-          })
+          if (!unauthorizedPromptVisible) {
+            unauthorizedPromptVisible = true
+            ElMessageBox.alert('登录已过期，请重新登录', '提示', {
+              confirmButtonText: '确定',
+              callback: () => {
+                localStorage.removeItem('token')
+                localStorage.removeItem('userInfo')
+                unauthorizedPromptVisible = false
+                window.location.href = '/login'
+              }
+            }).catch(() => {
+              unauthorizedPromptVisible = false
+            })
+          }
           break
         case 403:
           ElMessage.error('没有权限访问')

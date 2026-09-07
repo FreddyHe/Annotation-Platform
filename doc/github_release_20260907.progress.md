@@ -13,5 +13,6 @@
 - 已验证：`python -m pytest scripts/test_label_studio_proxy.py -q` 为 2 passed。首次误用 unittest 发现 0 项，未将该结果作为测试通过依据。
 - 已验证：经 redcloud fetch，HEAD 与 origin/main ahead/behind 为 0/0；GitHub 仓库当前为 PUBLIC。
 - 未验证：独立新机器依赖安装、完整模型下载、全流程 UI/训练/边端复现。部署依然约定 Linux 固定目录，README 与部署文档已明确说明。
-- 下一步：提交本次代码与部署文档、正常推送 main（不 force），再核对远端提交哈希。
-- 发布前补充：开发说明采用 CRLF 导致 diff whitespace 检查告警，已统一换行并清理行尾空格；补充文件后重新扫描常见令牌格式，未匹配。代码已形成发布提交，等待远端确认。
+- 发布前补充：开发说明采用 CRLF 导致 diff whitespace 检查告警，已统一换行并清理行尾空格；补充文件后重新扫描常见令牌格式，未匹配。
+- 已发布：`with-redcloud git push origin main` 成功，代码提交 `2a6bc2efe9654f5203a95948cbfbfaa99a9f0ef9`；`git ls-remote origin refs/heads/main` 返回同一哈希，完成远端核对。
+- 后续建议：合作方按 DEPLOYMENT.md 在新 Linux 机器准备环境和所需模型，执行上传、建项目、预标注和保存同步验收。本次未启动新的 GPU 推理或训练。

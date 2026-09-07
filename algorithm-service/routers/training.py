@@ -12,6 +12,8 @@ from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional, Dict, List, Any
 
+from compute_device import configure_cuda_visible_devices, resolve_compute_device
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/training", tags=["training"])
 
@@ -841,6 +843,7 @@ async def run_yolo_training(
     with open(data_yaml) as f:
         data_cfg = yaml.safe_load(f)
     names = data_cfg.get("names", {})
+    device = resolve_compute_device("0", context="single-class YOLO training")
 
     train_cmd = (
         f"yolo detect train "
@@ -853,12 +856,17 @@ async def run_yolo_training(
         f"project={output_dir} "
         f"name=train "
         f"exist_ok=True "
-        f"verbose=True"
+        f"verbose=True "
+        f"device={device}"
     )
     logger.info(f"训练命令: {train_cmd}")
 
     env = os.environ.copy()
-    env.pop("CUDA_VISIBLE_DEVICES", None)
+    configure_cuda_visible_devices(device)
+    if device == "cpu":
+        env.pop("CUDA_VISIBLE_DEVICES", None)
+    else:
+        env["CUDA_VISIBLE_DEVICES"] = os.environ["CUDA_VISIBLE_DEVICES"]
 
     proc = await asyncio.create_subprocess_shell(
         train_cmd,

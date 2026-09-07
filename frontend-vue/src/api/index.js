@@ -146,6 +146,13 @@ export const projectAPI = {
     })
   },
 
+  getProjectVideos(id) {
+    return request({
+      url: `/projects/${id}/videos`,
+      method: 'get'
+    })
+  },
+
   getProjectStats(id) {
     return request({
       url: `/projects/${id}/stats`,
@@ -268,10 +275,12 @@ export const uploadAPI = {
     })
   },
 
-  getUploadedChunks(fileId) {
+  getUploadedChunks(fileId, projectId) {
     return request({
       url: `/upload/chunks/${fileId}`,
-      method: 'get'
+      method: 'get',
+      params: { projectId },
+      silentError: true
     })
   },
 
@@ -462,6 +471,153 @@ export const labelStudioAPI = {
       url: '/label-studio/user-info',
       method: 'get',
       params: { lsToken }
+    })
+  }
+}
+
+export const autoLabelToModelAPI = {
+  parseRequirement(projectId, data) {
+    return request({
+      url: `/projects/${projectId}/requirements/parse`,
+      method: 'post',
+      data
+    })
+  },
+
+  getLatestRequirement(projectId) {
+    return request({
+      url: `/projects/${projectId}/requirements/latest`,
+      method: 'get'
+    })
+  },
+
+  createDatasetProfile(projectId, data = {}) {
+    return request({
+      url: `/projects/${projectId}/dataset-profile`,
+      method: 'post',
+      data
+    })
+  },
+
+  getLatestDatasetProfile(projectId) {
+    return request({
+      url: `/projects/${projectId}/dataset-profile/latest`,
+      method: 'get'
+    })
+  },
+
+  previewRoute(projectId, data = {}) {
+    return request({
+      url: `/projects/${projectId}/model-route/preview`,
+      method: 'post',
+      data
+    })
+  },
+
+  getLatestRoute(projectId) {
+    return request({
+      url: `/projects/${projectId}/model-route/latest`,
+      method: 'get'
+    })
+  },
+
+  createJob(projectId, data = {}) {
+    return request({
+      url: `/projects/${projectId}/auto-label/jobs`,
+      method: 'post',
+      data
+    })
+  },
+
+  listJobs(projectId) {
+    return request({
+      url: `/projects/${projectId}/auto-label/jobs`,
+      method: 'get'
+    })
+  },
+
+  getJob(projectId, jobId) {
+    return request({
+      url: `/projects/${projectId}/auto-label/jobs/${jobId}`,
+      method: 'get'
+    })
+  },
+
+  probeJob(projectId, jobId) {
+    return request({
+      url: `/projects/${projectId}/auto-label/jobs/${jobId}/probe`,
+      method: 'post'
+    })
+  },
+
+  runJob(projectId, jobId) {
+    return request({
+      url: `/projects/${projectId}/auto-label/jobs/${jobId}/run`,
+      method: 'post',
+      timeout: 90 * 60 * 1000,
+      silentError: true
+    })
+  },
+
+  syncLabelStudio(projectId, jobId) {
+    return request({
+      url: `/projects/${projectId}/auto-label/jobs/${jobId}/sync-label-studio`,
+      method: 'post'
+    })
+  },
+
+  listCandidates(projectId, jobId, params = {}) {
+    return request({
+      url: `/projects/${projectId}/auto-label/jobs/${jobId}/candidates`,
+      method: 'get',
+      params
+    })
+  },
+
+  listFusedPredictions(projectId, jobId, params = {}) {
+    return request({
+      url: `/projects/${projectId}/auto-label/jobs/${jobId}/fused-predictions`,
+      method: 'get',
+      params
+    })
+  },
+
+  getAnnotatedVideo(projectId, jobId) {
+    return request({
+      url: `/projects/${projectId}/auto-label/jobs/${jobId}/annotated-video`,
+      method: 'get'
+    })
+  },
+
+  renderAnnotatedVideo(projectId, jobId) {
+    return request({
+      url: `/projects/${projectId}/auto-label/jobs/${jobId}/annotated-video`,
+      method: 'post',
+      timeout: 90 * 60 * 1000,
+      silentError: true
+    })
+  },
+
+  trainFromReviewedLabels(projectId, data = {}) {
+    return request({
+      url: `/projects/${projectId}/train-from-reviewed-labels`,
+      method: 'post',
+      data
+    })
+  },
+
+  listModels(params = {}) {
+    return request({
+      url: '/models/registry',
+      method: 'get',
+      params
+    })
+  },
+
+  syncModels() {
+    return request({
+      url: '/models/registry/sync',
+      method: 'post'
     })
   }
 }

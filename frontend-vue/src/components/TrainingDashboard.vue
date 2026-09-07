@@ -18,7 +18,7 @@
           <template #header><div class="card-header"><el-icon><DataLine /></el-icon><span class="card-title">数据统计</span></div></template>
           <el-descriptions :column="1" border>
             <el-descriptions-item label="项目名称">{{ currentProject?.name || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="Label Studio ID">{{ currentProject?.labelStudioProjectId || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="标注项目 ID">{{ currentProject?.labelStudioProjectId || '-' }}</el-descriptions-item>
             <el-descriptions-item label="已标注图片">{{ stats.annotatedImages || '-' }}</el-descriptions-item>
             <el-descriptions-item label="标注框总数">{{ stats.totalAnnotations || '-' }}</el-descriptions-item>
             <el-descriptions-item label="类别数量">{{ stats.labelCount || '-' }}</el-descriptions-item>
@@ -78,12 +78,12 @@ const loadProjects = async () => { try { const res = await projectAPI.getProject
 const handleProjectChange = async (projectId) => { currentProject.value = projects.value.find(p => p.id === projectId); if (currentProject.value) await loadProjectStats() }
 const loadProjectStats = async () => { try { const res = await projectAPI.getProjectStats(currentProject.value.id); stats.value = res.data || {} } catch (error) { console.error('加载项目统计失败', error) } }
 const startTraining = async () => {
-  try { isStarting.value = true; const lsToken = await getLabelStudioToken(); if (!lsToken) { ElMessage.error('无法获取 Label Studio Token'); return }
+  try { isStarting.value = true; const lsToken = await getLabelStudioToken(); if (!lsToken) { ElMessage.error('无法获取标注服务令牌'); return }
     const res = await trainingAPI.startTraining({ projectId: trainingForm.value.projectId, labelStudioProjectId: currentProject.value.labelStudioProjectId, lsToken, epochs: trainingForm.value.epochs, batchSize: trainingForm.value.batchSize, imageSize: trainingForm.value.imageSize, modelType: trainingForm.value.modelType, device: trainingForm.value.device })
     currentTraining.value = res.data; logs.value = []; currentEpoch.value = 0; ElMessage.success('训练任务已启动'); startLogPolling(); startDurationTimer()
   } catch (error) { ElMessage.error('启动训练失败: ' + (error.response?.data?.message || error.message)) } finally { isStarting.value = false }
 }
-const getLabelStudioToken = async () => { try { const res = await labelStudioAPI.getLoginUrl({ projectId: currentProject.value.id }); return res.data?.lsToken } catch (error) { console.error('获取 Label Studio Token 失败', error); return null } }
+const getLabelStudioToken = async () => { try { const res = await labelStudioAPI.getLoginUrl({ projectId: currentProject.value.id }); return res.data?.lsToken } catch (error) { console.error('获取标注服务令牌失败', error); return null } }
 const startLogPolling = () => { if (logPollingTimer.value) clearInterval(logPollingTimer.value); logPollingTimer.value = setInterval(async () => { try { const res = await trainingAPI.getTrainingLog(currentTraining.value.taskId); const logContent = res.data?.log_content || ''; if (logContent) { const newLogs = logContent.split('\n').filter(line => line.trim()); const lastLogIndex = logs.value.length > 0 ? logs.value.findIndex(log => log === newLogs[0]) : -1; if (lastLogIndex === -1) logs.value = [...logs.value, ...newLogs]; else logs.value = [...logs.value.slice(0, lastLogIndex), ...newLogs]; await nextTick(); scrollToBottom(); parseCurrentEpoch() }; const recordRes = await trainingAPI.getTrainingRecordByTaskId(currentTraining.value.taskId); currentTraining.value = recordRes.data; if (currentTraining.value.status !== 'RUNNING') { stopLogPolling(); stopDurationTimer(); if (currentTraining.value.status === 'COMPLETED') ElMessage.success('训练完成！'); else if (currentTraining.value.status === 'FAILED') ElMessage.error('训练失败: ' + currentTraining.value.errorMessage) } } catch (error) { console.error('轮询日志失败', error) } }, 3000) }
 const stopLogPolling = () => { if (logPollingTimer.value) { clearInterval(logPollingTimer.value); logPollingTimer.value = null } }
 const startDurationTimer = () => { if (durationTimer.value) clearInterval(durationTimer.value); const startTime = new Date(currentTraining.value.startedAt).getTime(); durationTimer.value = setInterval(() => { const diff = Math.floor((Date.now() - startTime) / 1000); const hours = Math.floor(diff / 3600); const minutes = Math.floor((diff % 3600) / 60); const seconds = diff % 60; runningDuration.value = String(hours).padStart(2, '0') + ':' + String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0') }, 1000) }

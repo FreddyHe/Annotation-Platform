@@ -77,9 +77,27 @@ public class FileUploadController {
     }
 
     @GetMapping("/chunks/{fileId}")
-    public Result<Map<String, Object>> getUploadedChunks(@PathVariable String fileId, HttpServletRequest httpRequest) {
-        requireUploadSessionAccess(fileId, httpRequest);
-        return Result.success(fileUploadService.listUploadedChunks(fileId));
+    public Result<Map<String, Object>> getUploadedChunks(
+            @PathVariable String fileId,
+            @RequestParam(required = false) Long projectId,
+            HttpServletRequest httpRequest) {
+        Map<String, Object> chunks = new HashMap<>(fileUploadService.listUploadedChunks(fileId));
+        Object sessionProjectId = chunks.get("projectId");
+        if (sessionProjectId == null) {
+            if (projectId == null) {
+                throw new com.annotation.platform.exception.ResourceNotFoundException("UploadSession", "fileId", fileId);
+            }
+            projectAccessService.requireProjectAccess(projectId, httpRequest);
+            chunks.put("projectId", projectId);
+            chunks.putIfAbsent("uploadedChunks", java.util.Collections.emptyList());
+            chunks.putIfAbsent("receivedChunks", 0);
+        } else {
+            Long ownerProjectId = sessionProjectId instanceof Number number
+                    ? number.longValue()
+                    : Long.parseLong(String.valueOf(sessionProjectId));
+            projectAccessService.requireProjectAccess(ownerProjectId, httpRequest);
+        }
+        return Result.success(chunks);
     }
 
     @DeleteMapping("/file")

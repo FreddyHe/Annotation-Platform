@@ -65,13 +65,20 @@ class ModelConfigTestRequest(BaseModel):
     model_name: Optional[str] = Field(default=None, description="Model name")
 
 
+def _is_local_base_url(base_url: str) -> bool:
+    value = (base_url or "").strip().lower()
+    return value.startswith("http://127.0.0.1") or value.startswith("http://localhost")
+
+
 @router.post("/model-config/test-vlm")
 async def test_vlm_model_config(request: ModelConfigTestRequest):
     from openai import OpenAI
 
-    api_key = request.api_key or "sk-644be34708ab44a38a0a28c82e37d6b6"
-    base_url = request.base_url or "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    model_name = request.model_name or "qwen-vl-plus"
+    api_key = request.api_key or "local-no-key-required"
+    base_url = request.base_url or "http://127.0.0.1:8002/v1"
+    model_name = request.model_name or "local-vlm"
+    if not _is_local_base_url(base_url):
+        return {"success": False, "message": "Only local VLM endpoints are allowed"}
 
     try:
         client = OpenAI(api_key=api_key, base_url=base_url)
@@ -91,9 +98,11 @@ async def test_vlm_model_config(request: ModelConfigTestRequest):
 async def test_llm_model_config(request: ModelConfigTestRequest):
     from openai import OpenAI
 
-    api_key = request.api_key or "sk-AomDFLTBpbXd6JXk2hSv2WvzWccvww3TGkPRnA5L51ENOmNt"
-    base_url = request.base_url or "https://api.chatanywhere.tech/v1"
-    model_name = request.model_name or "gpt-4.1"
+    api_key = request.api_key or "local-no-key-required"
+    base_url = request.base_url or "http://127.0.0.1:8002/v1"
+    model_name = request.model_name or "local-llm"
+    if not _is_local_base_url(base_url):
+        return {"success": False, "message": "Only local LLM endpoints are allowed"}
 
     try:
         client = OpenAI(api_key=api_key, base_url=base_url)
@@ -344,9 +353,24 @@ async def call_vlm_cleaning(
     
     # 初始化 Qwen-VL 客户端
     from openai import OpenAI
-    effective_api_key = vlm_api_key or legacy_api_key or "sk-644be34708ab44a38a0a28c82e37d6b6"
-    effective_base_url = vlm_base_url or legacy_endpoint or "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    effective_model_name = vlm_model_name or "qwen-vl-plus"
+    effective_api_key = vlm_api_key or legacy_api_key or "local-no-key-required"
+    effective_base_url = vlm_base_url or legacy_endpoint or "http://127.0.0.1:8002/v1"
+    effective_model_name = vlm_model_name or "local-vlm"
+    if not _is_local_base_url(effective_base_url):
+        logger.warning("Remote VLM endpoint rejected; returning manual-review fallback")
+        return [
+            {
+                "image_path": detection.get("image_path", "unknown"),
+                "image_name": detection.get("image_name", "unknown"),
+                "original_label": detection.get("label", "unknown"),
+                "bbox": detection.get("bbox", []),
+                "score": detection.get("score", 0.0),
+                "vlm_decision": "review",
+                "vlm_reasoning": "Only local VLM endpoints are allowed; manual review required.",
+                "label_definition": label_definitions.get(detection.get("label", ""), "")
+            }
+            for detection in detections
+        ]
     client = OpenAI(
         api_key=effective_api_key,
         base_url=effective_base_url

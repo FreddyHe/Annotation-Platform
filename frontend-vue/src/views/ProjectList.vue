@@ -1,23 +1,21 @@
 <template>
   <div class="project-list">
-    <el-card>
-      <template #header>
-        <div class="card-header">
-          <span class="card-title">项目管理</span>
-          <el-button type="primary" @click="handleCreate">
-            <el-icon><Plus /></el-icon>
-            创建项目
-          </el-button>
-        </div>
-      </template>
+    <PageHeading
+      eyebrow="DATA WORKSPACE"
+      title="项目管理"
+      description="管理数据上传、智能标注、人工复核、训练测试和边端下发的完整项目闭环。"
+    >
+      <PlatformButton @click="handleCreate">＋ 创建项目</PlatformButton>
+    </PageHeading>
+    <PanelCard title="项目列表" :description="`当前共 ${total} 个项目`" :padded="false">
       
       <el-table :data="projects" v-loading="loading" style="width: 100%">
         <el-table-column prop="name" label="项目名称" />
         <el-table-column prop="status" label="状态">
           <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)" size="small">
+            <StatusPill :tone="getStatusTone(row.status)">
               {{ getStatusText(row.status) }}
-            </el-tag>
+            </StatusPill>
           </template>
         </el-table-column>
         <el-table-column prop="totalImages" label="图片数" />
@@ -49,7 +47,7 @@
         @current-change="handlePageChange"
         style="margin-top: 20px; justify-content: flex-end; display: flex;"
       />
-    </el-card>
+    </PanelCard>
 
     <el-dialog
       v-model="showCreateDialog"
@@ -107,6 +105,10 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { projectAPI } from '@/api/index'
 import { getProjectStatusText, getProjectStatusType } from '@/utils/projectStatus'
+import PageHeading from '@/components/platform-ui/PageHeading.vue'
+import PanelCard from '@/components/platform-ui/PanelCard.vue'
+import PlatformButton from '@/components/platform-ui/PlatformButton.vue'
+import StatusPill from '@/components/platform-ui/StatusPill.vue'
 
 const router = useRouter()
 
@@ -142,6 +144,10 @@ const labelInputValue = ref('')
 const getStatusType = (status) => {
   return getProjectStatusType(status)
 }
+
+const getStatusTone = (status) => ({
+  success: 'success', danger: 'danger', warning: 'warning', primary: 'active', info: 'neutral'
+}[getStatusType(status)] || 'neutral')
 
 const getStatusText = (status) => {
   return getProjectStatusText(status)
@@ -295,18 +301,6 @@ onMounted(() => {
 
 <style scoped>
 .project-list {
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.card-title {
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--gray-900);
 }
 
 .tag-group {

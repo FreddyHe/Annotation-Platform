@@ -1,13 +1,19 @@
 import json
+import os
 import re
 from typing import Any, Dict, Optional
 
 from loguru import logger
 
 
-DEFAULT_LLM_API_KEY = "sk-AomDFLTBpbXd6JXk2hSv2WvzWccvww3TGkPRnA5L51ENOmNt"
-DEFAULT_LLM_BASE_URL = "https://api.chatanywhere.tech/v1"
-DEFAULT_LLM_MODEL_NAME = "gpt-4.1"
+DEFAULT_LLM_API_KEY = os.getenv("LOCAL_LLM_API_KEY", "local-no-key-required")
+DEFAULT_LLM_BASE_URL = os.getenv("LOCAL_LLM_BASE_URL", "http://127.0.0.1:8002/v1")
+DEFAULT_LLM_MODEL_NAME = os.getenv("LOCAL_LLM_MODEL_NAME", "local-llm")
+
+
+def _is_local_base_url(base_url: str) -> bool:
+    value = (base_url or "").strip().lower()
+    return value.startswith("http://127.0.0.1") or value.startswith("http://localhost")
 
 
 def _extract_json_object(text: str) -> Dict[str, Any]:
@@ -37,6 +43,8 @@ class LlmService:
         self.api_key = api_key or DEFAULT_LLM_API_KEY
         self.base_url = base_url or DEFAULT_LLM_BASE_URL
         self.model_name = model_name or DEFAULT_LLM_MODEL_NAME
+        if not _is_local_base_url(self.base_url):
+            raise RuntimeError("Only local OpenAI-compatible LLM endpoints are allowed in this project")
         self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
 
     def parse_requirement(self, raw_requirement: str) -> Dict[str, Any]:
@@ -212,4 +220,3 @@ raw_requirement:
         except Exception as e:
             logger.error(f"LLM chat failed: {e}")
             raise
-

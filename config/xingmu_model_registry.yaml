@@ -1,0 +1,197 @@
+schema_version: "1.0"
+generated_at: "2026-06-03"
+source_root: "/root/autodl-fs/xingmu_model"
+source_catalog: "/root/autodl-fs/xingmu_model/platform/inference_service/capability_catalog.py"
+source_service: "/root/autodl-fs/xingmu_model/platform/inference_service/app.py"
+integration_policy:
+  allowed_scope: "frontend_displayed_acceptance_scenarios_only"
+  displayed_capabilities: 32
+  hidden_capabilities_excluded: 8
+  default_routable: true
+  mutation_policy: "do_not_move_delete_or_rename_xingmu_model_assets"
+  annotation_platform_strategy: "HYBRID_TEACHER_QUALITY"
+  annotation_platform_priority: "quality_first"
+  notes:
+    - "This manifest is an Annotation-Platform sidecar registry. It does not relocate or rewrite xingmu_model assets."
+    - "Only the 32 frontend-displayed, direct-testable scenarios are eligible for default routing."
+    - "The 8 hidden scenarios are recorded for exclusion and must not be selected by default model routing."
+
+service_binding:
+  base_url: "http://127.0.0.1:9000"
+  health_endpoint: "/healthz"
+  frontend_public_route: "Model Registry -> xingmu_model"
+  algorithm_adapter: "/root/autodl-fs/Annotation-Platform/algorithm-service/adapters/xingmu_adapter.py"
+  backend_seed_source: "/root/autodl-fs/Annotation-Platform/backend-springboot/src/main/java/com/annotation/platform/service/AutoLabelToModelService.java"
+
+hidden_excluded:
+  - excel_no: 17
+    label: "小吃车"
+  - excel_no: 18
+    label: "违规摆摊"
+  - excel_no: 22
+    label: "非法垂钓"
+  - excel_no: 35
+    label: "违停区域占用"
+  - excel_no: 37
+    label: "高速应急车道占用"
+  - excel_no: 38
+    label: "行人闯入高速公路"
+  - excel_no: 39
+    label: "林场违建识别"
+  - excel_no: 40
+    label: "非法偷盗识别"
+
+model_groups:
+  - group_id: "M1"
+    group_ref: "m1_uav_rgb_general"
+    group_name: "无人机 RGB 通用检测组"
+    task_type: "image_detection"
+    domain_tags: ["通用场景", "工地场景", "城管场景", "低空巡检"]
+    classes: ["person", "vehicle", "boat", "engineering_vehicle", "excavator", "dump_truck"]
+    aliases: ["人形", "车辆", "船只", "工程车辆", "挖掘机", "渣土车", "无人机俯视"]
+    endpoint: "/api/model-demo/predict"
+    status: "available"
+    version: "v0.5.6_public_ocr_repair"
+    notes: "共享 xingmu predict 入口；已作为默认可路由专用模型组接入。"
+
+  - group_id: "M2"
+    group_ref: "m2_thermal"
+    group_name: "红外热成像检测组"
+    task_type: "image_detection"
+    domain_tags: ["通用场景", "消防场景", "红外巡检"]
+    classes: ["thermal_person", "thermal_vehicle", "thermal_boat", "thermal_hotspot", "thermal_fire"]
+    aliases: ["红外人形", "红外车辆", "红外船只", "红外烟火", "热成像"]
+    endpoint: "/api/model-demo/predict"
+    status: "available"
+    version: "v0.5.6_public_ocr_repair"
+    notes: "用于红外/热成像输入；Router 仅在需求或标签命中红外语义时优先选择。"
+
+  - group_id: "M3"
+    group_ref: "m3_smoke_fire"
+    group_name: "烟火检测组"
+    task_type: "image_detection"
+    domain_tags: ["消防场景", "低空巡检", "安全监管"]
+    classes: ["smoke", "fire"]
+    aliases: ["烟火", "烟雾", "火情", "明火", "smoke", "fire"]
+    endpoint: "/api/model-demo/predict"
+    status: "available_with_upstream_risk"
+    version: "v0.5.6_public_ocr_repair"
+    notes: "服务注册可见；曾观察到场景样例上游 500，平台需保留 DINO 候选兜底。"
+
+  - group_id: "M4"
+    group_ref: "m4_ppe"
+    group_name: "工地 PPE 检测组"
+    task_type: "image_detection"
+    domain_tags: ["工地场景", "安全监管"]
+    classes: ["helmet"]
+    aliases: ["安全帽", "头盔", "hardhat", "helmet"]
+    endpoint: "/api/model-demo/predict"
+    status: "available"
+    version: "v0.5.6_public_ocr_repair"
+    notes: "安全帽未佩戴为独立单图端点，见 M8。"
+
+  - group_id: "M5"
+    group_ref: "m5_road_municipal"
+    group_name: "道路市政检测组"
+    task_type: "image_detection"
+    domain_tags: ["交通场景", "市政场景"]
+    classes: ["pothole", "crack", "road_damage", "road_debris", "waterlogging"]
+    aliases: ["路面破损", "路面杂物", "路面积水", "道路破损", "道路积水"]
+    endpoint: "/api/model-demo/predict"
+    status: "available"
+    version: "v0.5.6_public_ocr_repair"
+    notes: "用于道路病害、杂物和积水候选召回。"
+
+  - group_id: "M6"
+    group_ref: "m6_water_env"
+    group_name: "水面与环境检测组"
+    task_type: "image_detection"
+    domain_tags: ["水利场景", "城管场景", "环保场景"]
+    classes: ["garbage_bag", "floating_debris", "oil_spill", "floating_trash", "aquatic_plant"]
+    aliases: ["垃圾包", "水面漂浮物", "水面油污", "水面垃圾", "水面植物"]
+    endpoint: "/api/model-demo/predict"
+    status: "available"
+    version: "v0.5.6_public_ocr_repair"
+    notes: "用于水面污染和环境杂物相关可验收场景。"
+
+  - group_id: "M7"
+    group_ref: "m7_solar"
+    group_name: "光伏太阳能板检测组"
+    task_type: "image_detection"
+    domain_tags: ["能源场景", "低空巡检"]
+    classes: ["solar_panel", "panel_damage", "panel_soiling", "hotspot", "shadow"]
+    aliases: ["太阳能板", "光伏板", "组件破损", "热斑", "遮挡"]
+    endpoint: "/api/model-demo/predict"
+    status: "available"
+    version: "v0.5.6_public_ocr_repair"
+    notes: "用于能源巡检，仍需结合项目数据做人审确认。"
+
+  - group_id: "M8"
+    group_ref: "single_image_endpoint"
+    group_name: "单图专用端点组"
+    task_type: "single_image_endpoint"
+    domain_tags: ["工地场景", "城管场景", "市政场景", "水利场景", "环保场景", "交通场景"]
+    classes: ["endpoint_specific"]
+    aliases: ["安全帽未佩戴", "建筑垃圾乱堆", "井盖", "涉水识别", "东西焚烧", "路面标线", "非机动车道占用", "近景车牌号码识别"]
+    endpoint: "multiple:/api/model-demo/*"
+    status: "available"
+    version: "v0.5.6_public_ocr_repair"
+    notes: "每个场景有独立 endpoint；候选运行时按 scenario_inventory 的 endpoint 分发。"
+
+  - group_id: "M9"
+    group_ref: "event_sample"
+    group_name: "事件样例回放组"
+    task_type: "event_sample"
+    domain_tags: ["通用场景", "交通场景"]
+    classes: ["event_sample"]
+    aliases: ["人群聚集", "交通拥堵", "事件回放"]
+    endpoint: "/api/model-demo/event-video-replay"
+    status: "available"
+    version: "v0.5.6_public_ocr_repair"
+    notes: "事件型能力当前作为样例/回放入口接入，不伪造逐框检测结果。"
+
+  - group_id: "M10"
+    group_ref: "ocr_endpoint"
+    group_name: "OCR 与文本识别组"
+    task_type: "single_image_endpoint"
+    domain_tags: ["通用场景", "交通场景"]
+    classes: ["text", "plate_text"]
+    aliases: ["通用文字OCR识别", "近景车牌号码识别", "文字", "车牌"]
+    endpoint: "multiple:/api/model-demo/ocr,/api/model-demo/plate-recognize"
+    status: "available"
+    version: "v0.5.6_public_ocr_repair"
+    notes: "OCR 和车牌识别统一登记为文本识别资产；平台侧仍按具体 endpoint 路由。"
+
+scenario_inventory:
+  - {excel_no: 1, model_id: "xingmu-01-人形", label: "人形", group_id: "M1", group_ref: "m1_uav_rgb_general", task_type: "image_detection", endpoint: "/api/model-demo/predict", default_routable: true}
+  - {excel_no: 2, model_id: "xingmu-02-红外人形", label: "红外人形", group_id: "M2", group_ref: "m2_thermal", task_type: "image_detection", endpoint: "/api/model-demo/predict", default_routable: true}
+  - {excel_no: 3, model_id: "xingmu-03-车辆", label: "车辆", group_id: "M1", group_ref: "m1_uav_rgb_general", task_type: "image_detection", endpoint: "/api/model-demo/predict", default_routable: true}
+  - {excel_no: 4, model_id: "xingmu-04-红外车辆", label: "红外车辆", group_id: "M2", group_ref: "m2_thermal", task_type: "image_detection", endpoint: "/api/model-demo/predict", default_routable: true}
+  - {excel_no: 5, model_id: "xingmu-05-人群聚集", label: "人群聚集", group_id: "M9", group_ref: "event_sample", task_type: "event_sample", endpoint: "/api/model-demo/event-video-replay", default_routable: true}
+  - {excel_no: 6, model_id: "xingmu-06-船只", label: "船只", group_id: "M1", group_ref: "m1_uav_rgb_general", task_type: "image_detection", endpoint: "/api/model-demo/predict", default_routable: true}
+  - {excel_no: 7, model_id: "xingmu-07-红外船只", label: "红外船只", group_id: "M2", group_ref: "m2_thermal", task_type: "image_detection", endpoint: "/api/model-demo/predict", default_routable: true}
+  - {excel_no: 8, model_id: "xingmu-08-通用文字ocr识别", label: "通用文字OCR识别", group_id: "M10", group_ref: "ocr_endpoint", task_type: "single_image_endpoint", endpoint: "/api/model-demo/ocr", default_routable: true}
+  - {excel_no: 9, model_id: "xingmu-09-烟火", label: "烟火", group_id: "M3", group_ref: "m3_smoke_fire", task_type: "image_detection", endpoint: "/api/model-demo/predict", default_routable: true}
+  - {excel_no: 10, model_id: "xingmu-10-红外烟火", label: "红外烟火", group_id: "M2", group_ref: "m2_thermal", task_type: "image_detection", endpoint: "/api/model-demo/predict", default_routable: true}
+  - {excel_no: 11, model_id: "xingmu-11-安全帽", label: "安全帽", group_id: "M4", group_ref: "m4_ppe", task_type: "image_detection", endpoint: "/api/model-demo/predict", default_routable: true}
+  - {excel_no: 12, model_id: "xingmu-12-安全帽未佩戴", label: "安全帽未佩戴", group_id: "M8", group_ref: "single_image_endpoint", task_type: "single_image_endpoint", endpoint: "/api/model-demo/no-helmet-public", default_routable: true}
+  - {excel_no: 13, model_id: "xingmu-13-工程车辆", label: "工程车辆", group_id: "M1", group_ref: "m1_uav_rgb_general", task_type: "image_detection", endpoint: "/api/model-demo/predict", default_routable: true}
+  - {excel_no: 14, model_id: "xingmu-14-挖掘机", label: "挖掘机", group_id: "M1", group_ref: "m1_uav_rgb_general", task_type: "image_detection", endpoint: "/api/model-demo/predict", default_routable: true}
+  - {excel_no: 15, model_id: "xingmu-15-渣土车", label: "渣土车", group_id: "M1", group_ref: "m1_uav_rgb_general", task_type: "image_detection", endpoint: "/api/model-demo/predict", default_routable: true}
+  - {excel_no: 16, model_id: "xingmu-16-垃圾包", label: "垃圾包", group_id: "M6", group_ref: "m6_water_env", task_type: "image_detection", endpoint: "/api/model-demo/predict", default_routable: true}
+  - {excel_no: 19, model_id: "xingmu-19-建筑垃圾乱堆", label: "建筑垃圾乱堆", group_id: "M8", group_ref: "single_image_endpoint", task_type: "single_image_endpoint", endpoint: "/api/model-demo/construction-waste-pile-proxy", default_routable: true}
+  - {excel_no: 20, model_id: "xingmu-20-井盖", label: "井盖", group_id: "M8", group_ref: "single_image_endpoint", task_type: "single_image_endpoint", endpoint: "/api/model-demo/manhole-abnormal-v2", default_routable: true}
+  - {excel_no: 21, model_id: "xingmu-21-太阳能板", label: "太阳能板", group_id: "M7", group_ref: "m7_solar", task_type: "image_detection", endpoint: "/api/model-demo/predict", default_routable: true}
+  - {excel_no: 23, model_id: "xingmu-23-水面漂浮物", label: "水面漂浮物", group_id: "M6", group_ref: "m6_water_env", task_type: "image_detection", endpoint: "/api/model-demo/predict", default_routable: true}
+  - {excel_no: 24, model_id: "xingmu-24-水面油污", label: "水面油污", group_id: "M6", group_ref: "m6_water_env", task_type: "image_detection", endpoint: "/api/model-demo/predict", default_routable: true}
+  - {excel_no: 25, model_id: "xingmu-25-水面垃圾", label: "水面垃圾", group_id: "M6", group_ref: "m6_water_env", task_type: "image_detection", endpoint: "/api/model-demo/predict", default_routable: true}
+  - {excel_no: 26, model_id: "xingmu-26-水面植物", label: "水面植物", group_id: "M6", group_ref: "m6_water_env", task_type: "image_detection", endpoint: "/api/model-demo/predict", default_routable: true}
+  - {excel_no: 27, model_id: "xingmu-27-涉水识别", label: "涉水识别", group_id: "M8", group_ref: "single_image_endpoint", task_type: "single_image_endpoint", endpoint: "/api/model-demo/water-intrusion-proxy-v2", default_routable: true}
+  - {excel_no: 28, model_id: "xingmu-28-东西焚烧", label: "东西焚烧", group_id: "M8", group_ref: "single_image_endpoint", task_type: "single_image_endpoint", endpoint: "/api/model-demo/open-burning-dual-light-proxy-v2", default_routable: true}
+  - {excel_no: 29, model_id: "xingmu-29-交通拥堵", label: "交通拥堵", group_id: "M9", group_ref: "event_sample", task_type: "event_sample", endpoint: "/api/model-demo/event-video-replay", default_routable: true}
+  - {excel_no: 30, model_id: "xingmu-30-路面标线", label: "路面标线", group_id: "M8", group_ref: "single_image_endpoint", task_type: "single_image_endpoint", endpoint: "/api/model-demo/road-marking-wear", default_routable: true}
+  - {excel_no: 31, model_id: "xingmu-31-路面破损", label: "路面破损", group_id: "M5", group_ref: "m5_road_municipal", task_type: "image_detection", endpoint: "/api/model-demo/predict", default_routable: true}
+  - {excel_no: 32, model_id: "xingmu-32-路面杂物", label: "路面杂物", group_id: "M5", group_ref: "m5_road_municipal", task_type: "image_detection", endpoint: "/api/model-demo/predict", default_routable: true}
+  - {excel_no: 33, model_id: "xingmu-33-路面积水", label: "路面积水", group_id: "M5", group_ref: "m5_road_municipal", task_type: "image_detection", endpoint: "/api/model-demo/predict", default_routable: true}
+  - {excel_no: 34, model_id: "xingmu-34-非机动车道占用", label: "非机动车道占用", group_id: "M8", group_ref: "single_image_endpoint", task_type: "single_image_endpoint", endpoint: "/api/model-demo/traffic-lane-parking-proxy-v2", default_routable: true}
+  - {excel_no: 36, model_id: "xingmu-36-近景车牌号码识别", label: "近景车牌号码识别", group_id: "M10", group_ref: "ocr_endpoint", task_type: "single_image_endpoint", endpoint: "/api/model-demo/plate-recognize", default_routable: true}

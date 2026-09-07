@@ -10,7 +10,7 @@
         <el-col :span="12"><el-form-item label="置信度阈值"><el-slider v-model="form.confidenceThreshold" :min="0" :max="1" :step="0.05" :format-tooltip="formatThreshold" style="width: 300px;" /><span class="slider-value">{{ form.confidenceThreshold }}</span></el-form-item></el-col>
         <el-col :span="12"><el-form-item label="IOU 阈值"><el-slider v-model="form.iouThreshold" :min="0" :max="1" :step="0.05" :format-tooltip="formatThreshold" style="width: 300px;" /><span class="slider-value">{{ form.iouThreshold }}</span></el-form-item></el-col>
       </el-row>
-      <el-form-item label="图片选择"><el-radio-group v-model="imageSelectionMode"><el-radio label="all">全部图片</el-radio><el-radio label="unprocessed">未处理图片</el-radio><el-radio label="selected">选择图片</el-radio></el-radio-group></el-form-item>
+      <el-form-item label="图片选择"><el-radio-group v-model="imageSelectionMode"><el-radio value="all">全部图片</el-radio><el-radio value="unprocessed">未处理图片</el-radio><el-radio value="selected">选择图片</el-radio></el-radio-group></el-form-item>
       <el-form-item v-if="imageSelectionMode === 'selected'" label="选择图片"><el-select v-model="form.imagePaths" multiple filterable placeholder="请选择图片" style="width: 100%;"><el-option v-for="image in availableImages" :key="image.path" :label="image.name" :value="image.path" /></el-select></el-form-item>
       <el-form-item><el-button type="primary" size="large" @click="handleRun" :loading="running" :disabled="!canRun"><el-icon><VideoPlay /></el-icon>开始检测</el-button></el-form-item>
     </el-form>

@@ -2,7 +2,7 @@
   <div class="vlm-task">
     <p class="section-desc">使用视觉语言模型（VLM）清洗标注数据，提高数据质量</p>
     <el-form :model="form" label-width="120px">
-      <el-form-item label="清洗模式"><el-radio-group v-model="form.mode"><el-radio label="detections">基于检测结果清洗</el-radio><el-radio label="images">基于图片路径清洗</el-radio></el-radio-group></el-form-item>
+      <el-form-item label="清洗模式"><el-radio-group v-model="form.mode"><el-radio value="detections">基于检测结果清洗</el-radio><el-radio value="images">基于图片路径清洗</el-radio></el-radio-group></el-form-item>
       <el-form-item v-if="form.mode === 'detections'" label="检测结果"><el-select v-model="form.detections" multiple filterable placeholder="请选择检测结果" style="width: 100%;"><el-option v-for="detection in availableDetections" :key="detection.id" :label="`${detection.imageName} - ${detection.label}`" :value="detection.id" /></el-select></el-form-item>
       <el-form-item v-if="form.mode === 'images'" label="选择图片"><el-select v-model="form.imagePaths" multiple filterable placeholder="请选择图片" style="width: 100%;"><el-option v-for="image in availableImages" :key="image.path" :label="image.name" :value="image.path" /></el-select></el-form-item>
       <el-row :gutter="20">

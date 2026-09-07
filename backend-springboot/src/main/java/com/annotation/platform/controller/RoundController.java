@@ -85,6 +85,10 @@ public class RoundController {
 
             com.annotation.platform.service.FormatConverterService.DatasetConversionResult dataset =
                     formatConverterService.buildFeedbackDataset(projectId, sourceRoundId, user.getLsToken());
+            int totalImages = dataset.getTrainImages() + dataset.getValImages();
+            if (totalImages <= 0) {
+                return Result.error("400", "没有可用于回流训练的数据，请先完成边端推理或复核低置信数据");
+            }
 
             ModelTrainingRecord record = trainingService.startTrainingFromDataset(
                     user.getId(),
@@ -105,7 +109,13 @@ public class RoundController {
             inferenceDataPointRepository.markUsedInRound(
                     sourceRoundId,
                     roundId,
-                    List.of(InferenceDataPoint.PoolType.HIGH, InferenceDataPoint.PoolType.LOW_A, InferenceDataPoint.PoolType.LOW_B)
+                    List.of(
+                            InferenceDataPoint.PoolType.HIGH,
+                            InferenceDataPoint.PoolType.LOW_A_CANDIDATE,
+                            InferenceDataPoint.PoolType.LOW_A,
+                            InferenceDataPoint.PoolType.LOW_B,
+                            InferenceDataPoint.PoolType.DISCARDED
+                    )
             );
 
             return Result.success(Map.of(
@@ -113,8 +123,9 @@ public class RoundController {
                     "taskId", record.getTaskId(),
                     "roundId", roundId,
                     "datasetPath", dataset.getOutputPath(),
-                    "totalImages", dataset.getTrainImages() + dataset.getValImages(),
-                    "totalAnnotations", dataset.getTotalAnnotations()
+                    "totalImages", totalImages,
+                    "totalAnnotations", dataset.getTotalAnnotations(),
+                    "metadata", dataset.getMetadata()
             ));
         } catch (org.springframework.security.access.AccessDeniedException | com.annotation.platform.exception.ResourceNotFoundException e) {
             throw e;

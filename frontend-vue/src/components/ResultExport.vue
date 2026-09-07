@@ -5,11 +5,11 @@
     <div class="export-card">
       <div class="format-selector">
         <el-radio-group v-model="selectedFormat">
-          <el-radio-button label="coco">COCO JSON</el-radio-button>
-          <el-radio-button label="yolo">YOLO TXT</el-radio-button>
-          <el-radio-button label="voc">VOC XML</el-radio-button>
-          <el-radio-button label="csv">CSV</el-radio-button>
-          <el-radio-button label="json">JSON</el-radio-button>
+          <el-radio-button value="coco">COCO JSON</el-radio-button>
+          <el-radio-button value="yolo">YOLO TXT</el-radio-button>
+          <el-radio-button value="voc">VOC XML</el-radio-button>
+          <el-radio-button value="csv">CSV</el-radio-button>
+          <el-radio-button value="json">JSON</el-radio-button>
         </el-radio-group>
       </div>
 
@@ -52,7 +52,7 @@ const currentStatus = ref('')
 
 const handleExport = async () => {
   if (!props.project || !props.project.id || !(props.project.lsProjectId || props.project.labelStudioProjectId)) {
-    ElMessage.warning('项目尚未同步到 Label Studio')
+    ElMessage.warning('项目尚未同步到星目智能标注')
     return
   }
 

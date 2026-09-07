@@ -1,17 +1,14 @@
 <template>
   <div class="project-detail">
-    <el-page-header @back="goBack" :content="project.name">
-      <template #extra>
-        <el-button 
-          type="primary" 
-          @click="openLabelStudio"
-          :disabled="isProcessing"
-          :loading="isProcessing">
-          <el-icon><Link /></el-icon>
-          {{ buttonText }}
-        </el-button>
-      </template>
-    </el-page-header>
+    <div class="detail-hero">
+      <button class="back-link" type="button" @click="goBack">← 返回项目</button>
+      <PageHeading eyebrow="PROJECT WORKSPACE" :title="project.name || '项目详情'" description="在同一工作区完成智能标注、训练测试、边端下发和模型迭代。">
+        <div class="detail-metrics" aria-label="项目数据概览">
+          <span>数据量 <strong>{{ project.totalImages || 0 }}</strong></span>
+          <span>已处理 <strong>{{ project.processedImages || 0 }}</strong></span>
+        </div>
+      </PageHeading>
+    </div>
 
     <el-alert
       v-if="userProfile.lsEmail"
@@ -21,7 +18,7 @@
       <template #title>
         <div style="display: flex; align-items: center; gap: 8px;">
           <el-icon><Link /></el-icon>
-          <span style="font-weight: 500;">Label Studio 已同步</span>
+          <span style="font-weight: 500;">星目智能标注已同步</span>
         </div>
       </template>
       <div style="display: flex; gap: 24px; margin-top: 8px;">
@@ -37,34 +34,15 @@
 
     <div v-if="project.id" class="project-tabs-wrapper">
       <el-tabs v-model="activeTab" class="project-tabs">
-        <el-tab-pane label="数据与标注" name="workspace">
-          <div class="workspace-page">
-            <el-card shadow="never" class="workspace-card labels-card">
-              <template #header><span class="card-title">类别定义</span></template>
-              <LabelDefinition :project="project" @refresh="loadProject" />
-            </el-card>
-
-            <el-card shadow="never" class="workspace-card data-card">
-              <template #header><span class="card-title">数据管理</span></template>
-              <DataManager :project="project" @refresh="loadProject" />
-            </el-card>
-
-            <el-card shadow="never" class="workspace-card annotation-card">
-              <template #header><span class="card-title">自动标注</span></template>
-              <AlgorithmTasks :project="project" @refresh="loadProject" />
-            </el-card>
-          </div>
+        <el-tab-pane label="智能标注训练" name="autoLabel">
+          <ProjectAutoLabel embedded />
         </el-tab-pane>
 
-        <el-tab-pane label="结果查看" name="results">
-          <ResultViewer :project="project" />
-        </el-tab-pane>
-
-        <el-tab-pane label="模型训练" name="training">
+        <el-tab-pane label="训练与测试" name="training">
           <Training :project="project" @refresh="loadProject" />
         </el-tab-pane>
 
-        <el-tab-pane label="边端模拟" name="edge">
+        <el-tab-pane label="边端下发" name="edge">
           <EdgeSimulator :project="project" @refresh="loadProject" />
         </el-tab-pane>
 
@@ -74,23 +52,21 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { projectAPI, labelStudioAPI, userAPI } from '@/api'
+import { projectAPI, userAPI } from '@/api'
 import { ElMessage } from 'element-plus'
 import { DocumentCopy, Link } from '@element-plus/icons-vue'
 import { isProjectProcessing } from '@/utils/projectStatus'
-import LabelDefinition from '@/components/LabelDefinition.vue'
-import DataManager from '@/components/DataManager.vue'
-import AlgorithmTasks from '@/components/AlgorithmTasks.vue'
-import ResultViewer from '@/components/ResultViewer.vue'
 import Training from '@/components/Training.vue'
 import EdgeSimulator from '@/components/EdgeSimulator.vue'
+import ProjectAutoLabel from '@/views/ProjectAutoLabel.vue'
+import PageHeading from '@/components/platform-ui/PageHeading.vue'
 
 const router = useRouter()
 const route = useRoute()
 
-const activeTab = ref('workspace')
+const activeTab = ref('autoLabel')
 const project = ref({
   id: null,
   name: '',
@@ -105,10 +81,6 @@ const project = ref({
 
 const userProfile = ref({
   lsEmail: ''
-})
-
-const isProcessing = computed(() => {
-  return isProjectProcessing(project.value.status)
 })
 
 let pollInterval = null
@@ -126,18 +98,6 @@ watch(() => project.value?.status, (status) => {
     pollInterval = null
   }
 }, { immediate: true })
-
-const buttonText = computed(() => {
-  if (isProcessing.value) {
-    const statusMap = {
-      'DETECTING': '检测中...',
-      'CLEANING': '清洗中...',
-      'SYNCING': '同步中...'
-    }
-    return statusMap[project.value.status] || '处理中...'
-  }
-  return '打开 Label Studio'
-})
 
 const loadProject = async () => {
   try {
@@ -192,35 +152,6 @@ const maskEmail = (email) => {
   return `${name.slice(0, 2)}***@${domain}`
 }
 
-const openLabelStudio = async () => {
-  try {
-    const response = await labelStudioAPI.getLoginUrl({
-      projectId: project.value.id
-    })
-    const loginUrl = normalizeLabelStudioUrl(response.data)
-    if (loginUrl) {
-      window.open(loginUrl, '_blank')
-    } else {
-      ElMessage.error('未能获取 Label Studio 登录链接')
-    }
-  } catch (error) {
-    ElMessage.error('打开 Label Studio 失败')
-  }
-}
-
-const normalizeLabelStudioUrl = (url) => {
-  if (!url) return url
-  try {
-    const parsed = new URL(url)
-    if (parsed.hostname === 'localhost' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-      parsed.hostname = window.location.hostname
-    }
-    return parsed.toString()
-  } catch (error) {
-    return url
-  }
-}
-
 const goBack = () => {
   router.push('/projects')
 }
@@ -242,56 +173,57 @@ onUnmounted(() => {
 .project-detail {
 }
 
+.detail-hero {
+  margin-bottom: 18px;
+}
+
+.back-link {
+  margin: 0 0 16px;
+  padding: 0;
+  color: var(--brand-700);
+  font-size: 13px;
+  font-weight: 700;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.back-link:hover { color: var(--brand-600); }
+
+.detail-metrics {
+  display: flex;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.detail-metrics span {
+  min-width: 108px;
+  padding: 10px 13px;
+  color: var(--gray-500);
+  font-size: 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.detail-metrics strong {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-950);
+  font-size: 19px;
+}
+
 .project-tabs-wrapper {
   margin-top: 20px;
   background: #fff;
-  border: 0.5px solid var(--gray-200);
+  border: 1px solid var(--gray-200);
   border-radius: var(--radius-lg);
   padding: 14px 18px 18px;
 }
 
-.workspace-page {
-  display: grid;
-  grid-template-columns: minmax(300px, 0.9fr) minmax(420px, 1.5fr);
-  gap: 14px;
-  align-items: start;
+@media (max-width: 760px) {
+  .detail-metrics { width: 100%; }
+  .detail-metrics span { flex: 1; }
 }
 
-.workspace-card {
-  border-radius: 8px;
-}
-
-.workspace-card :deep(.el-card__header) {
-  padding: 10px 14px;
-}
-
-.workspace-card :deep(.el-card__body) {
-  padding: 14px;
-}
-
-.data-card {
-  grid-row: span 2;
-}
-
-.annotation-card {
-  grid-column: 1 / -1;
-}
-
-.card-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--gray-900);
-}
-
-@media (max-width: 1180px) {
-  .workspace-page {
-    grid-template-columns: 1fr;
-  }
-
-  .data-card,
-  .annotation-card {
-    grid-column: auto;
-    grid-row: auto;
-  }
-}
 </style>

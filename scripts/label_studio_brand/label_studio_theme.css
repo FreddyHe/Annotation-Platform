@@ -1,0 +1,639 @@
+/* Annotation Platform brand layer for Label Studio 1.22.
+ * The palette mirrors frontend-vue/src/styles/theme.css and remains isolated
+ * from the vendored Label Studio bundle so package upgrades stay manageable.
+ */
+:root,
+html[data-color-scheme="light"] {
+  color-scheme: light !important;
+  --xm-brand-950: #061a36;
+  --xm-brand-900: #082b5c;
+  --xm-brand-800: #0c3f82;
+  --xm-brand-700: #1255b7;
+  --xm-brand-600: #176bff;
+  --xm-brand-100: #dceaff;
+  --xm-brand-50: #edf5ff;
+  --xm-ink-950: #10233f;
+  --xm-ink-700: #415572;
+  --xm-ink-500: #73839a;
+  --xm-line: #dfe7f1;
+  --xm-surface: #ffffff;
+  --xm-canvas: #f4f7fb;
+  --xm-success: #18a873;
+  --xm-warning: #d98b18;
+  --xm-danger: #d94b5b;
+  --xm-shadow-sm: 0 8px 30px rgba(17, 49, 91, 0.07);
+  --xm-shadow-lg: 0 28px 80px rgba(4, 31, 70, 0.18);
+
+  --color-primary-background: #edf5ff !important;
+  --color-primary-background-raw: 237 245 255 !important;
+  --color-primary-surface: #176bff !important;
+  --color-primary-surface-raw: 23 107 255 !important;
+  --color-primary-surface-hover: #1255b7 !important;
+  --color-primary-surface-hover-raw: 18 85 183 !important;
+  --color-primary-surface-active: #0c3f82 !important;
+  --color-primary-surface-active-raw: 12 63 130 !important;
+  --color-primary-surface-content: #ffffff !important;
+  --color-primary-surface-content-raw: 255 255 255 !important;
+  --color-primary-surface-content-subtle: #dceaff !important;
+  --color-primary-content: #1255b7 !important;
+  --color-primary-content-raw: 18 85 183 !important;
+  --color-primary-content-hover: #0c3f82 !important;
+  --color-primary-border: #176bff !important;
+  --color-primary-border-raw: 23 107 255 !important;
+  --color-primary-border-bold: #1255b7 !important;
+  --color-primary-border-subtle: #8fc1ff !important;
+  --color-primary-border-subtler: #bcd8ff !important;
+  --color-primary-border-subtlest: #dceaff !important;
+  --color-primary-emphasis: #dceaff !important;
+  --color-primary-emphasis-subtle: #edf5ff !important;
+  --color-primary-focus-outline: rgba(23, 107, 255, 0.24) !important;
+  --color-primary-focus-outline-raw: 143 193 255 !important;
+  --color-primary-icon: #176bff !important;
+
+  --color-neutral-background: #ffffff !important;
+  --color-neutral-background-raw: 255 255 255 !important;
+  --color-neutral-surface: #f8fafd !important;
+  --color-neutral-surface-raw: 248 250 253 !important;
+  --color-neutral-surface-hover: #edf5ff !important;
+  --color-neutral-surface-active: #dceaff !important;
+  --color-neutral-surface-inset: #f4f7fb !important;
+  --color-neutral-content: #10233f !important;
+  --color-neutral-content-subtle: #415572 !important;
+  --color-neutral-content-subtler: #73839a !important;
+  --color-neutral-content-subtlest: #9babbe !important;
+  --color-neutral-border: #dfe7f1 !important;
+  --color-neutral-border-subtle: #e7edf5 !important;
+  --color-neutral-border-subtler: #eef3f8 !important;
+  --color-neutral-border-bold: #c7d3e2 !important;
+  --color-neutral-emphasis: #dceaff !important;
+  --color-neutral-emphasis-subtle: #edf5ff !important;
+  --color-neutral-shadow: #11315b !important;
+
+  --color-positive-surface: #18a873 !important;
+  --color-positive-content: #137957 !important;
+  --color-positive-background: #e9f8f2 !important;
+  --color-warning-surface: #d98b18 !important;
+  --color-warning-content: #a0640b !important;
+  --color-warning-background: #fff6e7 !important;
+  --color-negative-surface: #d94b5b !important;
+  --color-negative-content: #b83748 !important;
+  --color-negative-background: #fff0f2 !important;
+}
+
+html,
+body {
+  font-family: "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", Inter, system-ui, sans-serif !important;
+  color: var(--xm-ink-950) !important;
+  background: var(--xm-canvas) !important;
+  -webkit-font-smoothing: antialiased;
+}
+
+body,
+.app-wrapper,
+.lsf-app,
+.lsf-projects-page,
+.lsf-settings-wrapper {
+  background-color: var(--xm-canvas) !important;
+}
+
+::selection {
+  color: #fff;
+  background: var(--xm-brand-600);
+}
+
+a {
+  color: var(--xm-brand-600);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit !important;
+}
+
+button,
+[role="button"],
+.lsf-button-ls {
+  border-radius: 10px !important;
+}
+
+button:focus-visible,
+[role="button"]:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+a:focus-visible {
+  outline: 3px solid rgba(23, 107, 255, 0.24) !important;
+  outline-offset: 2px;
+}
+
+input:not([type="checkbox"]):not([type="radio"]),
+textarea,
+select,
+.lsf-input-ls,
+.lsf-input-dm,
+.lsf-select-ls {
+  color: var(--xm-ink-950) !important;
+  background: #f8fafd !important;
+  border-color: var(--xm-line) !important;
+  border-radius: 10px !important;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):focus,
+textarea:focus,
+select:focus,
+.lsf-input-ls:focus-within,
+.lsf-select-ls:focus-within {
+  background: #fff !important;
+  border-color: var(--xm-brand-600) !important;
+  box-shadow: 0 0 0 4px rgba(23, 107, 255, 0.08) !important;
+}
+
+.lsf-menu-header {
+  display: flex !important;
+  align-items: center !important;
+  color: #fff !important;
+  background: linear-gradient(135deg, var(--xm-brand-950), var(--xm-brand-900)) !important;
+  border-bottom: 0 !important;
+  box-shadow: 0 10px 32px rgba(4, 31, 70, 0.18) !important;
+}
+
+.lsf-menu-header__logo[data-xm-legacy-brand="true"] {
+  display: none !important;
+}
+
+.lsf-menu-header__trigger {
+  width: 48px !important;
+  min-width: 48px !important;
+  flex: 0 0 48px !important;
+  padding: 0 10px !important;
+}
+
+#xm-ls-brand,
+#xm-ls-login-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: #fff !important;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  text-decoration: none !important;
+  white-space: nowrap;
+}
+
+#xm-ls-brand {
+  min-width: 218px;
+  height: 100%;
+  padding: 0 18px;
+  border-right: 1px solid rgba(188, 216, 255, 0.22);
+}
+
+.xm-brand-mark {
+  position: relative;
+  display: inline-block;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  background: #0c3f82;
+  border: 1px solid rgba(188, 216, 255, 0.34);
+  border-radius: 11px;
+  box-shadow: 0 8px 20px rgba(0, 16, 42, 0.28);
+}
+
+.xm-brand-mark i {
+  position: absolute;
+  width: 15px;
+  height: 3px;
+  background: #fff;
+  border-radius: 3px;
+  transform: rotate(-35deg);
+}
+
+.xm-brand-mark i:nth-child(1) { top: 9px; left: 7px; }
+.xm-brand-mark i:nth-child(2) { top: 15px; left: 10px; background: #4ca2ff; }
+.xm-brand-mark i:nth-child(3) { top: 22px; left: 14px; width: 10px; }
+
+.xm-ls-brand__name {
+  font-size: 16px;
+}
+
+.lsf-menu-header a {
+  color: #fff !important;
+}
+
+/*
+ * Header controls use Label Studio's light-theme button tokens by default.
+ * Do not force every header button to white: that creates white text/icons on
+ * the buttons' white surfaces. Keep the exceptions explicit instead.
+ */
+.lsf-menu-header__context-item_right a:not(#xm-ls-brand),
+.lsf-menu-header__hotkeys-button button {
+  color: var(--xm-brand-100) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(188, 216, 255, 0.28) !important;
+  box-shadow: none !important;
+}
+
+.lsf-menu-header__context-item_right a:not(#xm-ls-brand):hover,
+.lsf-menu-header__hotkeys-button button:hover {
+  color: #fff !important;
+  background: rgba(255, 255, 255, 0.16) !important;
+  border-color: rgba(188, 216, 255, 0.48) !important;
+}
+
+.lsf-menu-header__hotkeys-button button svg,
+.lsf-menu-header__hotkeys-button button path {
+  color: currentColor !important;
+  stroke: currentColor !important;
+}
+
+.lsf-menu-header [class*="themeToggle--"] {
+  color: var(--xm-ink-950) !important;
+}
+
+.lsf-main-menu {
+  gap: 4px;
+}
+
+.lsf-main-menu__item {
+  border-radius: 9px !important;
+  transition: background 150ms ease, color 150ms ease, transform 150ms ease !important;
+}
+
+.lsf-main-menu__item:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
+.lsf-main-menu__item_active {
+  color: #fff !important;
+  background: var(--xm-brand-600) !important;
+  box-shadow: 0 7px 18px rgba(23, 107, 255, 0.28) !important;
+}
+
+.lsf-breadcrumbs {
+  color: var(--xm-ink-700) !important;
+  background: rgba(255, 255, 255, 0.92) !important;
+  border-color: var(--xm-line) !important;
+  backdrop-filter: blur(16px);
+}
+
+/* Breadcrumbs sit inside the navy header, so give them a navy glass surface
+ * and a single high-contrast light text system instead of a white capsule. */
+.lsf-menu-header .lsf-breadcrumbs {
+  color: var(--xm-brand-100) !important;
+  background: rgba(255, 255, 255, 0.07) !important;
+  border-color: rgba(188, 216, 255, 0.2) !important;
+  box-shadow: none !important;
+}
+
+.lsf-menu-header .lsf-breadcrumbs a,
+.lsf-menu-header .lsf-breadcrumbs__label {
+  color: var(--xm-brand-100) !important;
+}
+
+.lsf-menu-header .lsf-breadcrumbs__item_last .lsf-breadcrumbs__label {
+  color: #fff !important;
+  font-weight: 600 !important;
+}
+
+.lsf-card,
+.lsf-project-card,
+.lsf-backend-card,
+.lsf-prediction-card,
+[class*="card--"] {
+  background: var(--xm-surface) !important;
+  border-color: var(--xm-line) !important;
+  border-radius: 15px !important;
+  box-shadow: var(--xm-shadow-sm) !important;
+}
+
+.lsf-project-card {
+  overflow: hidden;
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease !important;
+}
+
+.lsf-project-card:hover {
+  border-color: #bcd8ff !important;
+  box-shadow: 0 15px 40px rgba(17, 49, 91, 0.12) !important;
+  transform: translateY(-2px);
+}
+
+.lsf-project-card__header,
+.lsf-project-card__icon {
+  background: linear-gradient(135deg, var(--xm-brand-900), var(--xm-brand-700)) !important;
+}
+
+.lsf-project-card__header,
+.lsf-project-card__header *,
+.lsf-project-card__icon,
+.lsf-project-card__icon * {
+  color: #fff !important;
+}
+
+.lsf-modal-ls__content,
+[role="dialog"] {
+  border: 1px solid var(--xm-line) !important;
+  border-radius: 20px !important;
+  box-shadow: var(--xm-shadow-lg) !important;
+}
+
+.lsf-modal-ls__header,
+.lsf-modal-ls__footer {
+  border-color: #e7edf5 !important;
+}
+
+.lsf-sidebar,
+.lsf-sidebar-menu {
+  background: #fff !important;
+  border-color: var(--xm-line) !important;
+}
+
+.lsf-sidebar-menu__navigation [aria-current="page"],
+.lsf-sidebar-menu__navigation a:hover {
+  color: var(--xm-brand-700) !important;
+  background: var(--xm-brand-50) !important;
+  border-radius: 10px !important;
+}
+
+table,
+[role="table"],
+[role="grid"] {
+  color: var(--xm-ink-700) !important;
+  background: #fff !important;
+  border-color: var(--xm-line) !important;
+}
+
+thead,
+[role="rowgroup"] [role="row"]:first-child {
+  background: #f8fafd !important;
+}
+
+th,
+td,
+[role="cell"],
+[role="columnheader"] {
+  border-color: #e7edf5 !important;
+}
+
+tr:hover td,
+[role="row"]:hover [role="cell"] {
+  background: #f1f7ff !important;
+}
+
+#xm-ls-language {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 8px;
+  height: 38px;
+  margin: 0 8px 0 auto;
+  padding: 4px 6px 4px 12px;
+  color: #dceaff;
+  background: rgba(6, 26, 54, 0.9);
+  border: 1px solid rgba(188, 216, 255, 0.3);
+  border-radius: 11px;
+  box-shadow: none;
+  backdrop-filter: blur(14px);
+  transform: none;
+}
+
+#xm-ls-language.xm-ls-language--floating {
+  position: fixed;
+  z-index: 2147483000;
+  top: 16px;
+  right: 18px;
+  margin: 0;
+  box-shadow: 0 8px 24px rgba(4, 31, 70, 0.22);
+}
+
+#xm-ls-language .xm-ls-language__icon {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  color: #8fc1ff;
+  font-size: 15px;
+}
+
+#xm-ls-language .xm-ls-language__label {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+#xm-ls-language select {
+  width: auto;
+  min-width: 108px;
+  height: 29px;
+  padding: 0 26px 0 10px;
+  color: #fff !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  border: 1px solid rgba(188, 216, 255, 0.28) !important;
+  border-radius: 8px !important;
+  cursor: pointer;
+}
+
+#xm-ls-language select:focus {
+  border-color: #8fc1ff !important;
+  box-shadow: 0 0 0 3px rgba(143, 193, 255, 0.18) !important;
+}
+
+#xm-ls-language option {
+  color: var(--xm-ink-950);
+  background: #fff;
+}
+
+html[data-xm-language="zh-CN"] body {
+  letter-spacing: 0;
+}
+
+/* Standalone login remains useful for maintenance even though Annotation
+ * Platform normally enters through SSO. Keep it on the same visual system. */
+.login_page_new_ui {
+  color: var(--xm-ink-950) !important;
+  background: var(--xm-canvas) !important;
+}
+
+.login_page_new_ui .left {
+  overflow: hidden;
+  color: #fff !important;
+  background:
+    radial-gradient(circle at 16% 18%, rgba(76, 162, 255, 0.26), transparent 31%),
+    radial-gradient(circle at 82% 76%, rgba(23, 107, 255, 0.22), transparent 34%),
+    linear-gradient(145deg, #061a36 0%, #082b5c 55%, #0c3f82 100%) !important;
+}
+
+.login_page_new_ui .left::after {
+  right: -100px !important;
+  bottom: -130px !important;
+  width: 420px !important;
+  height: 420px !important;
+  background:
+    linear-gradient(rgba(143, 193, 255, 0.09) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(143, 193, 255, 0.09) 1px, transparent 1px) !important;
+  background-size: 44px 44px !important;
+  border: 1px solid rgba(188, 216, 255, 0.12);
+  border-radius: 48px;
+  transform: rotate(12deg);
+}
+
+.login_page_new_ui .ls-logo,
+.login_page_new_ui .hs-logo,
+.login_page_new_ui .left img {
+  display: none !important;
+}
+
+#xm-ls-login-brand {
+  position: relative;
+  z-index: 2;
+  margin: 42px 0 34px;
+  font-size: 24px;
+}
+
+#xm-ls-login-brand .xm-brand-mark {
+  width: 44px;
+  height: 44px;
+  flex-basis: 44px;
+  border-radius: 14px;
+}
+
+#xm-ls-login-brand .xm-brand-mark i { width: 20px; height: 3px; }
+#xm-ls-login-brand .xm-brand-mark i:nth-child(1) { top: 12px; left: 9px; }
+#xm-ls-login-brand .xm-brand-mark i:nth-child(2) { top: 20px; left: 13px; }
+#xm-ls-login-brand .xm-brand-mark i:nth-child(3) { top: 29px; left: 18px; width: 13px; }
+
+.login_page_new_ui .ls-logo rect {
+  fill: #176bff !important;
+}
+
+.login_page_new_ui .ls-logo path[fill="#FF7557"],
+.login_page_new_ui .ls-logo path[fill="#FFD6CD"] {
+  fill: #8fc1ff !important;
+}
+
+.login_page_new_ui .left h3 {
+  max-width: 520px;
+  color: #bcd8ff !important;
+  font-size: 17px !important;
+  line-height: 1.7 !important;
+}
+
+.login_page_new_ui .tips {
+  color: #dceaff !important;
+  background: rgba(255, 255, 255, 0.07) !important;
+  border: 1px solid rgba(188, 216, 255, 0.2) !important;
+  border-radius: 15px !important;
+  box-shadow: 0 18px 46px rgba(4, 31, 70, 0.28) !important;
+  backdrop-filter: blur(14px);
+}
+
+.login_page_new_ui .tips::after {
+  display: none !important;
+}
+
+.login_page_new_ui .tips .description a {
+  color: #8fc1ff !important;
+}
+
+.login_page_new_ui .left .by {
+  color: #bcd8ff !important;
+  opacity: 0.82;
+}
+
+.login_page_new_ui .right {
+  background:
+    radial-gradient(circle at 84% 12%, rgba(23, 107, 255, 0.08), transparent 29%),
+    var(--xm-canvas) !important;
+}
+
+.login_page_new_ui .form-wrapper {
+  width: min(440px, calc(100vw - 48px));
+  color: var(--xm-ink-950) !important;
+  background: #fff !important;
+  border: 1px solid var(--xm-line) !important;
+  border-radius: 20px !important;
+  box-shadow: var(--xm-shadow-lg) !important;
+}
+
+.login_page_new_ui .form-wrapper h2 {
+  color: var(--xm-ink-950) !important;
+  font-size: 30px !important;
+  font-weight: 800 !important;
+}
+
+.login_page_new_ui form input {
+  min-height: 44px;
+  background: #f8fafd !important;
+  border-color: var(--xm-line) !important;
+  border-radius: 10px !important;
+}
+
+.login_page_new_ui form input:focus {
+  background: #fff !important;
+  border-color: var(--xm-brand-600) !important;
+  box-shadow: 0 0 0 4px rgba(23, 107, 255, 0.08) !important;
+  outline: 0 !important;
+}
+
+.login_page_new_ui form button {
+  min-height: 44px;
+  color: #fff !important;
+  font-weight: 700 !important;
+  background: var(--xm-brand-600) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 9px 20px rgba(23, 107, 255, 0.2);
+}
+
+.login_page_new_ui form button:hover {
+  background: var(--xm-brand-700) !important;
+  transform: translateY(-1px);
+}
+
+@media (max-width: 760px) {
+  .login_page_new_ui .left {
+    display: none !important;
+  }
+
+  .login_page_new_ui .right {
+    flex: 1 1 100%;
+  }
+}
+
+@media (max-width: 900px) {
+  #xm-ls-language {
+    margin-left: auto;
+    padding-left: 7px;
+  }
+
+  #xm-ls-language.xm-ls-language--floating { right: 12px; }
+
+  #xm-ls-brand {
+    min-width: 52px;
+    padding: 0 9px;
+  }
+
+  .xm-ls-brand__name { display: none; }
+
+  #xm-ls-language .xm-ls-language__label {
+    display: none;
+  }
+
+  #xm-ls-language select {
+    min-width: 92px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

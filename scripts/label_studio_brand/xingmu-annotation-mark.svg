@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">Xingmu Annotation</title>
+  <defs>
+    <linearGradient id="background" x1="8" y1="4" x2="56" y2="60" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0c3f82"/>
+      <stop offset="1" stop-color="#061a36"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="18" fill="url(#background)"/>
+  <rect x="15" y="19" width="30" height="6" rx="3" fill="#fff" transform="rotate(-35 15 19)"/>
+  <rect x="22" y="30" width="30" height="6" rx="3" fill="#4ca2ff" transform="rotate(-35 22 30)"/>
+  <rect x="29" y="42" width="21" height="6" rx="3" fill="#fff" transform="rotate(-35 29 42)"/>
+</svg>

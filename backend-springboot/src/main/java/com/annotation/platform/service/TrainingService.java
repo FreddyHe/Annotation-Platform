@@ -267,6 +267,13 @@ public class TrainingService {
                 .outputDir(datasetDir)
                 .totalImages(conversionResult.getTrainImages() + conversionResult.getValImages())
                 .totalAnnotations(conversionResult.getTotalAnnotations())
+                .testResults(objectMapper.writeValueAsString(Map.of(
+                        "datasetPolicy", "prepared dataset",
+                        "trainImages", conversionResult.getTrainImages(),
+                        "valImages", conversionResult.getValImages(),
+                        "totalAnnotations", conversionResult.getTotalAnnotations(),
+                        "metadata", conversionResult.getMetadata() == null ? Map.of() : conversionResult.getMetadata()
+                )))
                 .startedAt(LocalDateTime.now())
                 .build();
         record = trainingRecordRepository.save(record);
@@ -325,24 +332,29 @@ public class TrainingService {
     }
 
     public ModelTrainingRecord getTrainingResults(String taskId) throws Exception {
-        String resultsUrl = algorithmServiceUrl + "/api/v1/algo/train/results/" + taskId;
-
-        ResponseEntity<String> response = restTemplate.getForEntity(resultsUrl, String.class);
-
-        if (!response.getStatusCode().is2xxSuccessful()) {
-            throw new RuntimeException("Failed to get training results: " + response.getStatusCode());
-        }
-
         ModelTrainingRecord record = trainingRecordRepository.findByTaskId(taskId)
                 .orElseThrow(() -> new RuntimeException("Training record not found"));
 
-        JsonNode resultsJson = objectMapper.readTree(response.getBody());
-        JsonNode results = resultsJson.get("results");
+        try {
+            String resultsUrl = algorithmServiceUrl + "/api/v1/algo/train/results/" + taskId;
 
-        if (results != null && results.isArray() && results.size() > 0) {
-            JsonNode result = results.get(0);
-            applyTrainingResult(record, result);
-            record = trainingRecordRepository.save(record);
+            ResponseEntity<String> response = restTemplate.getForEntity(resultsUrl, String.class);
+
+            if (!response.getStatusCode().is2xxSuccessful()) {
+                throw new RuntimeException("Failed to get training results: " + response.getStatusCode());
+            }
+
+            JsonNode resultsJson = objectMapper.readTree(response.getBody());
+            JsonNode results = resultsJson.get("results");
+
+            if (results != null && results.isArray() && results.size() > 0) {
+                JsonNode result = results.get(0);
+                applyTrainingResult(record, result);
+                record = trainingRecordRepository.save(record);
+            }
+        } catch (Exception e) {
+            log.warn("Unable to fetch algorithm task results for task {}, trying local artifacts: {}", taskId, e.getMessage());
+            record = hydrateCompletedRecordFromOutput(record);
         }
 
         return record;
@@ -503,33 +515,44 @@ public class TrainingService {
         if (record.getBestModelPath() != null && record.getMap50() != null) {
             return record;
         }
-            Path outputDir = Paths.get(record.getOutputDir() != null ? record.getOutputDir() : trainingOutputBasePath + "/project_" + record.getProjectId());
-        if (!Files.isDirectory(outputDir)) {
-            return record;
-        }
         try {
-            Optional<Path> latestRun = findLatestRunDir(outputDir);
-            if (latestRun.isEmpty()) {
-                return record;
+            List<Path> searchDirs = new java.util.ArrayList<>();
+            if (record.getOutputDir() != null && !record.getOutputDir().isBlank()) {
+                searchDirs.add(Paths.get(record.getOutputDir()));
             }
+            searchDirs.add(Paths.get(trainingOutputBasePath, "project_" + record.getProjectId()));
 
-            Path runDir = latestRun.get();
-            Path best = runDir.resolve("weights").resolve("best.pt");
-            Path last = runDir.resolve("weights").resolve("last.pt");
-            Path resultsCsv = runDir.resolve("results.csv");
-            Path logFile = outputDir.resolve(runDir.getFileName().toString() + "_training.log");
+            for (Path outputDir : searchDirs.stream().distinct().toList()) {
+                if (!Files.isDirectory(outputDir)) {
+                    continue;
+                }
+                Optional<Path> latestRun = findLatestRunDir(outputDir);
+                if (latestRun.isEmpty()) {
+                    continue;
+                }
 
-            if (Files.exists(best)) {
-                record.setBestModelPath(best.toString());
+                Path runDir = latestRun.get();
+                Path best = runDir.resolve("weights").resolve("best.pt");
+                Path last = runDir.resolve("weights").resolve("last.pt");
+                Path resultsCsv = runDir.resolve("results.csv");
+                Path logFile = outputDir.resolve(runDir.getFileName().toString() + "_training.log");
+
+                if (!Files.exists(best) && !Files.exists(last)) {
+                    continue;
+                }
+                if (Files.exists(best)) {
+                    record.setBestModelPath(best.toString());
+                }
+                if (Files.exists(last)) {
+                    record.setLastModelPath(last.toString());
+                }
+                if (Files.exists(logFile)) {
+                    record.setLogFilePath(logFile.toString());
+                }
+                applyMetricsFromResultsCsv(record, resultsCsv);
+                return trainingRecordRepository.save(record);
             }
-            if (Files.exists(last)) {
-                record.setLastModelPath(last.toString());
-            }
-            if (Files.exists(logFile)) {
-                record.setLogFilePath(logFile.toString());
-            }
-            applyMetricsFromResultsCsv(record, resultsCsv);
-            return trainingRecordRepository.save(record);
+            return record;
         } catch (IOException e) {
             log.warn("Failed to hydrate training record {} from output dir: {}", record.getId(), e.getMessage());
             return record;

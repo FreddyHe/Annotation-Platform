@@ -14,20 +14,31 @@ PROJECT_ROOT="/root/autodl-fs/Annotation-Platform"
 CONDA_SH="$(conda info --base 2>/dev/null)/etc/profile.d/conda.sh"
 NVM_SH="/root/.nvm/nvm.sh"
 TORCH_LIB_DIR="/root/miniconda3/envs/groundingdino310/lib/python3.10/site-packages/torch/lib"
+LABEL_STUDIO_PROXY_PYTHON="${LABEL_STUDIO_PROXY_PYTHON:-/root/miniconda3/bin/python}"
+QWEN_VLM_MODEL_PATH="${QWEN_VLM_MODEL_PATH:-/root/autodl-fs/科研文件夹/MACGD/third_party/models/Qwen/Qwen3-VL-4B-Instruct}"
+ALGORITHM_UVICORN="${ALGORITHM_UVICORN:-/root/miniconda3/bin/uvicorn}"
 
 # 日志文件
 LOG_SPRINGBOOT="/tmp/springboot.log"
 LOG_LABELSTUDIO="/tmp/labelstudio.log"
+LOG_LABELSTUDIO_PROXY="/tmp/labelstudio-proxy.log"
 LOG_DINO="/tmp/dino.log"
+LOG_QWEN_VLM="/tmp/qwen3-vl-4b-vllm.log"
+LOG_LOCATE_ANYTHING="/tmp/locate-anything.log"
 LOG_ALGORITHM="/tmp/algorithm.log"
 LOG_FRONTEND="/tmp/frontend.log"
 
 # 端口定义
 PORT_SPRINGBOOT=8080
 PORT_LABELSTUDIO=5001
+PORT_LABELSTUDIO_UPSTREAM=15001
 PORT_DINO=5003
+PORT_QWEN_VLM=5008
+PORT_LOCATE_ANYTHING=5010
 PORT_ALGORITHM=8001
 PORT_FRONTEND=6006
+
+PID_ALGORITHM="$PROJECT_ROOT/logs/algorithm-service-${PORT_ALGORITHM}.pid"
 
 # 颜色
 GREEN='\033[0;32m'
@@ -85,8 +96,11 @@ do_status() {
     local all_ok=true
     for entry in \
         "$PORT_SPRINGBOOT:Spring Boot 后端" \
-        "$PORT_LABELSTUDIO:Label Studio" \
+        "$PORT_LABELSTUDIO:Label Studio 公开代理" \
+        "$PORT_LABELSTUDIO_UPSTREAM:Label Studio 内部服务" \
         "$PORT_DINO:DINO 模型服务" \
+        "$PORT_QWEN_VLM:Qwen3-VL-4B 本地 VLM" \
+        "$PORT_LOCATE_ANYTHING:LocateAnything-3B 本地服务" \
         "$PORT_ALGORITHM:算法服务 FastAPI" \
         "$PORT_FRONTEND:前端 Vue"; do
         local port="${entry%%:*}"
@@ -121,8 +135,11 @@ do_stop() {
 
     for entry in \
         "$PORT_SPRINGBOOT:Spring Boot 后端" \
-        "$PORT_LABELSTUDIO:Label Studio" \
+        "$PORT_LABELSTUDIO:Label Studio 公开代理" \
+        "$PORT_LABELSTUDIO_UPSTREAM:Label Studio 内部服务" \
         "$PORT_DINO:DINO 模型服务" \
+        "$PORT_QWEN_VLM:Qwen3-VL-4B 本地 VLM" \
+        "$PORT_LOCATE_ANYTHING:LocateAnything-3B 本地服务" \
         "$PORT_ALGORITHM:算法服务 FastAPI" \
         "$PORT_FRONTEND:前端 Vue"; do
         local port="${entry%%:*}"
@@ -138,6 +155,8 @@ do_stop() {
     # 补充按进程名杀残留
     pkill -f "vite" 2>/dev/null
     pkill -f "dino_model_server" 2>/dev/null
+    pkill -f "vllm serve .*Qwen3-VL-4B-Instruct" 2>/dev/null
+    pkill -f "locate_anything_model_server" 2>/dev/null
 
     echo ""
     echo -e "  ${GREEN}全部服务已停止${NC}"
@@ -159,6 +178,16 @@ do_start() {
     if [ -f "$NVM_SH" ]; then
         source "$NVM_SH" 2>/dev/null
     fi
+    if [ -f "$PROJECT_ROOT/.env.local" ]; then
+        set -a
+        source "$PROJECT_ROOT/.env.local"
+        set +a
+    fi
+    if [ -f "$HOME/.config/ai-keys/env" ]; then
+        set -a
+        source "$HOME/.config/ai-keys/env"
+        set +a
+    fi
 
     # --- 1. Spring Boot 后端 (8080) ---
     if check_port $PORT_SPRINGBOOT; then
@@ -175,23 +204,36 @@ do_start() {
         if [ ! -f "$jar" ]; then
             echo -e "  ${RED}❌ JAR 不存在，先执行编译: ./startup.sh build${NC}"
         else
-            setsid java -jar "$jar" --server.port=$PORT_SPRINGBOOT \
+            nohup setsid -f java -jar "$jar" --server.port=$PORT_SPRINGBOOT \
                 > "$LOG_SPRINGBOOT" 2>&1 &
             wait_for_port $PORT_SPRINGBOOT "Spring Boot" 30
         fi
     fi
 
-    # --- 2. Label Studio (5001) ---
-    if check_port $PORT_LABELSTUDIO; then
-        echo -e "  ${GREEN}✅${NC} Label Studio (端口 $PORT_LABELSTUDIO) 已在运行，跳过"
+    # --- 2. Label Studio (内部 15001 + 公开代理 5001) ---
+    if check_port $PORT_LABELSTUDIO_UPSTREAM; then
+        echo -e "  ${GREEN}✅${NC} Label Studio 内部服务 (端口 $PORT_LABELSTUDIO_UPSTREAM) 已在运行，跳过"
     else
-        echo -e "  ${CYAN}🚀${NC} 启动 Label Studio..."
+        echo -e "  ${CYAN}🚀${NC} 启动 Label Studio 内部服务..."
         conda activate web_annotation 2>/dev/null
         export LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true
         export LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=/root/autodl-fs
-        setsid label-studio start --port $PORT_LABELSTUDIO --no-browser --log-level INFO \
+        export COLLECT_ANALYTICS=false
+        nohup setsid -f label-studio start --host 0.0.0.0 --port $PORT_LABELSTUDIO_UPSTREAM --no-browser --log-level INFO \
             > "$LOG_LABELSTUDIO" 2>&1 &
-        wait_for_port $PORT_LABELSTUDIO "Label Studio" 30
+        wait_for_port $PORT_LABELSTUDIO_UPSTREAM "Label Studio 内部服务" 30
+    fi
+
+    if check_port $PORT_LABELSTUDIO; then
+        echo -e "  ${GREEN}✅${NC} Label Studio 公开代理 (端口 $PORT_LABELSTUDIO) 已在运行，跳过"
+    else
+        echo -e "  ${CYAN}🚀${NC} 启动 Label Studio 公开代理..."
+        conda activate web_annotation 2>/dev/null
+        LABEL_STUDIO_PROXY_UPSTREAM="http://127.0.0.1:$PORT_LABELSTUDIO_UPSTREAM" \
+        LABEL_STUDIO_PROXY_PORT="$PORT_LABELSTUDIO" \
+        nohup setsid -f "$LABEL_STUDIO_PROXY_PYTHON" "$PROJECT_ROOT/scripts/label_studio_proxy.py" \
+            > "$LOG_LABELSTUDIO_PROXY" 2>&1 &
+        wait_for_port $PORT_LABELSTUDIO "Label Studio 公开代理" 15
     fi
 
     # --- 3. DINO 模型服务 (5003) ---
@@ -201,30 +243,70 @@ do_start() {
         echo -e "  ${CYAN}🚀${NC} 启动 DINO 模型服务 (模型约 662MB，加载需 30~60 秒)..."
         conda activate groundingdino310 2>/dev/null
         export LD_LIBRARY_PATH="$TORCH_LIB_DIR:${LD_LIBRARY_PATH:-}"
-        setsid python "$PROJECT_ROOT/algorithm-service/dino_model_server.py" \
+        nohup setsid -f python "$PROJECT_ROOT/algorithm-service/dino_model_server.py" \
             > "$LOG_DINO" 2>&1 &
         wait_for_port $PORT_DINO "DINO 模型服务" 90
     fi
 
-    # --- 4. 算法服务 FastAPI (8001) ---
+    # --- 4. Qwen3-VL-4B 本地 VLM (5008) ---
+    if check_port $PORT_QWEN_VLM; then
+        echo -e "  ${GREEN}✅${NC} Qwen3-VL-4B 本地 VLM (端口 $PORT_QWEN_VLM) 已在运行，跳过"
+    else
+        echo -e "  ${CYAN}🚀${NC} 启动 Qwen3-VL-4B 本地 VLM..."
+        export CUDA_VISIBLE_DEVICES="${LOCAL_VLM_CUDA_VISIBLE_DEVICES:-0}"
+        nohup setsid -f /root/miniconda3/envs/LLM_DL/bin/vllm serve \
+            "$QWEN_VLM_MODEL_PATH" \
+            --host 0.0.0.0 \
+            --port $PORT_QWEN_VLM \
+            --allowed-local-media-path / \
+            --gpu-memory-utilization "${LOCAL_VLM_GPU_MEMORY_UTILIZATION:-0.70}" \
+            --served-model-name Qwen3-VL-4B-Instruct \
+            --max-model-len "${LOCAL_VLM_MAX_MODEL_LEN:-16384}" \
+            --trust-remote-code \
+            --enforce-eager \
+            --max-num-seqs "${LOCAL_VLM_MAX_NUM_SEQS:-4}" \
+            > "$LOG_QWEN_VLM" 2>&1 &
+        # 首次加载 4B 模型在当前机器上通常需要约 4 分钟，避免服务仍在正常加载时误报失败。
+        wait_for_port $PORT_QWEN_VLM "Qwen3-VL-4B 本地 VLM" 360
+    fi
+
+    # --- 5. LocateAnything-3B 本地服务 (5010) ---
+    if check_port $PORT_LOCATE_ANYTHING; then
+        echo -e "  ${GREEN}✅${NC} LocateAnything-3B 本地服务 (端口 $PORT_LOCATE_ANYTHING) 已在运行，跳过"
+    else
+        echo -e "  ${CYAN}🚀${NC} 启动 LocateAnything-3B 本地服务..."
+        LOCATE_ANYTHING_PORT="$PORT_LOCATE_ANYTHING" \
+        LOCATE_ANYTHING_CUDA_VISIBLE_DEVICES="${LOCATE_ANYTHING_CUDA_VISIBLE_DEVICES:-1}" \
+        "$PROJECT_ROOT/scripts/start_locate_anything_service.sh" > "$LOG_LOCATE_ANYTHING" 2>&1
+        wait_for_port $PORT_LOCATE_ANYTHING "LocateAnything-3B 本地服务" 30
+    fi
+
+    # --- 6. 算法服务 FastAPI (8001) ---
     if check_port $PORT_ALGORITHM; then
         echo -e "  ${GREEN}✅${NC} 算法服务 FastAPI (端口 $PORT_ALGORITHM) 已在运行，跳过"
     else
         echo -e "  ${CYAN}🚀${NC} 启动算法服务 FastAPI..."
-        conda activate algo_service 2>/dev/null
-        cd "$PROJECT_ROOT/algorithm-service"
-        setsid uvicorn main:app --host 0.0.0.0 --port $PORT_ALGORITHM \
-            > "$LOG_ALGORITHM" 2>&1 &
+        mkdir -p "$PROJECT_ROOT/logs"
+        if [ ! -x "$ALGORITHM_UVICORN" ]; then
+            echo -e "  ${RED}❌ 算法服务启动器不存在: $ALGORITHM_UVICORN${NC}"
+        else
+            (
+                cd "$PROJECT_ROOT/algorithm-service"
+                nohup setsid "$ALGORITHM_UVICORN" main:app --host 0.0.0.0 --port $PORT_ALGORITHM \
+                    > "$LOG_ALGORITHM" 2>&1 &
+                echo $! > "$PID_ALGORITHM"
+            )
+        fi
         wait_for_port $PORT_ALGORITHM "算法服务 FastAPI" 15
     fi
 
-    # --- 5. 前端 Vue (6006) ---
+    # --- 7. 前端 Vue (6006) ---
     if check_port $PORT_FRONTEND; then
         echo -e "  ${GREEN}✅${NC} 前端 Vue (端口 $PORT_FRONTEND) 已在运行，跳过"
     else
         echo -e "  ${CYAN}🚀${NC} 启动前端 Vue..."
         cd "$PROJECT_ROOT/frontend-vue"
-        setsid npx vite --host 0.0.0.0 --port $PORT_FRONTEND \
+        nohup setsid -f npx vite --host 0.0.0.0 --port $PORT_FRONTEND \
             > "$LOG_FRONTEND" 2>&1 &
         wait_for_port $PORT_FRONTEND "前端 Vue" 15
     fi
@@ -239,7 +321,10 @@ do_start() {
     echo "日志文件:"
     echo "  Spring Boot:  $LOG_SPRINGBOOT"
     echo "  Label Studio: $LOG_LABELSTUDIO"
+    echo "  LS 公开代理:  $LOG_LABELSTUDIO_PROXY"
     echo "  DINO:         $LOG_DINO"
+    echo "  Qwen VLM:     $LOG_QWEN_VLM"
+    echo "  LocateAny:    $LOG_LOCATE_ANYTHING"
     echo "  算法服务:     $LOG_ALGORITHM"
     echo "  前端:         $LOG_FRONTEND"
     echo ""

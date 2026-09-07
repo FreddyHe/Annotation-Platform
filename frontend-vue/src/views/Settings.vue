@@ -1,6 +1,6 @@
 <template>
   <div class="settings-container">
-    <div class="page-title">设置</div>
+    <PageHeading eyebrow="PLATFORM SETTINGS" title="平台设置" description="集中维护视觉语言模型、语言模型及平台服务接入参数。" />
 
     <el-row :gutter="20">
       <el-col :xs="24" :sm="24" :md="12">
@@ -75,6 +75,7 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { userAPI } from '@/api'
+import PageHeading from '@/components/platform-ui/PageHeading.vue'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -160,15 +161,7 @@ onMounted(() => {
 
 <style scoped>
 .settings-container {
-  max-width: 1000px;
-}
-
-.page-title {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--gray-900);
-  letter-spacing: -0.02em;
-  margin-bottom: 24px;
+  max-width: 1180px;
 }
 
 .config-card {

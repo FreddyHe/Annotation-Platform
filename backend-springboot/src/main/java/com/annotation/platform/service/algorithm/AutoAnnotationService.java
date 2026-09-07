@@ -167,7 +167,7 @@ public class AutoAnnotationService {
                 runVlmMode(jobId, project, images, labelDefinitions, imagePaths, detections, dinoTaskId);
             }
 
-            updateProjectStatus(projectId, Project.ProjectStatus.COMPLETED);
+            updateProjectCompletion(projectId, images.size());
             markJobCompleted(jobId);
             log.info("Auto annotation job completed: jobId={}, projectId={}", jobId, projectId);
         } catch (Exception e) {
@@ -822,6 +822,14 @@ public class AutoAnnotationService {
     private void updateProjectStatus(Long projectId, Project.ProjectStatus status) {
         Project project = projectRepository.findById(projectId).orElseThrow();
         project.setStatus(status);
+        projectRepository.save(project);
+    }
+
+    private void updateProjectCompletion(Long projectId, int processedImages) {
+        Project project = projectRepository.findById(projectId).orElseThrow();
+        project.setStatus(Project.ProjectStatus.COMPLETED);
+        project.setTotalImages(processedImages);
+        project.setProcessedImages(processedImages);
         projectRepository.save(project);
     }
 

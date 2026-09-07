@@ -14,13 +14,13 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class UserModelConfigService {
 
-    public static final String DEFAULT_VLM_API_KEY = "sk-644be34708ab44a38a0a28c82e37d6b6";
-    public static final String DEFAULT_VLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
-    public static final String DEFAULT_VLM_MODEL_NAME = "qwen-vl-plus";
+    public static final String DEFAULT_VLM_API_KEY = "local-no-key-required";
+    public static final String DEFAULT_VLM_BASE_URL = "http://127.0.0.1:8002/v1";
+    public static final String DEFAULT_VLM_MODEL_NAME = "local-vlm";
 
-    public static final String DEFAULT_LLM_API_KEY = "sk-AomDFLTBpbXd6JXk2hSv2WvzWccvww3TGkPRnA5L51ENOmNt";
-    public static final String DEFAULT_LLM_BASE_URL = "https://api.chatanywhere.tech/v1";
-    public static final String DEFAULT_LLM_MODEL_NAME = "gpt-4.1";
+    public static final String DEFAULT_LLM_API_KEY = "local-no-key-required";
+    public static final String DEFAULT_LLM_BASE_URL = "http://127.0.0.1:8002/v1";
+    public static final String DEFAULT_LLM_MODEL_NAME = "local-llm";
 
     private final UserModelConfigRepository userModelConfigRepository;
 

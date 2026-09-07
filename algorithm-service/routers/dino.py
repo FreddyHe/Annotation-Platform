@@ -197,8 +197,11 @@ async def run_dino_detection_task(
             await task_manager.set_task_cancelled(task_id)
             return
         
-        if total_images > 0 and failed_images == total_images:
-            message = f"DINO service failed for all images: {last_error or 'unknown error'}"
+        if failed_images > 0:
+            message = (
+                f"DINO service failed for {failed_images}/{total_images} images: "
+                f"{last_error or 'unknown error'}"
+            )
             await task_manager.set_task_failed(task_id, message)
             logger.error(f"Task {task_id}: {message}")
             return

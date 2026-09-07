@@ -1,43 +1,15 @@
 <template>
   <div class="single-class-workflow">
-    <div class="module-header">
-      <div>
-        <h1>单类别训练与检测</h1>
-        <p>训练任务、模型管理和单图检测集中在同一工作流中。</p>
-      </div>
-      <el-space>
-        <el-button :loading="loadingTasks || loadingModels" @click="refreshAll">
-          <el-icon><Refresh /></el-icon>
-          刷新
-        </el-button>
-        <el-button type="primary" @click="activeTab = 'train'">
-          <el-icon><Plus /></el-icon>
-          新建训练
-        </el-button>
-      </el-space>
-    </div>
+    <PageHeading eyebrow="MODEL OPERATIONS" title="单类别训练与检测" description="训练任务、模型管理和单图检测集中在同一工作流中。">
+      <PlatformButton variant="secondary" :disabled="loadingTasks || loadingModels" @click="refreshAll">刷新</PlatformButton>
+      <PlatformButton @click="activeTab = 'train'">＋ 新建训练</PlatformButton>
+    </PageHeading>
 
     <div class="overview-grid">
-      <div class="metric-tile">
-        <span class="metric-label">训练任务</span>
-        <strong>{{ tasks.length }}</strong>
-        <small>{{ runningTasks.length }} 个进行中</small>
-      </div>
-      <div class="metric-tile">
-        <span class="metric-label">可用模型</span>
-        <strong>{{ availableModels.length }}</strong>
-        <small>含 {{ customModels.length }} 个自定义模型</small>
-      </div>
-      <div class="metric-tile">
-        <span class="metric-label">最近训练</span>
-        <strong>{{ latestTask ? statusText(latestTask.status) : '-' }}</strong>
-        <small>{{ latestTask?.modelName || '暂无任务' }}</small>
-      </div>
-      <div class="metric-tile">
-        <span class="metric-label">最近检测</span>
-        <strong>{{ detectionHistory[0]?.count ?? '-' }}</strong>
-        <small>{{ detectionHistory[0]?.className || '暂无记录' }}</small>
-      </div>
+      <MetricCard label="训练任务" :value="tasks.length" :hint="`${runningTasks.length} 个进行中`" mark="Σ" />
+      <MetricCard label="可用模型" :value="availableModels.length" :hint="`含 ${customModels.length} 个自定义模型`" tone="running" mark="AI" />
+      <MetricCard label="最近训练" :value="latestTask ? statusText(latestTask.status) : '-'" :hint="latestTask?.modelName || '暂无任务'" tone="warning" mark="▶" />
+      <MetricCard label="最近检测" :value="detectionHistory[0]?.count ?? '-'" :hint="detectionHistory[0]?.className || '暂无记录'" tone="danger" mark="◎" />
     </div>
 
     <el-alert
@@ -443,6 +415,9 @@ import {
   retryTrainingTask,
   uploadTrainingDataset
 } from '@/api/customModel'
+import MetricCard from '@/components/platform-ui/MetricCard.vue'
+import PageHeading from '@/components/platform-ui/PageHeading.vue'
+import PlatformButton from '@/components/platform-ui/PlatformButton.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -1041,55 +1016,11 @@ onUnmounted(() => {
   max-width: 1440px;
 }
 
-.module-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 18px;
-}
-
-.module-header h1 {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--gray-900);
-}
-
-.module-header p {
-  margin: 6px 0 0;
-  color: var(--gray-500);
-  font-size: 13px;
-}
-
 .overview-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 16px;
-}
-
-.metric-tile {
-  min-height: 92px;
-  padding: 14px;
-  border: 1px solid var(--gray-200);
-  border-radius: var(--radius-md);
-  background: #fff;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-
-.metric-label,
-.metric-tile small {
-  color: var(--gray-500);
-  font-size: 12px;
-}
-
-.metric-tile strong {
-  color: var(--gray-900);
-  font-size: 24px;
-  font-weight: 600;
 }
 
 .module-alert {
@@ -1099,7 +1030,7 @@ onUnmounted(() => {
 .workflow-tabs {
   background: #fff;
   border: 1px solid var(--gray-200);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   padding: 12px 16px 18px;
 }
 
@@ -1270,10 +1201,6 @@ onUnmounted(() => {
 }
 
 @media (max-width: 720px) {
-  .module-header {
-    flex-direction: column;
-  }
-
   .overview-grid {
     grid-template-columns: 1fr;
   }

@@ -1,12 +1,11 @@
 <template>
   <div class="assessment-detail" v-loading="loading">
     <div class="header">
-      <div class="title-section">
-        <h2>{{ assessment.assessmentName }}</h2>
+      <PageHeading eyebrow="ASSESSMENT WORKSPACE" :title="assessment.assessmentName || '评估详情'" description="依次完成需求解析、开放词汇测试、质量评估、资源估算与实施规划。">
         <el-tag :type="getStatusType(assessment.status)" size="large">
           {{ getStatusText(assessment.status) }}
         </el-tag>
-      </div>
+      </PageHeading>
       <div class="meta-info">
         <span>创建时间：{{ formatDate(assessment.createdAt) }}</span>
       </div>
@@ -447,9 +446,9 @@
           <el-form label-width="110px">
             <el-form-item label="匹配度选择">
               <el-radio-group v-model="judgmentForm.datasetMatchLevel" :disabled="assessment.status !== 'DATASET_SEARCHED'">
-                <el-radio label="ALMOST_MATCH">ALMOST_MATCH（几乎一致）</el-radio>
-                <el-radio label="PARTIAL_MATCH">PARTIAL_MATCH（部分相关）</el-radio>
-                <el-radio label="NOT_USABLE">NOT_USABLE（不可用）</el-radio>
+                <el-radio value="ALMOST_MATCH">ALMOST_MATCH（几乎一致）</el-radio>
+                <el-radio value="PARTIAL_MATCH">PARTIAL_MATCH（部分相关）</el-radio>
+                <el-radio value="NOT_USABLE">NOT_USABLE（不可用）</el-radio>
               </el-radio-group>
             </el-form-item>
             <el-form-item label="备注">
@@ -669,6 +668,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, CircleCheck, Warning, InfoFilled } from '@element-plus/icons-vue'
 import { feasibilityAPI } from '@/api/feasibility'
+import PageHeading from '@/components/platform-ui/PageHeading.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -1371,29 +1371,16 @@ onMounted(async () => {
 
 <style scoped>
 .assessment-detail {
-  padding: 20px;
+  padding: 0;
 }
 
 .header {
-  margin-bottom: 30px;
-}
-
-.title-section {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-  margin-bottom: 10px;
-}
-
-.title-section h2 {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 500;
+  margin-bottom: 24px;
 }
 
 .meta-info {
-  color: #666;
-  font-size: 14px;
+  color: var(--gray-500);
+  font-size: 12px;
 }
 
 .step-card {
@@ -1498,8 +1485,8 @@ onMounted(async () => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  font-size: 18px;
-  font-weight: 500;
+  font-size: 15px;
+  font-weight: 700;
 }
 
 .step-content {

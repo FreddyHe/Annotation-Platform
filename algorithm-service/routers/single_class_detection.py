@@ -8,6 +8,7 @@ import base64
 from io import BytesIO
 from PIL import Image
 
+from compute_device import resolve_compute_device
 from services.model_service import model_service
 from config import settings
 
@@ -57,13 +58,15 @@ async def single_class_detection(
         if model_service.yolo_model is None or model_service.yolo_model_path != model_path:
             logger.info(f"Loading YOLO model from {model_path}")
             model_service.load_yolo_model(model_path)
+        device = resolve_compute_device("0", context="single class detection")
         
         # 运行 YOLO 检测
         results = model_service.yolo_model(
             temp_image_path,
             conf=confidence_threshold,
             iou=iou_threshold,
-            verbose=False
+            verbose=False,
+            device=device
         )
         
         # 过滤指定 class_id 的检测结果

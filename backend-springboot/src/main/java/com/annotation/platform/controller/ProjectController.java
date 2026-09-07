@@ -9,10 +9,12 @@ import com.annotation.platform.dto.response.project.ProjectDetailResponse;
 import com.annotation.platform.entity.Organization;
 import com.annotation.platform.entity.Project;
 import com.annotation.platform.entity.ProjectImage;
+import com.annotation.platform.entity.ProjectVideo;
 import com.annotation.platform.entity.User;
 import com.annotation.platform.repository.OrganizationRepository;
 import com.annotation.platform.repository.ProjectImageRepository;
 import com.annotation.platform.repository.ProjectRepository;
+import com.annotation.platform.repository.ProjectVideoRepository;
 import com.annotation.platform.repository.UserRepository;
 import com.annotation.platform.service.labelstudio.LabelStudioProxyService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -42,6 +44,7 @@ public class ProjectController {
 
     private final ProjectRepository projectRepository;
     private final ProjectImageRepository projectImageRepository;
+    private final ProjectVideoRepository projectVideoRepository;
     private final OrganizationRepository organizationRepository;
     private final UserRepository userRepository;
     private final LabelStudioProxyService labelStudioProxyService;
@@ -56,6 +59,8 @@ public class ProjectController {
     private final com.annotation.platform.repository.IterationRoundRepository iterationRoundRepository;
     private final com.annotation.platform.repository.ProjectConfigRepository projectConfigRepository;
     private final com.annotation.platform.repository.AutoAnnotationJobRepository autoAnnotationJobRepository;
+    private final com.annotation.platform.repository.AutoLabelJobRepository autoLabelJobRepository;
+    private final com.annotation.platform.repository.FusedPredictionRepository fusedPredictionRepository;
     private final com.annotation.platform.service.IncrementalProjectService incrementalProjectService;
     private final com.annotation.platform.service.ProjectAccessService projectAccessService;
 
@@ -240,6 +245,7 @@ public class ProjectController {
 
         // 2. 删除 ProjectImage（会级联删除，但显式删除更清晰）
         projectImageRepository.deleteByProjectId(id);
+        projectVideoRepository.deleteByProjectId(id);
 
         // 2.5 清理迭代飞轮新增数据，避免 iteration_rounds 外键阻塞项目删除
         inferenceDataPointRepository.deleteByProjectId(id);
@@ -336,6 +342,7 @@ public class ProjectController {
                     response.put("path", image.getFilePath());
                     response.put("url", "/api/v1/files/" + image.getFilePath());
                     response.put("size", image.getFileSize());
+                    response.put("metadata", image.getMetadataJson());
                     response.put("uploadedAt", image.getUploadedAt());
                     response.put("status", image.getStatus().name());
                     
@@ -389,6 +396,39 @@ public class ProjectController {
         result.put("images", imageResponses);
         result.put("total", images.size());
         
+        return Result.success(result);
+    }
+
+    @GetMapping("/{id}/videos")
+    @Transactional(readOnly = true)
+    public Result<java.util.Map<String, Object>> getProjectVideos(@PathVariable Long id, HttpServletRequest httpRequest) {
+        projectAccessService.requireProjectAccess(id, httpRequest);
+        List<ProjectVideo> videos = projectVideoRepository.findByProjectIdOrderByCreatedAtAsc(id);
+        List<java.util.Map<String, Object>> items = videos.stream()
+                .map(video -> {
+                    java.util.Map<String, Object> item = new java.util.LinkedHashMap<>();
+                    item.put("id", video.getId());
+                    item.put("sourceVideoId", video.getSourceVideoId());
+                    item.put("originalFileName", video.getOriginalFileName());
+                    item.put("filePath", video.getFilePath());
+                    item.put("url", "/api/v1/files/" + video.getFilePath());
+                    item.put("fileSize", video.getFileSize());
+                    item.put("durationSec", video.getDurationSec());
+                    item.put("fps", video.getFps());
+                    item.put("width", video.getWidth());
+                    item.put("height", video.getHeight());
+                    item.put("totalFrames", video.getTotalFrames());
+                    item.put("selectedFrames", video.getSelectedFrames());
+                    item.put("manifestPath", video.getManifestPath());
+                    item.put("metadata", video.getMetadataJson());
+                    item.put("annotatedVideos", video.getAnnotatedVideosJson());
+                    item.put("createdAt", video.getCreatedAt());
+                    return item;
+                })
+                .collect(Collectors.toList());
+        java.util.Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("items", items);
+        result.put("total", items.size());
         return Result.success(result);
     }
 
@@ -556,16 +596,23 @@ public class ProjectController {
                 "项目尚未同步到 Label Studio"
             );
         }
-        
+
         Long userId = projectAccessService.currentUserId(httpRequest);
+        java.util.Map<String, Object> platformStats = getPlatformAutoLabelReviewStats(project);
         
         try {
             java.util.Map<String, Object> reviewStats = labelStudioProxyService.getProjectReviewStats(
                 project.getLsProjectId(), userId
             );
+            if (!platformStats.isEmpty()) {
+                return Result.success(mergePlatformAndLiveReviewStats(platformStats, reviewStats));
+            }
             return Result.success(reviewStats);
         } catch (Exception e) {
             log.warn("获取审核统计失败（可能项目尚无任务）: projectId={}, error={}", id, e.getMessage());
+            if (!platformStats.isEmpty()) {
+                return Result.success(platformStats);
+            }
             java.util.Map<String, Object> emptyStats = new java.util.HashMap<>();
             emptyStats.put("totalTasks", 0);
             emptyStats.put("reviewedTasks", 0);
@@ -589,6 +636,11 @@ public class ProjectController {
                 "项目尚未同步到 Label Studio"
             );
         }
+
+        java.util.Map<String, Object> platformResults = getPlatformAutoLabelReviewResults(project);
+        if (!platformResults.isEmpty()) {
+            return Result.success(platformResults);
+        }
         
         Long userId = projectAccessService.currentUserId(httpRequest);
         
@@ -603,6 +655,103 @@ public class ProjectController {
             emptyResults.put("tasks", new java.util.ArrayList<>());
             return Result.success(emptyResults);
         }
+    }
+
+    private java.util.Map<String, Object> getPlatformAutoLabelReviewStats(Project project) {
+        if (project == null || project.getId() == null) {
+            return java.util.Collections.emptyMap();
+        }
+        return autoLabelJobRepository.findFirstByProjectIdOrderByCreatedAtDesc(project.getId())
+                .map(job -> {
+                    long totalPredictionResults = fusedPredictionRepository.countByJobId(job.getId());
+                    if (totalPredictionResults <= 0) {
+                        return java.util.Collections.<String, Object>emptyMap();
+                    }
+                    long predictedTasks = fusedPredictionRepository.countDistinctImageIdByJobId(job.getId());
+                    int totalTasks = job.getTotalImages() != null && job.getTotalImages() > 0
+                            ? job.getTotalImages()
+                            : Math.toIntExact(Math.max(predictedTasks, 0));
+                    java.util.Map<String, Object> stats = new java.util.LinkedHashMap<>();
+                    stats.put("totalTasks", totalTasks);
+                    stats.put("reviewedTasks", 0);
+                    stats.put("pendingTasks", totalTasks);
+                    stats.put("tasksWithPredictions", predictedTasks);
+                    stats.put("totalPredictions", predictedTasks);
+                    stats.put("totalPredictionResults", totalPredictionResults);
+                    stats.put("totalAnnotationResults", 0);
+                    stats.put("source", "platform_auto_label_summary");
+                    stats.put("jobId", job.getId());
+                    return stats;
+                })
+                .orElse(java.util.Collections.emptyMap());
+    }
+
+    private java.util.Map<String, Object> mergePlatformAndLiveReviewStats(
+            java.util.Map<String, Object> platformStats,
+            java.util.Map<String, Object> liveStats) {
+        java.util.Map<String, Object> stats = new java.util.LinkedHashMap<>(platformStats);
+        long platformTotal = asLong(platformStats.get("totalTasks"), 0L);
+        long liveTotal = asLong(liveStats.get("totalTasks"), 0L);
+        long reviewedTasks = asLong(liveStats.get("reviewedTasks"), 0L);
+        long totalTasks = Math.max(Math.max(platformTotal, liveTotal), reviewedTasks);
+        long pendingTasks = Math.max(totalTasks - reviewedTasks, 0L);
+
+        stats.put("totalTasks", totalTasks);
+        stats.put("reviewedTasks", reviewedTasks);
+        stats.put("pendingTasks", pendingTasks);
+        stats.put("tasksWithPredictions", preferPositive(platformStats, liveStats, "tasksWithPredictions"));
+        stats.put("totalPredictions", preferPositive(platformStats, liveStats, "totalPredictions"));
+        stats.put("totalPredictionResults", preferPositive(platformStats, liveStats, "totalPredictionResults"));
+        stats.put("totalAnnotationResults", asLong(liveStats.get("totalAnnotationResults"), 0L));
+        stats.put("source", "platform_auto_label_summary+label_studio_live_review");
+        return stats;
+    }
+
+    private long preferPositive(
+            java.util.Map<String, Object> primary,
+            java.util.Map<String, Object> fallback,
+            String key) {
+        long primaryValue = asLong(primary.get(key), 0L);
+        if (primaryValue > 0L) {
+            return primaryValue;
+        }
+        return asLong(fallback.get(key), 0L);
+    }
+
+    private long asLong(Object value, long defaultValue) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value instanceof String stringValue && !stringValue.isBlank()) {
+            try {
+                return Long.parseLong(stringValue);
+            } catch (NumberFormatException ignored) {
+                return defaultValue;
+            }
+        }
+        return defaultValue;
+    }
+
+    private java.util.Map<String, Object> getPlatformAutoLabelReviewResults(Project project) {
+        if (project == null || project.getId() == null) {
+            return java.util.Collections.emptyMap();
+        }
+        return autoLabelJobRepository.findFirstByProjectIdOrderByCreatedAtDesc(project.getId())
+                .map(job -> {
+                    long totalPredictionResults = fusedPredictionRepository.countByJobId(job.getId());
+                    if (totalPredictionResults <= 0) {
+                        return java.util.Collections.<String, Object>emptyMap();
+                    }
+                    java.util.Map<String, Object> result = new java.util.LinkedHashMap<>();
+                    result.put("tasks", new java.util.ArrayList<>());
+                    result.put("deferred", true);
+                    result.put("source", "platform_auto_label_summary");
+                    result.put("jobId", job.getId());
+                    result.put("totalPredictionResults", totalPredictionResults);
+                    result.put("message", "复核明细请进入 Label Studio 查看，平台页仅展示轻量统计。");
+                    return result;
+                })
+                .orElse(java.util.Collections.emptyMap());
     }
 
     @PostMapping("/{id}/export")

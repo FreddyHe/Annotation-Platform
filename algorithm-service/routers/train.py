@@ -17,6 +17,11 @@ from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
+from compute_device import (
+    configure_cuda_visible_devices,
+    gpu_lock_if_needed,
+    resolve_compute_device,
+)
 from services.task_manager import task_manager, TaskStatus
 from services.resource_locks import gpu_lock
 
@@ -132,7 +137,7 @@ class YOLOTrainRequest(BaseModel):
     """YOLO 训练请求"""
     project_id: int = Field(..., description="项目ID")
     dataset_path: str = Field(..., description="数据集路径")
-    epochs: int = Field(100, ge=10, le=500, description="训练轮数")
+    epochs: int = Field(100, ge=1, le=500, description="训练轮数")
     batch_size: int = Field(16, ge=1, le=64, description="批次大小")
     image_size: int = Field(640, ge=320, le=1280, description="图片尺寸")
     model_type: str = Field("yolov8n.pt", description="预训练模型类型")
@@ -165,8 +170,6 @@ def _do_yolo_training_sync(
     loop
 ) -> dict:
     """在线程中同步执行真实 YOLO 训练"""
-    from ultralytics import YOLO
-
     output_dir = ensure_training_output_dir(project_id)
     run_name = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     run_dir = output_dir / run_name
@@ -179,13 +182,12 @@ def _do_yolo_training_sync(
     if not model_type.endswith('.pt'):
         model_type = model_type + '.pt'
 
-    # 自动检测设备：如果请求 GPU 但不可用，回退到 CPU
-    import torch
-    if device != "cpu" and not torch.cuda.is_available():
-        logger.warning(f"Task {task_id}: CUDA not available, falling back to CPU")
-        device = "cpu"
+    device = resolve_compute_device(device, context=f"YOLO training task {task_id}")
+    configure_cuda_visible_devices(device)
 
     logger.info(f"Task {task_id}: Loading model {model_type}, device={device}")
+    from ultralytics import YOLO
+
     model = YOLO(model_type)
 
     # 注册 epoch 结束回调，实时更新进度
@@ -244,7 +246,7 @@ def _do_yolo_training_sync(
         pass
 
     # 真实训练
-    with gpu_lock:
+    with gpu_lock_if_needed(device, gpu_lock):
         results = model.train(
             data=data_yaml,
             epochs=epochs,

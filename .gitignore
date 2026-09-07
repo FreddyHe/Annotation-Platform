@@ -83,3 +83,20 @@ pnpm-debug.log*
 *.tgz
 *.rar
 *.7z
+.env.local
+*.env
+
+# Local acceptance artifacts and customer inputs
+.playwright-cli/
+**/.playwright-cli/
+output/
+input/
+input_packages/
+.context/
+doc/*_提取图片/
+*.docx
+*.mp4
+*.avi
+*.mov
+.venv*/
+external/

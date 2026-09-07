@@ -5,7 +5,7 @@
         type="info"
         :closable="false"
         show-icon
-        title="低-B 待审数据会同步到增量 Label Studio 项目；只有全量审核完成的增量项目会进入下一次训练数据集。"
+        title="低-B 待审数据会同步到增量标注项目；只有全量审核完成的增量项目会进入下一次训练数据集。"
       />
       <el-button :loading="loading" @click="loadData">
         <el-icon><Refresh /></el-icon>
@@ -80,6 +80,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { labelStudioAPI, projectAPI } from '@/api'
+import { openLabelStudioUrl } from '@/utils/labelStudioUrl'
 
 const props = defineProps({
   project: { type: Object, required: true }
@@ -128,36 +129,22 @@ const syncFlywheel = async () => {
 
 const openLsProject = async (row) => {
   if (!row?.lsProjectId) {
-    ElMessage.error('缺少 Label Studio 项目 ID')
+    ElMessage.error('缺少星目智能标注项目 ID')
     return
   }
   try {
     const response = await labelStudioAPI.getLoginUrl({
       returnUrl: `/projects/${row.lsProjectId}/data`
     })
-    const loginUrl = normalizeLabelStudioUrl(response.data)
+    const loginUrl = openLabelStudioUrl(response.data)
     if (loginUrl) {
-      window.open(loginUrl, '_blank')
+      return
     } else {
-      ElMessage.error('未能获取 Label Studio 登录链接')
+      ElMessage.error('未能获取星目智能标注入口')
     }
   } catch (error) {
-    ElMessage.error('打开 Label Studio 失败')
+    ElMessage.error('打开星目智能标注失败')
   }
-}
-
-const normalizeLabelStudioUrl = (url) => {
-  if (!url) return url
-  try {
-    const parsed = new URL(url)
-    if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
-      parsed.hostname = window.location.hostname
-      return parsed.toString()
-    }
-  } catch (error) {
-    return url
-  }
-  return url
 }
 
 watch(() => props.project.id, loadData)

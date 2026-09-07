@@ -151,16 +151,23 @@ public class RoundService {
         int previousRoundNumber = Math.max(1, target.getRoundNumber() - 1);
         IterationRound previous = iterationRoundRepository.findByProjectIdAndRoundNumber(projectId, previousRoundNumber)
                 .orElse(target);
-        long high = inferenceDataPointRepository.countByRoundIdAndPoolType(previous.getId(), InferenceDataPoint.PoolType.HIGH);
-        long lowA = inferenceDataPointRepository.countByRoundIdAndPoolType(previous.getId(), InferenceDataPoint.PoolType.LOW_A);
-        long lowB = inferenceDataPointRepository.findByRoundIdAndPoolTypeAndHumanReviewed(previous.getId(), InferenceDataPoint.PoolType.LOW_B, true).size();
+        IterationRound source = hasFeedbackData(target) ? target : previous;
+        long high = inferenceDataPointRepository.countByRoundIdAndPoolType(source.getId(), InferenceDataPoint.PoolType.HIGH);
+        long lowACandidate = inferenceDataPointRepository.countByRoundIdAndPoolType(source.getId(), InferenceDataPoint.PoolType.LOW_A_CANDIDATE);
+        long lowA = inferenceDataPointRepository.countByRoundIdAndPoolType(source.getId(), InferenceDataPoint.PoolType.LOW_A);
+        long lowB = inferenceDataPointRepository.findByRoundIdAndPoolTypeAndHumanReviewed(source.getId(), InferenceDataPoint.PoolType.LOW_B, true).size();
+        long discarded = inferenceDataPointRepository.countByRoundIdAndPoolType(source.getId(), InferenceDataPoint.PoolType.DISCARDED);
         Map<String, Object> preview = new HashMap<>();
-        preview.put("sourceRoundId", previous.getId());
+        preview.put("sourceRoundId", source.getId());
         preview.put("targetRoundId", target.getId());
         preview.put("highPoolData", high);
+        preview.put("lowACandidateData", lowACandidate);
         preview.put("lowAPoolData", lowA);
         preview.put("lowBReviewedData", lowB);
-        preview.put("total", high + lowA + lowB);
+        preview.put("discardedBackgroundData", discarded);
+        preview.put("positiveTotal", high + lowACandidate + lowA + lowB);
+        preview.put("total", high + lowACandidate + lowA + lowB + discarded);
+        preview.put("sourceSelection", source.getId().equals(target.getId()) ? "current_round" : "previous_round");
         return preview;
     }
 
@@ -181,5 +188,16 @@ public class RoundService {
         IterationRound round = getRound(roundId);
         round.setStatus(status);
         iterationRoundRepository.save(round);
+    }
+
+    private boolean hasFeedbackData(IterationRound round) {
+        if (round == null || round.getId() == null) {
+            return false;
+        }
+        return inferenceDataPointRepository.countByRoundIdAndPoolType(round.getId(), InferenceDataPoint.PoolType.HIGH) > 0
+                || inferenceDataPointRepository.countByRoundIdAndPoolType(round.getId(), InferenceDataPoint.PoolType.LOW_A_CANDIDATE) > 0
+                || inferenceDataPointRepository.countByRoundIdAndPoolType(round.getId(), InferenceDataPoint.PoolType.LOW_A) > 0
+                || !inferenceDataPointRepository.findByRoundIdAndPoolTypeAndHumanReviewed(round.getId(), InferenceDataPoint.PoolType.LOW_B, true).isEmpty()
+                || inferenceDataPointRepository.countByRoundIdAndPoolType(round.getId(), InferenceDataPoint.PoolType.DISCARDED) > 0;
     }
 }

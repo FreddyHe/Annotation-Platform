@@ -1,12 +1,13 @@
 import os
 import sys
-import torch
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from loguru import logger
 from PIL import Image
 import cv2
 import numpy as np
+
+from compute_device import resolve_compute_device
 
 
 class ModelService:
@@ -21,7 +22,7 @@ class ModelService:
         self.dino_weights_path = None
         self.yolo_model_path = None
         
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = resolve_compute_device("0", for_torch=True, context="model service startup")
         logger.info(f"Model service initialized - Device: {self.device}")
     
     def load_dino_model(self, config_path: str, weights_path: str):
@@ -96,6 +97,12 @@ class ModelService:
         try:
             if self.dino_model is None:
                 raise RuntimeError("DINO model not loaded")
+
+            device = resolve_compute_device("0", for_torch=True, context="DINO detection")
+            if device != self.device:
+                logger.info(f"Moving DINO model from {self.device} to {device}")
+                self.dino_model = self.dino_model.to(device)
+                self.device = device
             
             from groundingdino.util.inference import load_image, predict
             
@@ -113,7 +120,7 @@ class ModelService:
                 caption=text_prompt,
                 box_threshold=box_threshold,
                 text_threshold=text_threshold,
-                device=self.device
+                device=device
             )
             
             # 处理结果
@@ -157,6 +164,8 @@ class ModelService:
         try:
             if self.yolo_model is None:
                 raise RuntimeError("YOLO model not loaded")
+
+            device = resolve_compute_device("0", context="YOLO detection")
             
             # 运行检测
             results = self.yolo_model(
@@ -164,7 +173,7 @@ class ModelService:
                 conf=confidence_threshold,
                 iou=iou_threshold,
                 verbose=False,
-                device=self.device
+                device=device
             )
             
             # 解析结果

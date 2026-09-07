@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 
@@ -29,6 +30,7 @@ public class ScheduledTasks {
     }
 
     @Scheduled(cron = "0 0 3 * * ?")
+    @Transactional
     public void cleanupExpiredSessions() {
         log.info("开始执行定时任务：清理过期会话 - {}", LocalDateTime.now());
         try {

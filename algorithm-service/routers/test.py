@@ -14,6 +14,7 @@ from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel, Field
 
+from compute_device import configure_cuda_visible_devices, resolve_compute_device
 from services.task_manager import task_manager, TaskStatus
 
 logger = logging.getLogger(__name__)
@@ -65,17 +66,11 @@ async def run_yolo_inference_task(
         # 加载模型
         logger.info(f"Task {task_id}: Loading YOLO model from {model_path}")
         
-        # 设置环境变量
-        import os
-        os.environ['CUDA_VISIBLE_DEVICES'] = device
+        device = resolve_compute_device(device, context=f"YOLO inference task {task_id}")
+        configure_cuda_visible_devices(device)
         
         # 导入 YOLO
         from ultralytics import YOLO
-        import torch
-
-        if device != "cpu" and not torch.cuda.is_available():
-            logger.warning(f"Task {task_id}: CUDA not available, falling back to CPU")
-            device = "cpu"
         
         model = YOLO(model_path)
         

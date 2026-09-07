@@ -103,7 +103,10 @@ public class TrainingController {
         try {
             projectAccessService.requireProjectAccess(projectId, httpRequest);
             List<ModelTrainingRecord> records = trainingService.getTrainingRecordsByProject(projectId);
-            return Result.success(records.stream().map(this::toRecordResponse).collect(Collectors.toList()));
+            return Result.success(records.stream()
+                    .map(trainingService::refreshTrainingRecord)
+                    .map(this::toRecordResponse)
+                    .collect(Collectors.toList()));
         } catch (org.springframework.security.access.AccessDeniedException | com.annotation.platform.exception.ResourceNotFoundException e) {
             throw e;
         } catch (Exception e) {
@@ -121,7 +124,10 @@ public class TrainingController {
             }
 
             List<ModelTrainingRecord> records = trainingService.getTrainingRecordsByUser(user.getId());
-            return Result.success(records.stream().map(this::toRecordResponse).collect(Collectors.toList()));
+            return Result.success(records.stream()
+                    .map(trainingService::refreshTrainingRecord)
+                    .map(this::toRecordResponse)
+                    .collect(Collectors.toList()));
         } catch (Exception e) {
             log.error("Failed to get training records", e);
             return Result.error("500", "Failed to get training records: " + e.getMessage());
@@ -192,7 +198,10 @@ public class TrainingController {
         try {
             Long organizationId = projectAccessService.currentOrganizationId(httpRequest);
             List<ModelTrainingRecord> records = modelTrainingRecordRepository.findCompletedByOrganizationIdOrderByMap50Desc(organizationId);
-            return Result.success(records.stream().map(this::toRecordResponse).collect(Collectors.toList()));
+            return Result.success(records.stream()
+                    .map(trainingService::hydrateCompletedRecordFromOutput)
+                    .map(this::toRecordResponse)
+                    .collect(Collectors.toList()));
         } catch (org.springframework.security.access.AccessDeniedException | com.annotation.platform.exception.ResourceNotFoundException e) {
             throw e;
         } catch (Exception e) {

@@ -1,11 +1,6 @@
 <template>
   <div class="create-assessment">
-    <div class="page-header">
-      <div>
-        <h1>新建可行性评估</h1>
-        <p>填写需求、样本条件和资源约束后生成评估工作流。</p>
-      </div>
-    </div>
+    <PageHeading eyebrow="NEW ASSESSMENT" title="新建可行性评估" description="填写需求、样本条件和资源约束后生成评估工作流。" />
 
     <el-card shadow="never">
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
@@ -160,6 +155,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { feasibilityAPI } from '@/api/feasibility'
+import PageHeading from '@/components/platform-ui/PageHeading.vue'
 
 const router = useRouter()
 const formRef = ref(null)
@@ -266,23 +262,6 @@ function handleCancel() {
 <style scoped>
 .create-assessment {
   max-width: 1120px;
-}
-
-.page-header {
-  margin-bottom: 18px;
-}
-
-.page-header h1 {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--gray-900);
-}
-
-.page-header p {
-  margin: 6px 0 0;
-  color: var(--gray-500);
-  font-size: 13px;
 }
 
 .form-section {

@@ -90,9 +90,11 @@ app:
       chunk-size: 5242880
 
   label-studio:
-    url: http://localhost:5001
-    internal-url: http://localhost:5001
-    public-url: http://localhost:5001
+    url: ${LABEL_STUDIO_INTERNAL_URL:http://localhost:5001}
+    internal-url: ${LABEL_STUDIO_INTERNAL_URL:http://localhost:5001}
+    public-url: ${LABEL_STUDIO_PUBLIC_URL:http://localhost:5001}
+    secret-key: ${LABEL_STUDIO_SECRET_KEY:}
+    env-path: ${LABEL_STUDIO_ENV_PATH:/root/.local/share/label-studio/.env}
     timeout: 30000
     admin-token: ${LABEL_STUDIO_ADMIN_TOKEN:}
     db-path: /root/.local/share/label-studio/label_studio.sqlite3

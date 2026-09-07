@@ -2,10 +2,10 @@ from pathlib import Path
 import threading
 from typing import Any, Dict, List
 
-import torch
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 from pydantic import BaseModel, Field
+from compute_device import gpu_lock_if_needed, resolve_compute_device
 from services.resource_locks import gpu_lock
 
 router = APIRouter(prefix="/algo/edge-inference", tags=["EdgeInference"])
@@ -77,10 +77,7 @@ async def batch_edge_inference(request: EdgeInferenceRequest):
     if not valid_images:
         raise HTTPException(status_code=400, detail="No valid images found")
 
-    device = request.device
-    if device != "cpu" and not torch.cuda.is_available():
-        logger.warning("CUDA unavailable for edge inference, falling back to CPU")
-        device = "cpu"
+    device = resolve_compute_device(request.device, context="edge inference")
 
     try:
         model, cache_hit = _get_cached_model(model_file)
@@ -89,7 +86,7 @@ async def batch_edge_inference(request: EdgeInferenceRequest):
             f"cache_hit={cache_hit}, device={device}"
         )
         results = []
-        with gpu_lock:
+        with gpu_lock_if_needed(device, gpu_lock):
             for image_path in valid_images:
                 prediction = model(
                     image_path,

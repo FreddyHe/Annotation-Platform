@@ -1,6 +1,6 @@
 <template>
   <div class="profile-container">
-    <div class="page-title">个人中心</div>
+    <PageHeading eyebrow="ACCOUNT CENTER" title="个人中心" description="查看账户、组织、标注服务同步状态和数据资产统计。" />
 
     <el-card class="profile-card">
       <div class="basic-org-info">
@@ -63,9 +63,9 @@
         </div>
       </div>
       <div class="actions-row">
-        <el-button type="primary" @click="jumpToLabelStudio" style="flex: 1;">
+        <el-button type="primary" :loading="labelStudioOpening" :disabled="labelStudioOpening" @click="jumpToLabelStudio" style="flex: 1;">
           <el-icon style="margin-right: 6px;"><Monitor /></el-icon>
-          进入 Label Studio
+          进入智能标注
         </el-button>
         <el-button @click="router.push('/settings')" style="flex: 1;">
           <el-icon style="margin-right: 6px;"><Edit /></el-icon>
@@ -135,9 +135,16 @@ import { useUserStore } from '@/stores/user'
 import { ElMessage } from 'element-plus'
 import { Monitor, Edit } from '@element-plus/icons-vue'
 import { labelStudioAPI } from '@/api'
+import {
+  closeLabelStudioPendingWindow,
+  openLabelStudioPendingWindow,
+  openLabelStudioUrl
+} from '@/utils/labelStudioUrl'
+import PageHeading from '@/components/platform-ui/PageHeading.vue'
 
 const router = useRouter()
 const userStore = useUserStore()
+const labelStudioOpening = ref(false)
 
 const userInfo = computed(() => userStore.userInfo || {})
 
@@ -167,33 +174,38 @@ const getStatusType = (status) => {
   return statusMap[status] || 'info'
 }
 
+const getDefaultProjectId = () => {
+  const recentProjects = userInfo.value.recentProjects || []
+  return recentProjects.find(project => project?.id)?.id || null
+}
+
 const jumpToLabelStudio = async () => {
+  if (labelStudioOpening.value) return
+
+  const pendingWindow = openLabelStudioPendingWindow()
+  labelStudioOpening.value = true
   try {
-    ElMessage.info('正在跳转到 Label Studio...')
-    const response = await labelStudioAPI.getLoginUrl()
+    const projectId = getDefaultProjectId()
+    const response = await labelStudioAPI.getLoginUrl(projectId ? { projectId } : undefined)
     if (response.data) {
-      window.open(response.data, '_blank')
+      openLabelStudioUrl(response.data, pendingWindow)
     } else {
-      ElMessage.error('未能获取 Label Studio 登录链接')
+      closeLabelStudioPendingWindow(pendingWindow)
+      ElMessage.error('未能获取星目智能标注入口')
     }
   } catch (error) {
-    console.error('跳转到 Label Studio 失败:', error)
+    closeLabelStudioPendingWindow(pendingWindow)
+    console.error('跳转到星目智能标注失败:', error)
     ElMessage.error('跳转失败，请稍后重试')
+  } finally {
+    labelStudioOpening.value = false
   }
 }
 </script>
 
 <style scoped>
 .profile-container {
-  max-width: 800px;
-}
-
-.page-title {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--gray-900);
-  letter-spacing: -0.02em;
-  margin-bottom: 24px;
+  max-width: 1000px;
 }
 
 .profile-card {

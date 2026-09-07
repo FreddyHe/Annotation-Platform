@@ -23,8 +23,8 @@
         <div class="setting-row">
           <span class="setting-label">自动标注模式</span>
           <el-radio-group v-model="mode" :disabled="isProcessing || isStarting">
-            <el-radio-button label="DINO_VLM">DINO + VLM 清洗</el-radio-button>
-            <el-radio-button label="DINO_THRESHOLD">DINO 阈值过滤</el-radio-button>
+            <el-radio-button value="DINO_VLM">DINO + VLM 清洗</el-radio-button>
+            <el-radio-button value="DINO_THRESHOLD">DINO 阈值过滤</el-radio-button>
           </el-radio-group>
         </div>
 
@@ -137,7 +137,7 @@
           title="自动标注已完成！" 
           type="success" 
           :closable="false"
-          description="请前往 Label Studio 查看标注结果。如需重新标注，可直接重新执行。"
+          description="请前往星目智能标注查看标注结果。如需重新标注，可直接重新执行。"
         />
       </div>
 
@@ -207,7 +207,7 @@ const buttonText = computed(() => {
   switch (props.project.status) {
     case 'DETECTING': return 'DINO检测中...'
     case 'CLEANING': return 'VLM清洗中...'
-    case 'SYNCING': return '同步到Label Studio中...'
+    case 'SYNCING': return '同步到星目智能标注中...'
     case 'COMPLETED':
       return '重新执行自动标注'
     case 'FAILED': return '重新执行自动标注'
@@ -249,7 +249,7 @@ const stageLabel = computed(() => {
     DINO: 'DINO 目标检测',
     VLM: 'VLM 智能清洗',
     THRESHOLD_FILTER: '阈值过滤',
-    SYNC: '同步到 Label Studio'
+    SYNC: '同步到星目智能标注'
   }
   return map[stage] || '准备中'
 })
@@ -263,7 +263,7 @@ const currentStepText = computed(() => {
       DINO: total > 0 ? `DINO 目标检测中... ${processed}/${total} 张` : 'DINO 目标检测中...',
       VLM: 'VLM 智能清洗中...',
       THRESHOLD_FILTER: 'DINO 置信度过滤中...',
-      SYNC: '同步标注到 Label Studio...'
+      SYNC: '同步标注到星目智能标注...'
     }
     return stageMap[jobStatus.value.currentStage] || ''
   }
@@ -271,7 +271,7 @@ const currentStepText = computed(() => {
     'UPLOADING': '上传图片中...',
     'DETECTING': 'DINO 目标检测中...',
     'CLEANING': 'VLM 智能清洗中...',
-    'SYNCING': '同步标注到 Label Studio...',
+    'SYNCING': '同步标注到星目智能标注...',
     'COMPLETED': '自动标注已完成',
     'FAILED': '标注过程出错'
   }
@@ -299,10 +299,10 @@ const STATUS_LOGS = {
   ],
   'SYNCING': [
     { msg: 'VLM 清洗完成', level: 'success', icon: '✅' },
-    { msg: '正在同步标注结果到 Label Studio...', level: 'info', icon: '📤' }
+    { msg: '正在同步标注结果到星目智能标注...', level: 'info', icon: '📤' }
   ],
   'COMPLETED': [
-    { msg: '标注结果已同步到 Label Studio', level: 'success', icon: '✅' }
+    { msg: '标注结果已同步到星目智能标注', level: 'success', icon: '✅' }
   ]
 }
 
@@ -388,7 +388,7 @@ const syncLogsFromJob = () => {
       DINO: '开始 Grounding DINO 目标检测...',
       VLM: '开始 VLM 智能清洗与验证...',
       THRESHOLD_FILTER: `按 score >= ${scoreThreshold.value} 过滤 DINO 检测框...`,
-      SYNC: '正在同步标注结果到 Label Studio...'
+      SYNC: '正在同步标注结果到星目智能标注...'
     }
     if (stageLogs[stage]) addLog(stageLogs[stage], 'info', '⚙️')
     lastLoggedStatus = stage

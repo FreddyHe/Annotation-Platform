@@ -1,6 +1,5 @@
 <template>
   <div class="file-upload">
-    <p class="section-desc">支持大文件分块上传，自动断点续传，上传完成后自动合并</p>
     <el-upload ref="uploadRef" class="upload-demo" drag :auto-upload="false" :on-change="handleFileChange" :on-remove="handleFileRemove" :file-list="fileList" :limit="10" multiple>
       <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
       <div class="el-upload__text">将文件拖到此处，或<em>点击上传</em></div>
@@ -97,7 +96,7 @@ const uploadChunkWithRetry = async (formData, maxRetries = MAX_RETRIES) => {
 
 const getUploadedChunkSet = async (fileId) => {
   try {
-    const res = await uploadAPI.getUploadedChunks(fileId)
+    const res = await uploadAPI.getUploadedChunks(fileId, props.projectId)
     return new Set(res.data?.uploadedChunks || [])
   } catch {
     return new Set()
@@ -126,7 +125,6 @@ const uploadFile = async (file) => {
 
 <style scoped>
 .file-upload { }
-.section-desc { color: var(--gray-500); font-size: 13px; margin-bottom: 16px; }
 .upload-actions { margin-top: 20px; text-align: center; display: flex; justify-content: center; gap: 12px; }
 .upload-progress { margin-top: 20px; padding: 16px; background: var(--gray-50); border-radius: var(--radius-md); }
 .progress-section { margin-bottom: 12px; }

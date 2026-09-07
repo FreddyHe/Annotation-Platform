@@ -52,7 +52,12 @@ public class AuthServiceImpl implements AuthService {
             User user = userService.findByUsername(request.getUsername());
             userService.updateLastLogin(user.getId());
 
-            if (!user.getLsSynced() || user.getLsToken() == null) {
+            boolean needsLabelStudioSync = !Boolean.TRUE.equals(user.getLsSynced())
+                    || user.getLsToken() == null
+                    || user.getLsToken().isBlank()
+                    || user.getLsPlainPassword() == null
+                    || user.getLsPlainPassword().isBlank();
+            if (needsLabelStudioSync) {
                 try {
                     labelStudioProxyService.syncUserToLS(user, request.getPassword());
                     log.info("登录时同步用户到 Label Studio: userId={}, lsUserId={}", 

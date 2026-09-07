@@ -15,9 +15,14 @@ from services.llm_service import LlmService
 router = APIRouter()
 
 
-DEFAULT_VLM_API_KEY = "sk-644be34708ab44a38a0a28c82e37d6b6"
-DEFAULT_VLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-DEFAULT_VLM_MODEL_NAME = "qwen-vl-plus"
+DEFAULT_VLM_API_KEY = "local-no-key-required"
+DEFAULT_VLM_BASE_URL = "http://127.0.0.1:8002/v1"
+DEFAULT_VLM_MODEL_NAME = "local-vlm"
+
+
+def _is_local_base_url(base_url: str) -> bool:
+    value = (base_url or "").strip().lower()
+    return value.startswith("http://127.0.0.1") or value.startswith("http://localhost")
 
 
 def _extract_json_object(text: str) -> Dict[str, Any]:
@@ -96,6 +101,8 @@ async def analyze_image(
     effective_api_key = vlm_api_key or DEFAULT_VLM_API_KEY
     effective_base_url = vlm_base_url or DEFAULT_VLM_BASE_URL
     effective_model_name = vlm_model_name or DEFAULT_VLM_MODEL_NAME
+    if not _is_local_base_url(effective_base_url):
+        raise HTTPException(status_code=400, detail={"message": "Only local VLM endpoints are allowed"})
 
     try:
         content_bytes = await image.read()
@@ -506,6 +513,8 @@ async def vlm_evaluate(request: VlmEvaluateRequest):
     effective_api_key = request.vlm_api_key or DEFAULT_VLM_API_KEY
     effective_base_url = request.vlm_base_url or DEFAULT_VLM_BASE_URL
     effective_model_name = request.vlm_model_name or DEFAULT_VLM_MODEL_NAME
+    if not _is_local_base_url(effective_base_url):
+        return VlmEvaluateResponse(**_generate_default_evaluation(0))
     
     try:
         bboxes = json.loads(request.bboxJson) if request.bboxJson else []

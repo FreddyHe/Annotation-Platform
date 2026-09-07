@@ -39,10 +39,16 @@ request.interceptors.response.use(
     return res
   },
   error => {
-    console.error('Response error:', error)
+    const silentError = error.config?.silentError
+    if (!silentError) {
+      console.error('Response error:', error)
+    }
     
     if (error.response) {
       const { status, data } = error.response
+      if (silentError) {
+        return Promise.reject(error)
+      }
       
       switch (status) {
         case 401:

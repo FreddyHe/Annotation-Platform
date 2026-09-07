@@ -1,0 +1,78 @@
+# Third-party vendor model registry for Annotation Platform.
+# Secrets must stay in .env.local as BORDER_API_BASE_URL / BORDER_API_APP_KEY / BORDER_API_APP_SECRET.
+# Fill api_path from the Apifox document when the vendor endpoint is reachable.
+provider: border-online-api
+version: border-online-20260615
+default_api_path: ""
+models:
+  - model_id: border-online-multiclass-detection
+    name: 三方厂商在线综合检测
+    version: border-online-20260615
+    model_type: BORDER_VENDOR
+    task_type: image_detection
+    endpoint: /internal/adapters/border/predict
+    api_path: ""
+    expand_classes_as_models: true
+    class_model_id_prefix: border-online
+    include_aggregate_model: true
+    claim_boundary: 第三方公网在线接口；只有 api_path 配置完成且接口实测可达后才参与生产路由。
+    classes:
+      - 人形
+      - 红外人形
+      - 车辆
+      - 红外车辆
+      - 人群聚集
+      - 船只
+      - 红外船只
+      - 通用文字OCR识别
+      - 烟火
+      - 红外烟火
+      - 安全帽
+      - 安全帽未佩戴
+      - 反光衣
+      - 未穿反光衣
+      - 工程车辆
+      - 挖掘机
+      - 渣土车
+      - 垃圾包
+      - 建筑垃圾乱堆
+      - 井盖
+      - 太阳能板
+      - 水面漂浮物
+      - 水面油污
+      - 水面垃圾
+      - 水面植物
+      - 涉水识别
+      - 东西焚烧
+      - 交通拥堵
+      - 路面标线
+      - 路面破损
+      - 路面杂物
+      - 路面积水
+      - 非机动车道占用
+      - 近景车牌号码识别
+    aliases:
+      - 三方厂商
+      - 第三方厂商
+      - 边界智能
+      - 在线综合检测
+      - 人形
+      - 红外人形
+      - 车辆
+      - 红外车辆
+      - 人群聚集
+      - 船只
+      - 红外船只
+      - OCR
+      - 文字识别
+      - 烟火
+      - 红外烟火
+      - 安全帽
+      - 未戴安全帽
+      - 安全帽未佩戴
+      - 反光衣
+      - 未穿反光衣
+      - reflective vest
+      - safety vest
+      - helmet
+      - no helmet

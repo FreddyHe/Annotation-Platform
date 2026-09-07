@@ -12,6 +12,15 @@ public interface LabelStudioProxyService {
 
     String getLoginUrl(Long userId, String returnUrl);
 
+    String createBrowserSessionCookie(Long userId);
+
+    /**
+     * Create a browser session pinned to the project organization currently
+     * selected in Annotation Platform. This prevents stale LS organization
+     * state from making an otherwise valid project appear as 404.
+     */
+    String createBrowserSessionCookie(Long userId, Long lsProjectId, Long lsOrganizationId);
+
     LoginResponse.UserInfo getUserInfo(String lsToken);
 
     String createLSToken(Long userId);
@@ -73,6 +82,16 @@ public interface LabelStudioProxyService {
      * 同步本地存储
      */
     boolean syncLocalStorage(Long storageId, Long userId);
+
+    /**
+     * 清理不适合当前图片标注配置的非图片任务
+     */
+    Map<String, Object> cleanupNonImageTasks(Long lsProjectId, Long userId);
+
+    /**
+     * 准备图片复核工作台：确保 LS 项目、挂载项目图片目录、同步 storage，并清理历史非图片 task。
+     */
+    Map<String, Object> prepareProjectReviewWorkspace(Project project, Long userId);
 
     /**
      * 导入预测结果

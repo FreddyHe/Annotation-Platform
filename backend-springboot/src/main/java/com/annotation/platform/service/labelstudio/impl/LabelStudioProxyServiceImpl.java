@@ -20,14 +20,25 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 
 import java.sql.*;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.IOException;
+import java.net.URLDecoder;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.net.URLEncoder;
+import java.util.UUID;
+import java.util.zip.DeflaterOutputStream;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 
 @Slf4j
@@ -35,12 +46,23 @@ import java.nio.charset.StandardCharsets;
 @RequiredArgsConstructor
 public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
     private static final int PREDICTION_IMPORT_BATCH_SIZE = 500;
+    private static final String IMAGE_TASK_REGEX = "(?i).*\\.(jpg|jpeg|png|bmp|gif|webp)$";
+    private static final String DJANGO_SESSION_SALT = "django.contrib.sessions.backends.signed_cookies";
+    private static final String DJANGO_AUTH_HASH_SALT = "django.contrib.auth.models.AbstractBaseUser.get_session_auth_hash";
+    private static final String DJANGO_AUTH_BACKEND = "django.contrib.auth.backends.ModelBackend";
+    private static final String BASE62_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
     @Value("${app.label-studio.url}")
     private String labelStudioUrl;
 
     @Value("${app.label-studio.public-url}")
     private String labelStudioPublicUrl;
+
+    @Value("${app.label-studio.secret-key:}")
+    private String labelStudioSecretKey;
+
+    @Value("${app.label-studio.env-path:/root/.local/share/label-studio/.env}")
+    private String labelStudioEnvPath;
 
     @Value("${app.label-studio.timeout}")
     private Integer timeout;
@@ -51,10 +73,16 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
     @Value("${app.label-studio.db-path}")
     private String labelStudioDbPath;
 
+    @Value("${app.file.upload.base-path:/root/autodl-fs/uploads}")
+    private String uploadBasePath;
+
+    private volatile String cachedAdminToken;
+
     private final UserRepository userRepository;
     private final ProjectRepository projectRepository;
     private final OrganizationRepository organizationRepository;
     private final RestTemplate restTemplate;
+    private volatile String cachedLabelStudioSecretKey;
 
     @Override
     public String getLoginUrl(Long userId, String returnUrl) {
@@ -63,12 +91,70 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
 
         createLSToken(userId);
 
-        String next = returnUrl != null && !returnUrl.isBlank() ? returnUrl : "/projects";
-        String encodedNext = URLEncoder.encode(next, StandardCharsets.UTF_8);
-        String loginUrl = String.format("%s/user/login/?next=%s", labelStudioPublicUrl, encodedNext);
+        String next = normalizeLabelStudioReturnPath(returnUrl);
+        String loginUrl = buildLabelStudioPublicUrl(next);
 
-        log.info("生成 Label Studio 登录链接: userId={}, loginUrl={}", userId, loginUrl);
+        log.info("生成 Label Studio 项目入口链接: userId={}, path={}", userId, next);
         return loginUrl;
+    }
+
+    @Override
+    public String createBrowserSessionCookie(Long userId) {
+        return createBrowserSessionCookie(userId, null, null);
+    }
+
+    @Override
+    public String createBrowserSessionCookie(Long userId, Long lsProjectId, Long lsOrganizationId) {
+        try {
+            User user = userRepository.findById(userId)
+                    .orElseThrow(() -> new BusinessException(com.annotation.platform.common.ErrorCode.USER_001));
+            if (user.getLsUserId() == null) {
+                syncUserToLS(user, null);
+                user = userRepository.findById(userId)
+                        .orElseThrow(() -> new BusinessException(com.annotation.platform.common.ErrorCode.USER_001));
+            }
+            if (user.getLsUserId() == null) {
+                log.warn("无法生成 Label Studio 会话：用户尚未同步到 LS: userId={}", userId);
+                return null;
+            }
+
+            String secretKey = resolveLabelStudioSecretKey();
+            String passwordHash = fetchPasswordFromLSDB(user.getLsUserId());
+            if ((passwordHash == null || passwordHash.isBlank())
+                    && user.getLsPlainPassword() != null
+                    && !user.getLsPlainPassword().isBlank()) {
+                setLSUserPassword(user.getLsUserId(), user.getLsPlainPassword());
+                passwordHash = fetchPasswordFromLSDB(user.getLsUserId());
+            }
+            if (secretKey == null || secretKey.isBlank() || passwordHash == null || passwordHash.isBlank()) {
+                log.warn("无法生成 Label Studio 会话：缺少 LS secret 或密码哈希: userId={}, lsUserId={}", userId, user.getLsUserId());
+                return null;
+            }
+
+            Long organizationPk = lsOrganizationId != null
+                    ? lsOrganizationId
+                    : resolveLabelStudioSessionOrganization(user);
+            if (lsProjectId != null && organizationPk != null) {
+                updateProjectOrganizationInLSDB(lsProjectId, organizationPk);
+                updateUserActiveOrganizationInLSDB(user.getLsUserId(), organizationPk);
+                addUserToOrganizationInLSDB(organizationPk, user.getLsUserId());
+            }
+            String authHash = saltedHmacHex(DJANGO_AUTH_HASH_SALT, passwordHash, secretKey);
+
+            Map<String, Object> session = new LinkedHashMap<>();
+            session.put("uid", UUID.randomUUID().toString());
+            session.put("organization_pk", organizationPk);
+            session.put("last_login", Instant.now().toEpochMilli() / 1000.0d);
+            session.put("_auth_user_id", String.valueOf(user.getLsUserId()));
+            session.put("_auth_user_backend", DJANGO_AUTH_BACKEND);
+            session.put("_auth_user_hash", authHash);
+            session.put("_session_expiry", 259200.0d);
+
+            return signDjangoSession(session, secretKey);
+        } catch (Exception e) {
+            log.warn("生成 Label Studio 浏览器会话失败: userId={}, error={}", userId, e.getMessage());
+            return null;
+        }
     }
 
     @Override
@@ -123,7 +209,19 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
     @Transactional
     public void syncUserToLS(User user, String plainPassword) {
         try {
-            if (user.getLsUserId() != null && user.getLsSynced() && user.getLsToken() != null && !user.getLsToken().isBlank()) {
+            if (user.getLsUserId() != null && Boolean.TRUE.equals(user.getLsSynced()) && user.getLsToken() != null && !user.getLsToken().isBlank()) {
+                if (plainPassword != null && !plainPassword.isBlank()) {
+                    String existingPassword = fetchPasswordFromLSDB(user.getLsUserId());
+                    if (existingPassword == null || existingPassword.isBlank()) {
+                        setLSUserPassword(user.getLsUserId(), plainPassword);
+                        log.info("为已同步 LS 用户补充密码: lsUserId={}", user.getLsUserId());
+                    }
+                    if (user.getLsPlainPassword() == null || user.getLsPlainPassword().isBlank()) {
+                        user.setLsPlainPassword(plainPassword);
+                        user.setUpdatedAt(LocalDateTime.now());
+                        userRepository.save(user);
+                    }
+                }
                 log.info("用户已同步到 Label Studio: userId={}, lsUserId={}", user.getId(), user.getLsUserId());
                 return;
             }
@@ -154,7 +252,12 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
             String url = String.format("%s/api/users", labelStudioUrl);
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.set("Authorization", "Token " + adminToken);
+            String effectiveAdminToken = resolveLabelStudioAdminToken();
+            if (effectiveAdminToken == null) {
+                log.warn("缺少 Label Studio admin token，跳过用户同步: userId={}", user.getId());
+                return;
+            }
+            headers.set("Authorization", "Token " + effectiveAdminToken);
 
             Map<String, Object> userData = new HashMap<>();
             userData.put("username", user.getUsername());
@@ -238,11 +341,6 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
     @Transactional
     public Long syncProjectToLS(Project project, Long userId) {
         try {
-            if (project.getLsProjectId() != null) {
-                log.info("项目已同步到 Label Studio: projectId={}, lsProjectId={}", project.getId(), project.getLsProjectId());
-                return project.getLsProjectId();
-            }
-
             Organization organization = null;
             if (project.getOrganization() != null) {
                 organization = organizationRepository.findById(project.getOrganization().getId()).orElse(null);
@@ -259,10 +357,20 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
 
             syncOrganizationToLS(organization, createdBy);
 
+            if (project.getLsProjectId() != null) {
+                ensureProjectVisibleInOrganization(project, organization, userId);
+                log.info("项目已同步到 Label Studio: projectId={}, lsProjectId={}", project.getId(), project.getLsProjectId());
+                return project.getLsProjectId();
+            }
+
             String lsToken = getOrganizationAdminToken(organization);
             if (lsToken == null) {
                 log.warn("无法获取组织管理员 Token，fallback 到 admin token: orgId={}", organization.getId());
-                lsToken = adminToken;
+                lsToken = resolveLabelStudioAdminToken();
+            }
+            if (lsToken == null) {
+                log.warn("缺少 Label Studio 可用 Token，跳过项目同步: projectId={}, orgId={}", project.getId(), organization.getId());
+                return null;
             }
 
             List<String> projectLabels = project.getLabels();
@@ -302,6 +410,7 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
                 project.setLsProjectId(lsProject.getLong("id"));
                 project.setUpdatedAt(LocalDateTime.now());
                 projectRepository.save(project);
+                ensureProjectVisibleInOrganization(project, organization, userId);
 
                 log.info("项目同步到 Label Studio 成功: projectId={}, lsProjectId={}", project.getId(), project.getLsProjectId());
                 return lsProject.getLong("id");
@@ -445,6 +554,7 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
             Long existingStorageId = getExistingLocalStorage(lsProjectId, normalizedPath, lsToken);
             if (existingStorageId != null) {
                 log.info("找到已存在的存储: lsProjectId={}, storageId={}, path={}", lsProjectId, existingStorageId, normalizedPath);
+                updateLocalStorageImageFilter(existingStorageId, normalizedPath, lsToken);
                 return existingStorageId;
             }
 
@@ -458,7 +568,7 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
             payload.put("project", lsProjectId);
             payload.put("title", "Auto_Local_Images");
             payload.put("use_blob_urls", true);
-            payload.put("regex_filter", ".*");
+            payload.put("regex_filter", IMAGE_TASK_REGEX);
             payload.put("recursive_scan", true);
             payload.put("scan_on_creation", true);
             payload.put("can_delete_objects", false);
@@ -527,6 +637,126 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
     }
 
     @Override
+    public Map<String, Object> cleanupNonImageTasks(Long lsProjectId, Long userId) {
+        Map<String, Object> stats = new HashMap<>();
+        stats.put("checked", 0);
+        stats.put("deleted", 0);
+        stats.put("failed", 0);
+        stats.put("skipped", 0);
+
+        try {
+            String lsToken = getUserLsTokenWithFallback(userId);
+            if (lsToken == null) {
+                log.warn("无法获取用户 Token，跳过非图片 task 清理: userId={}", userId);
+                return stats;
+            }
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("Authorization", "Token " + lsToken);
+
+            List<Map<String, Object>> tasks = fetchAllProjectTasks(lsProjectId, headers);
+            stats.put("checked", tasks.size());
+            for (Map<String, Object> task : tasks) {
+                String imageName = extractTaskImageName(task);
+                if (imageName == null || imageName.isBlank()) {
+                    stats.put("skipped", (int) stats.get("skipped") + 1);
+                    continue;
+                }
+                if (isSupportedImageFile(imageName)) {
+                    continue;
+                }
+                Object taskId = task.get("id");
+                if (taskId == null) {
+                    stats.put("skipped", (int) stats.get("skipped") + 1);
+                    continue;
+                }
+                String url = String.format("%s/api/tasks/%s", labelStudioUrl, taskId);
+                try {
+                    ResponseEntity<String> response = restTemplate.exchange(
+                            url,
+                            HttpMethod.DELETE,
+                            new HttpEntity<>(headers),
+                            String.class
+                    );
+                    if (response.getStatusCode().is2xxSuccessful()) {
+                        stats.put("deleted", (int) stats.get("deleted") + 1);
+                    } else {
+                        stats.put("failed", (int) stats.get("failed") + 1);
+                        log.warn("删除非图片 Label Studio task 失败: lsProjectId={}, taskId={}, imageName={}, status={}",
+                                lsProjectId, taskId, imageName, response.getStatusCode());
+                    }
+                } catch (Exception e) {
+                    stats.put("failed", (int) stats.get("failed") + 1);
+                    log.warn("删除非图片 Label Studio task 异常: lsProjectId={}, taskId={}, imageName={}, error={}",
+                            lsProjectId, taskId, imageName, e.getMessage());
+                }
+            }
+            log.info("Label Studio 非图片 task 清理完成: lsProjectId={}, checked={}, deleted={}, failed={}, skipped={}",
+                    lsProjectId, stats.get("checked"), stats.get("deleted"), stats.get("failed"), stats.get("skipped"));
+        } catch (Exception e) {
+            log.error("Label Studio 非图片 task 清理失败: lsProjectId={}, error={}", lsProjectId, e.getMessage(), e);
+        }
+        return stats;
+    }
+
+    @Override
+    public Map<String, Object> prepareProjectReviewWorkspace(Project project, Long userId) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("available", false);
+        result.put("storageSynced", false);
+        result.put("cleanup", Map.of());
+
+        if (project == null || project.getId() == null) {
+            result.put("reason", "项目不存在，无法准备 Label Studio 复核工作台");
+            return result;
+        }
+
+        try {
+            Long lsProjectId = syncProjectToLS(project, userId);
+            if (lsProjectId == null) {
+                lsProjectId = project.getLsProjectId();
+            }
+            result.put("lsProjectId", lsProjectId);
+            if (lsProjectId == null) {
+                result.put("reason", "Label Studio 项目不可用");
+                return result;
+            }
+
+            Path projectUploadDir = Path.of(uploadBasePath, String.valueOf(project.getId())).toAbsolutePath().normalize();
+            if (!Files.exists(projectUploadDir)) {
+                result.put("available", true);
+                result.put("reason", "项目图片目录尚不存在");
+                result.put("localPath", projectUploadDir.toString());
+                return result;
+            }
+
+            Long storageId = mountLocalStorage(lsProjectId, projectUploadDir.toString(), userId);
+            result.put("storageId", storageId);
+            if (storageId != null) {
+                boolean synced = syncLocalStorage(storageId, userId);
+                result.put("storageSynced", synced);
+                int taskCount = getProjectTaskCount(lsProjectId, userId);
+                result.put("taskCount", taskCount);
+                if (taskCount > 500) {
+                    result.put("cleanup", Map.of(
+                            "skipped", true,
+                            "reason", "large_project_skip_repeated_non_image_cleanup",
+                            "taskCount", taskCount));
+                } else {
+                    result.put("cleanup", cleanupNonImageTasks(lsProjectId, userId));
+                }
+            }
+            result.put("available", true);
+            return result;
+        } catch (Exception e) {
+            log.warn("准备 Label Studio 复核工作台失败: projectId={}, error={}", project.getId(), e.getMessage());
+            result.put("reason", e.getMessage());
+            return result;
+        }
+    }
+
+    @Override
     public Map<String, Object> importPredictions(Long lsProjectId, 
                                                List<Map<String, Object>> predictions, 
                                                Long userId) {
@@ -590,7 +820,7 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
                 Map<String, Object> payload = new HashMap<>();
                 payload.put("task", task.get("id"));
                 payload.put("result", results);
-                payload.put("model_version", "dino_threshold_v1");
+                payload.put("model_version", prediction.getOrDefault("model_version", "dino_threshold_v1"));
                 payload.put("score", avgScore);
                 bulkPayload.add(payload);
             }
@@ -628,10 +858,20 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
                 );
 
                 if (response.getStatusCode() == HttpStatus.OK || response.getStatusCode() == HttpStatus.CREATED) {
-                    int created = extractCreatedPredictionCount(response.getBody(), batch.size());
-                    stats.put("success", (int) stats.get("success") + created);
-                    log.info("Label Studio 批量预测导入成功: lsProjectId={}, batch={}-{}, created={}",
-                            lsProjectId, start, end - 1, created);
+                    Integer created = extractCreatedPredictionCount(response.getBody());
+                    if (created == null) {
+                        stats.put("success", (int) stats.get("success") + batch.size());
+                        log.info("Label Studio 批量预测导入成功: lsProjectId={}, batch={}-{}, created=unknown, assumed={}",
+                                lsProjectId, start, end - 1, batch.size());
+                    } else if (created > 0) {
+                        stats.put("success", (int) stats.get("success") + created);
+                        log.info("Label Studio 批量预测导入成功: lsProjectId={}, batch={}-{}, created={}",
+                                lsProjectId, start, end - 1, created);
+                    } else {
+                        log.warn("Label Studio 批量预测导入 created=0，回退逐条导入: lsProjectId={}, batch={}-{}, body={}",
+                                lsProjectId, start, end - 1, response.getBody());
+                        importPredictionsOneByOne(batch, headers, stats);
+                    }
                 } else {
                     log.warn("Label Studio 批量预测导入返回非成功状态，回退逐条导入: lsProjectId={}, status={}, body={}",
                             lsProjectId, response.getStatusCode(), response.getBody());
@@ -645,16 +885,15 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
         }
     }
 
-    private int extractCreatedPredictionCount(String responseBody, int fallbackCount) {
+    private Integer extractCreatedPredictionCount(String responseBody) {
         if (responseBody == null || responseBody.isBlank()) {
-            return fallbackCount;
+            return null;
         }
         try {
             JSONObject body = JSON.parseObject(responseBody);
-            Integer created = body.getInteger("created");
-            return created != null ? created : fallbackCount;
+            return body.getInteger("created");
         } catch (Exception e) {
-            return fallbackCount;
+            return null;
         }
     }
 
@@ -695,7 +934,7 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
         int pageSize = 100;
 
         while (true) {
-            String tasksUrl = String.format("%s/api/tasks?project=%d&page=%d&page_size=%d",
+            String tasksUrl = String.format("%s/api/tasks?project=%d&page=%d&page_size=%d&fields=all",
                     labelStudioUrl, lsProjectId, page, pageSize);
             HttpEntity<String> tasksEntity = new HttpEntity<>(headers);
             ResponseEntity<String> tasksResponse = restTemplate.exchange(
@@ -744,8 +983,22 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
             return null;
         }
 
-        int slashIndex = imageUrl.lastIndexOf('/');
-        String imageName = slashIndex >= 0 ? imageUrl.substring(slashIndex + 1) : imageUrl;
+        String imageName = imageUrl;
+        int dIndex = imageUrl.indexOf("?d=");
+        if (dIndex >= 0) {
+            imageName = imageUrl.substring(dIndex + 3);
+            int ampIndex = imageName.indexOf('&');
+            if (ampIndex >= 0) {
+                imageName = imageName.substring(0, ampIndex);
+            }
+        }
+        try {
+            imageName = URLDecoder.decode(imageName, StandardCharsets.UTF_8);
+        } catch (Exception ignored) {
+            // Keep the raw value if URL decoding fails.
+        }
+        int slashIndex = imageName.lastIndexOf('/');
+        imageName = slashIndex >= 0 ? imageName.substring(slashIndex + 1) : imageName;
         int queryIndex = imageName.indexOf('?');
         if (queryIndex >= 0) {
             imageName = imageName.substring(0, queryIndex);
@@ -767,7 +1020,12 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
             String url = String.format("%s/api/organizations", labelStudioUrl);
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.set("Authorization", "Token " + adminToken);
+            String effectiveAdminToken = resolveLabelStudioAdminToken();
+            if (effectiveAdminToken == null) {
+                log.warn("缺少 Label Studio admin token，跳过组织同步: orgId={}", organization.getId());
+                return;
+            }
+            headers.set("Authorization", "Token " + effectiveAdminToken);
 
             Map<String, Object> orgData = new HashMap<>();
             orgData.put("title", organization.getDisplayName());
@@ -853,6 +1111,52 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
         }
     }
 
+    private void updateLocalStorageImageFilter(Long storageId, String normalizedPath, String lsToken) {
+        try {
+            String url = String.format("%s/api/storages/localfiles/%d", labelStudioUrl, storageId);
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("Authorization", "Token " + lsToken);
+
+            Map<String, Object> payload = new HashMap<>();
+            // Label Studio 1.22 在 PATCH 时仍会校验必填 path，必须连同过滤器一起传回。
+            payload.put("path", normalizedPath);
+            payload.put("regex_filter", IMAGE_TASK_REGEX);
+            payload.put("recursive_scan", true);
+            payload.put("use_blob_urls", true);
+            payload.put("presign", true);
+            payload.put("presign_ttl", 1);
+
+            ResponseEntity<String> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.PATCH,
+                    new HttpEntity<>(JSON.toJSONString(payload), headers),
+                    String.class
+            );
+            if (response.getStatusCode().is2xxSuccessful()) {
+                log.info("Label Studio local storage 图片过滤器已更新: storageId={}", storageId);
+            } else {
+                log.warn("更新 Label Studio local storage 图片过滤器失败: storageId={}, status={}",
+                        storageId, response.getStatusCode());
+            }
+        } catch (Exception e) {
+            log.warn("更新 Label Studio local storage 图片过滤器异常: storageId={}, error={}", storageId, e.getMessage());
+        }
+    }
+
+    private boolean isSupportedImageFile(String filename) {
+        if (filename == null || filename.isBlank()) {
+            return false;
+        }
+        String lower = filename.toLowerCase();
+        return lower.endsWith(".jpg")
+                || lower.endsWith(".jpeg")
+                || lower.endsWith(".png")
+                || lower.endsWith(".bmp")
+                || lower.endsWith(".gif")
+                || lower.endsWith(".webp");
+    }
+
     @Override
     public int getProjectTaskCount(Long lsProjectId, Long userId) {
         try {
@@ -886,6 +1190,9 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
                 
                 JSONObject data = JSON.parseObject(responseBody);
                 Integer totalCount = data.getInteger("total_count");
+                if (totalCount == null) {
+                    totalCount = data.getInteger("total");
+                }
                 if (totalCount == null) {
                     log.warn("total_count 字段为空，尝试从 tasks 数组获取: lsProjectId={}", lsProjectId);
                     Object tasksObj = data.get("tasks");
@@ -927,9 +1234,42 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
 
         User user = userRepository.findById(userId).orElse(null);
         if (user != null && user.getOrganization() != null) {
-            return getOrganizationAdminToken(user.getOrganization());
+            String organizationToken = getOrganizationAdminToken(user.getOrganization());
+            if (organizationToken != null) {
+                return organizationToken;
+            }
         }
 
+        return resolveLabelStudioAdminToken();
+    }
+
+    private String resolveLabelStudioAdminToken() {
+        if (adminToken != null && !adminToken.isBlank()) {
+            return adminToken.trim();
+        }
+        if (cachedAdminToken != null && !cachedAdminToken.isBlank()) {
+            return cachedAdminToken;
+        }
+
+        String sql = """
+                SELECT t.key, t.user_id
+                FROM authtoken_token t
+                JOIN htx_user u ON u.id = t.user_id
+                WHERE t.key IS NOT NULL AND length(trim(t.key)) > 0 AND u.is_active = 1
+                ORDER BY u.id
+                LIMIT 1
+                """;
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + labelStudioDbPath);
+             PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            if (rs.next()) {
+                cachedAdminToken = rs.getString("key");
+                log.info("从 Label Studio 本地数据库读取可用 Token: lsUserId={}", rs.getLong("user_id"));
+                return cachedAdminToken;
+            }
+        } catch (SQLException e) {
+            log.warn("从 Label Studio 本地数据库读取可用 Token 失败: {}", e.getMessage());
+        }
         return null;
     }
 
@@ -1016,6 +1356,43 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
         }
     }
 
+    private void ensureProjectVisibleInOrganization(Project project, Organization organization, Long userId) {
+        if (project == null || project.getLsProjectId() == null || organization == null || organization.getLsOrgId() == null) {
+            return;
+        }
+        updateProjectOrganizationInLSDB(project.getLsProjectId(), organization.getLsOrgId());
+        if (userId == null) {
+            return;
+        }
+        User user = userRepository.findById(userId).orElse(null);
+        if (user == null) {
+            return;
+        }
+        if (user.getLsUserId() == null) {
+            syncUserToLS(user, null);
+            user = userRepository.findById(userId).orElse(null);
+        }
+        if (user != null && user.getLsUserId() != null) {
+            updateUserActiveOrganizationInLSDB(user.getLsUserId(), organization.getLsOrgId());
+            addUserToOrganizationInLSDB(organization.getLsOrgId(), user.getLsUserId());
+        }
+    }
+
+    private void updateProjectOrganizationInLSDB(Long lsProjectId, Long lsOrgId) {
+        String sql = "UPDATE project SET organization_id = ? WHERE id = ?";
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + labelStudioDbPath);
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setLong(1, lsOrgId);
+            stmt.setLong(2, lsProjectId);
+            int updated = stmt.executeUpdate();
+            log.info("更新 LS 项目 organization_id: lsProjectId={}, lsOrgId={}, updatedRows={}",
+                    lsProjectId, lsOrgId, updated);
+        } catch (SQLException e) {
+            log.error("更新 LS 项目 organization_id 失败: lsProjectId={}, lsOrgId={}, error={}",
+                    lsProjectId, lsOrgId, e.getMessage(), e);
+        }
+    }
+
     private void addUserToOrganizationInLSDB(Long lsOrgId, Long lsUserId) {
         String checkSql = "SELECT COUNT(*) FROM organizations_organizationmember WHERE organization_id = ? AND user_id = ?";
         String insertSql = "INSERT INTO organizations_organizationmember (organization_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)";
@@ -1057,6 +1434,117 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
         } catch (SQLException e) {
             log.error("从 LS 组织成员表移除用户失败: lsOrgId={}, lsUserId={}, error={}", lsOrgId, lsUserId, e.getMessage(), e);
         }
+    }
+
+    private String normalizeLabelStudioReturnPath(String returnUrl) {
+        if (returnUrl == null || returnUrl.isBlank()) {
+            return "/projects";
+        }
+        String next = returnUrl.trim();
+        if (!next.startsWith("/") || next.startsWith("//") || next.contains("\r") || next.contains("\n")) {
+            return "/projects";
+        }
+        return next;
+    }
+
+    private String buildLabelStudioPublicUrl(String path) {
+        String base = labelStudioPublicUrl != null ? labelStudioPublicUrl.trim() : "";
+        while (base.endsWith("/")) {
+            base = base.substring(0, base.length() - 1);
+        }
+        return base + normalizeLabelStudioReturnPath(path);
+    }
+
+    private Long resolveLabelStudioSessionOrganization(User user) {
+        if (user.getLsOrgId() != null) {
+            return user.getLsOrgId();
+        }
+        if (user.getOrganization() != null && user.getOrganization().getLsOrgId() != null) {
+            return user.getOrganization().getLsOrgId();
+        }
+        return 1L;
+    }
+
+    private String resolveLabelStudioSecretKey() {
+        if (labelStudioSecretKey != null && !labelStudioSecretKey.isBlank()) {
+            return labelStudioSecretKey.trim();
+        }
+        if (cachedLabelStudioSecretKey != null && !cachedLabelStudioSecretKey.isBlank()) {
+            return cachedLabelStudioSecretKey;
+        }
+        try {
+            for (String line : Files.readAllLines(Path.of(labelStudioEnvPath), StandardCharsets.UTF_8)) {
+                if (line.startsWith("SECRET_KEY=")) {
+                    String secret = line.substring("SECRET_KEY=".length()).trim();
+                    if (!secret.isBlank()) {
+                        cachedLabelStudioSecretKey = secret;
+                        return secret;
+                    }
+                }
+            }
+        } catch (IOException e) {
+            log.warn("读取 Label Studio SECRET_KEY 失败: path={}, error={}", labelStudioEnvPath, e.getMessage());
+        }
+        return null;
+    }
+
+    private String signDjangoSession(Map<String, Object> session, String secretKey) throws Exception {
+        byte[] json = JSON.toJSONString(session).getBytes(StandardCharsets.UTF_8);
+        byte[] compressed = zlibCompress(json);
+        boolean useCompressed = compressed.length < json.length - 1;
+        String payload = base64Url(useCompressed ? compressed : json);
+        if (useCompressed) {
+            payload = "." + payload;
+        }
+        String value = payload + ":" + base62Encode(Instant.now().getEpochSecond());
+        String signature = base64Url(saltedHmacDigest(DJANGO_SESSION_SALT + "signer", value, secretKey));
+        return value + ":" + signature;
+    }
+
+    private byte[] zlibCompress(byte[] data) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try (DeflaterOutputStream deflater = new DeflaterOutputStream(out)) {
+            deflater.write(data);
+        }
+        return out.toByteArray();
+    }
+
+    private String saltedHmacHex(String keySalt, String value, String secretKey) throws Exception {
+        byte[] digest = saltedHmacDigest(keySalt, value, secretKey);
+        StringBuilder hex = new StringBuilder(digest.length * 2);
+        for (byte b : digest) {
+            hex.append(String.format("%02x", b & 0xff));
+        }
+        return hex.toString();
+    }
+
+    private byte[] saltedHmacDigest(String keySalt, String value, String secretKey) throws Exception {
+        MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
+        byte[] key = sha256.digest((keySalt + secretKey).getBytes(StandardCharsets.UTF_8));
+        Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec(key, "HmacSHA256"));
+        return mac.doFinal(value.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private String base64Url(byte[] data) {
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(data);
+    }
+
+    private String base62Encode(long value) {
+        if (value == 0) {
+            return "0";
+        }
+        StringBuilder encoded = new StringBuilder();
+        long current = Math.abs(value);
+        while (current > 0) {
+            int remainder = (int) (current % 62);
+            encoded.append(BASE62_ALPHABET.charAt(remainder));
+            current = current / 62;
+        }
+        if (value < 0) {
+            encoded.append("-");
+        }
+        return encoded.reverse().toString();
     }
 
     private String fetchPasswordFromLSDB(Long lsUserId) {
@@ -1144,16 +1632,22 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
             for (Map<String, Object> task : tasks) {
                 com.alibaba.fastjson2.JSONArray annotations = toJsonArray(task.get("annotations"));
                 com.alibaba.fastjson2.JSONArray predictions = toJsonArray(task.get("predictions"));
-                if (annotations != null && !annotations.isEmpty()) {
+                int taskAnnotationCount = countFromArrayOrSummary(annotations, task.get("total_annotations"));
+                int taskPredictionCount = countFromArrayOrSummary(predictions, task.get("total_predictions"));
+                if (taskAnnotationCount > 0 || Boolean.TRUE.equals(task.get("is_labeled"))) {
                     reviewedTasks++;
-                    totalAnnotationResults += countNestedResults(annotations);
+                    totalAnnotationResults += annotations != null && !annotations.isEmpty()
+                            ? countNestedResults(annotations)
+                            : taskAnnotationCount;
                 } else {
                     pendingTasks++;
                 }
-                if (predictions != null && !predictions.isEmpty()) {
+                if (taskPredictionCount > 0) {
                     tasksWithPredictions++;
-                    totalPredictions += predictions.size();
-                    totalPredictionResults += countNestedResults(predictions);
+                    totalPredictions += taskPredictionCount;
+                    totalPredictionResults += predictions != null && !predictions.isEmpty()
+                            ? countNestedResults(predictions)
+                            : taskPredictionCount;
                 }
             }
 
@@ -1198,7 +1692,9 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
 
                 com.alibaba.fastjson2.JSONArray annotations = toJsonArray(task.get("annotations"));
                 com.alibaba.fastjson2.JSONArray predictions = toJsonArray(task.get("predictions"));
-                boolean isReviewed = annotations != null && !annotations.isEmpty();
+                int summaryAnnotationCount = countFromArrayOrSummary(annotations, task.get("total_annotations"));
+                int summaryPredictionCount = countFromArrayOrSummary(predictions, task.get("total_predictions"));
+                boolean isReviewed = summaryAnnotationCount > 0 || Boolean.TRUE.equals(task.get("is_labeled"));
                 taskInfo.put("isReviewed", isReviewed);
 
                 int annotationCount = 0;
@@ -1208,18 +1704,23 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
 
                 if (predictions != null && !predictions.isEmpty()) {
                     predictionCount = countNestedResults(predictions);
+                } else {
+                    predictionCount = summaryPredictionCount;
                 }
 
                 if (isReviewed) {
-                    JSONObject annotation = annotations.getJSONObject(0);
-                    com.alibaba.fastjson2.JSONArray results = annotation.getJSONArray("result");
-                    annotationCount = results != null ? results.size() : 0;
-                    completedAt = annotation.getString("created_at");
+                    annotationCount = summaryAnnotationCount;
+                    if (annotations != null && !annotations.isEmpty()) {
+                        JSONObject annotation = annotations.getJSONObject(0);
+                        com.alibaba.fastjson2.JSONArray results = annotation.getJSONArray("result");
+                        annotationCount = results != null ? results.size() : annotationCount;
+                        completedAt = annotation.getString("created_at");
 
-                    Object completedBy = annotation.get("completed_by");
-                    Long completedById = extractUserId(completedBy);
-                    if (completedById != null) {
-                        annotatedBy = getUserEmailById(completedById);
+                        Object completedBy = annotation.get("completed_by");
+                        Long completedById = extractUserId(completedBy);
+                        if (completedById != null) {
+                            annotatedBy = getUserEmailById(completedById);
+                        }
                     }
                 }
 
@@ -1264,6 +1765,23 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
             }
         }
         return count;
+    }
+
+    private int countFromArrayOrSummary(com.alibaba.fastjson2.JSONArray items, Object summaryValue) {
+        if (items != null && !items.isEmpty()) {
+            return items.size();
+        }
+        if (summaryValue instanceof Number number) {
+            return number.intValue();
+        }
+        if (summaryValue != null) {
+            try {
+                return Integer.parseInt(String.valueOf(summaryValue));
+            } catch (NumberFormatException ignored) {
+                return 0;
+            }
+        }
+        return 0;
     }
 
     @SuppressWarnings("unchecked")
@@ -1326,6 +1844,7 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
 
             List<Map<String, Object>> tasks = fetchAllProjectTasks(lsProjectId, headers);
             List<Map<String, Object>> annotations = new ArrayList<>();
+            boolean reviewedOnly = "reviewed-json".equalsIgnoreCase(format) || "reviewed".equalsIgnoreCase(format);
 
             for (Map<String, Object> task : tasks) {
                 com.alibaba.fastjson2.JSONArray taskAnnotations = toJsonArray(task.get("annotations"));
@@ -1336,7 +1855,7 @@ public class LabelStudioProxyServiceImpl implements LabelStudioProxyService {
                 if (taskAnnotations != null && !taskAnnotations.isEmpty()) {
                     source = taskAnnotations.getJSONObject(0);
                     sourceType = "annotation";
-                } else if (taskPredictions != null && !taskPredictions.isEmpty()) {
+                } else if (!reviewedOnly && taskPredictions != null && !taskPredictions.isEmpty()) {
                     source = taskPredictions.getJSONObject(0);
                     sourceType = "prediction";
                 }

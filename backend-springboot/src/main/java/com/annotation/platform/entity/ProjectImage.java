@@ -6,9 +6,12 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 
 @Entity
 @Table(name = "project_images", indexes = {
@@ -37,6 +40,10 @@ public class ProjectImage {
 
     @Column(name = "file_size")
     private Long fileSize;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "metadata_json", columnDefinition = "json")
+    private Map<String, Object> metadataJson;
 
     @CreationTimestamp
     @Column(name = "uploaded_at", nullable = false, updatable = false)

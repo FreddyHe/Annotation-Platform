@@ -6,10 +6,12 @@ import com.annotation.platform.dto.request.upload.UploadChunkRequest;
 import com.annotation.platform.dto.response.upload.UploadProgressResponse;
 import com.annotation.platform.entity.Project;
 import com.annotation.platform.entity.ProjectImage;
+import com.annotation.platform.entity.ProjectVideo;
 import com.annotation.platform.exception.BusinessException;
 import com.annotation.platform.exception.ResourceNotFoundException;
 import com.annotation.platform.repository.ProjectImageRepository;
 import com.annotation.platform.repository.ProjectRepository;
+import com.annotation.platform.repository.ProjectVideoRepository;
 import com.annotation.platform.service.upload.FileUploadService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,8 +19,11 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.*;
@@ -42,9 +47,14 @@ public class FileUploadServiceImpl implements FileUploadService {
     @Value("${app.file.upload.chunk-size}")
     private Long chunkSize;
 
+    @Value("${app.algorithm.url:http://localhost:8001}")
+    private String algorithmServiceUrl;
+
     private final ProjectRepository projectRepository;
     private final ProjectImageRepository projectImageRepository;
+    private final ProjectVideoRepository projectVideoRepository;
     private final ObjectMapper objectMapper;
+    private final RestTemplate restTemplate;
 
     private final Map<String, UploadProgress> uploadProgressMap = new ConcurrentHashMap<>();
 
@@ -151,6 +161,8 @@ public class FileUploadServiceImpl implements FileUploadService {
                         .build();
                 projectImageRepository.save(projectImage);
                 imagePaths.add(relativePath);
+            } else if (isVideoFile(filename)) {
+                imagePaths = smartSampleVideo(mergedFile, projectDirPath, project, filename, fileId);
             } else {
                 log.warn("不支持的文件类型: {}", filename);
             }
@@ -351,7 +363,8 @@ public class FileUploadServiceImpl implements FileUploadService {
             throw new BusinessException(ErrorCode.FILE_004, "文件名为空");
         }
         String normalized = filename.replace('\\', '/');
-        String baseName = Paths.get(normalized).getFileName().toString();
+        int lastSeparator = normalized.lastIndexOf('/');
+        String baseName = lastSeparator >= 0 ? normalized.substring(lastSeparator + 1) : normalized;
         String safe = baseName.replaceAll("[^a-zA-Z0-9._-]", "_");
         if (safe.isBlank() || ".".equals(safe) || "..".equals(safe)) {
             throw new BusinessException(ErrorCode.FILE_004, "文件名非法");
@@ -521,36 +534,40 @@ public class FileUploadServiceImpl implements FileUploadService {
                     continue;
                 }
                 
-                if (!isImageFile(entryName)) {
-                    continue;
-                }
-                
                 String safeEntryName = sanitizeFilename(entryName);
-                String outputName = uniqueFilename(projectDir.toPath(), safeEntryName);
-                File outputFile = resolveInside(projectDir.toPath(), outputName).toFile();
-                
-                try (InputStream is = zipFileObj.getInputStream(entry);
-                     FileOutputStream fos = new FileOutputStream(outputFile)) {
-                    byte[] buffer = new byte[8192];
-                    int bytesRead;
-                    while ((bytesRead = is.read(buffer)) != -1) {
-                        fos.write(buffer, 0, bytesRead);
+                if (isImageFile(entryName)) {
+                    String outputName = uniqueFilename(projectDir.toPath(), safeEntryName);
+                    File outputFile = resolveInside(projectDir.toPath(), outputName).toFile();
+
+                    try (InputStream is = zipFileObj.getInputStream(entry);
+                         FileOutputStream fos = new FileOutputStream(outputFile)) {
+                        byte[] buffer = new byte[8192];
+                        int bytesRead;
+                        while ((bytesRead = is.read(buffer)) != -1) {
+                            fos.write(buffer, 0, bytesRead);
+                        }
                     }
+
+                    String relativePath = registerProjectImage(project, outputFile);
+                    imagePaths.add(relativePath);
+
+                    log.info("提取图片: {}", entryName);
+                } else if (isVideoFile(entryName)) {
+                    String outputName = uniqueFilename(projectDir.toPath(), safeEntryName);
+                    File outputFile = resolveInside(projectDir.toPath(), outputName).toFile();
+
+                    try (InputStream is = zipFileObj.getInputStream(entry);
+                         FileOutputStream fos = new FileOutputStream(outputFile)) {
+                        byte[] buffer = new byte[8192];
+                        int bytesRead;
+                        while ((bytesRead = is.read(buffer)) != -1) {
+                            fos.write(buffer, 0, bytesRead);
+                        }
+                    }
+
+                    imagePaths.addAll(smartSampleVideo(outputFile, projectDir.toPath(), project, outputFile.getName(), UUID.randomUUID().toString()));
+                    log.info("提取视频并抽帧: {}", entryName);
                 }
-                
-                String relativePath = String.format("%d/%s", project.getId(), outputFile.getName());
-                ProjectImage projectImage = ProjectImage.builder()
-                        .project(project)
-                        .fileName(outputFile.getName())
-                        .filePath(relativePath)
-                        .fileSize(outputFile.length())
-                        .status(ProjectImage.ImageStatus.COMPLETED)
-                        .uploadedAt(LocalDateTime.now())
-                        .build();
-                projectImageRepository.save(projectImage);
-                imagePaths.add(relativePath);
-                
-                log.info("提取图片: {}", entryName);
             }
         }
         
@@ -567,6 +584,282 @@ public class FileUploadServiceImpl implements FileUploadService {
                lowerName.endsWith(".bmp") || 
                lowerName.endsWith(".gif") || 
                lowerName.endsWith(".webp");
+    }
+
+    private boolean isVideoFile(String filename) {
+        String lowerName = filename.toLowerCase();
+        return lowerName.endsWith(".mp4")
+                || lowerName.endsWith(".mov")
+                || lowerName.endsWith(".m4v")
+                || lowerName.endsWith(".avi")
+                || lowerName.endsWith(".mkv")
+                || lowerName.endsWith(".webm");
+    }
+
+    private List<String> smartSampleVideo(
+            File videoFile,
+            Path projectDirPath,
+            Project project,
+            String originalName,
+            String sourceKey) throws IOException {
+        String sourceVideoId = "video_" + sanitizeFileId(sourceKey).replaceAll("[^a-zA-Z0-9._-]", "_");
+        Path uploadRoot = Paths.get(basePath).toAbsolutePath().normalize();
+        Path videoPath = videoFile.toPath().toAbsolutePath().normalize();
+        if (!videoPath.startsWith(uploadRoot)) {
+            throw new IOException("视频文件路径不在上传根目录内");
+        }
+        String videoRelativePath = uploadRoot.relativize(videoPath).toString().replace(File.separatorChar, '/');
+
+        ProjectVideo projectVideo = projectVideoRepository.findByProjectIdAndSourceVideoId(project.getId(), sourceVideoId)
+                .orElseGet(() -> ProjectVideo.builder()
+                        .project(project)
+                        .sourceVideoId(sourceVideoId)
+                        .originalFileName(originalName)
+                        .filePath(videoRelativePath)
+                        .fileSize(videoFile.length())
+                        .metadataJson(new LinkedHashMap<>())
+                        .build());
+        projectVideo.setOriginalFileName(originalName);
+        projectVideo.setFilePath(videoRelativePath);
+        projectVideo.setFileSize(videoFile.length());
+        projectVideo = projectVideoRepository.save(projectVideo);
+
+        Path frameDir = resolveInside(projectDirPath, "smart-frames/" + sourceVideoId);
+        Files.createDirectories(frameDir);
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("video_path", videoPath.toString());
+        payload.put("output_dir", frameDir.toString());
+        payload.put("source_video_id", sourceVideoId);
+        payload.put("source_video_name", originalName);
+        payload.put("options", Map.of(
+                "scan_interval_sec", 1.0,
+                "max_frames", 0,
+                "heartbeat_sec", 20.0
+        ));
+
+        Map<String, Object> body;
+        try {
+            ResponseEntity<Map> response = restTemplate.postForEntity(
+                    algorithmServiceUrl + "/internal/video/smart-sample", payload, Map.class);
+            body = objectMap(response.getBody());
+        } catch (RestClientException e) {
+            log.warn("智能抽帧服务不可用，回退到固定抽帧: video={}, error={}", originalName, e.getMessage());
+            return extractFramesFromVideo(videoFile, projectDirPath, project, originalName);
+        }
+
+        if (!Boolean.TRUE.equals(body.get("available"))) {
+            log.warn("智能抽帧未产出可用结果，回退到固定抽帧: video={}, status={}, reason={}",
+                    originalName, body.get("status"), body.get("reason"));
+            return extractFramesFromVideo(videoFile, projectDirPath, project, originalName);
+        }
+
+        Map<String, Object> manifest = objectMap(body.get("manifest"));
+        List<Map<String, Object>> frames = mapList(body.get("frames"));
+        List<String> imagePaths = new ArrayList<>();
+        for (Map<String, Object> frame : frames) {
+            String absoluteFramePath = String.valueOf(frame.getOrDefault("file_path", ""));
+            if (absoluteFramePath.isBlank()) {
+                continue;
+            }
+            Path framePath = Paths.get(absoluteFramePath).toAbsolutePath().normalize();
+            if (!framePath.startsWith(uploadRoot) || !Files.isRegularFile(framePath)) {
+                log.warn("忽略非法智能抽帧输出: {}", absoluteFramePath);
+                continue;
+            }
+            String relativePath = uploadRoot.relativize(framePath).toString().replace(File.separatorChar, '/');
+            Map<String, Object> metadata = frameMetadata(sourceVideoId, originalName, frame, manifest);
+            imagePaths.add(registerProjectImage(project, framePath.toFile(), relativePath, metadata));
+        }
+
+        projectVideo.setDurationSec(doubleValue(manifest.get("duration_sec")));
+        projectVideo.setFps(doubleValue(manifest.get("fps")));
+        projectVideo.setWidth(intValue(manifest.get("width")));
+        projectVideo.setHeight(intValue(manifest.get("height")));
+        projectVideo.setTotalFrames(longValue(manifest.get("total_frames")));
+        projectVideo.setSelectedFrames(imagePaths.size());
+        Object manifestPath = body.get("manifest_path");
+        if (manifestPath != null) {
+            Path manifestFile = Paths.get(String.valueOf(manifestPath)).toAbsolutePath().normalize();
+            if (manifestFile.startsWith(uploadRoot)) {
+                projectVideo.setManifestPath(uploadRoot.relativize(manifestFile).toString().replace(File.separatorChar, '/'));
+            }
+        }
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("sampler", manifest.get("sampler"));
+        metadata.put("camera_mode", manifest.get("camera_mode"));
+        metadata.put("analyzed_frames", manifest.get("analyzed_frames"));
+        metadata.put("selected_frames", imagePaths.size());
+        metadata.put("options", manifest.get("options"));
+        metadata.put("deep_shot_boundary_backend", manifest.get("deep_shot_boundary_backend"));
+        projectVideo.setMetadataJson(metadata);
+        projectVideoRepository.save(projectVideo);
+
+        log.info("智能抽帧完成: video={}, sourceVideoId={}, frames={}", originalName, sourceVideoId, imagePaths.size());
+        return imagePaths;
+    }
+
+    private List<String> extractFramesFromVideo(File videoFile, Path projectDirPath, Project project, String originalName) throws IOException {
+        List<String> imagePaths = new ArrayList<>();
+        if (!videoFile.exists() || !videoFile.isFile()) {
+            return imagePaths;
+        }
+
+        String baseName = originalName;
+        int dotIndex = baseName.lastIndexOf('.');
+        if (dotIndex > 0) {
+            baseName = baseName.substring(0, dotIndex);
+        }
+        baseName = sanitizeFilename(baseName);
+        String framePrefix = baseName + "_" + System.currentTimeMillis();
+        String framePattern = framePrefix + "_frame_%04d.jpg";
+        Path outputPattern = resolveInside(projectDirPath, framePattern);
+
+        List<String> command = List.of(
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel", "error",
+                "-nostdin",
+                "-y",
+                "-i", videoFile.getAbsolutePath(),
+                "-vf", "fps=1/5",
+                "-frames:v", "120",
+                outputPattern.toString()
+        );
+
+        ProcessBuilder processBuilder = new ProcessBuilder(command);
+        processBuilder.redirectErrorStream(true);
+        Process process = processBuilder.start();
+        String output;
+        try (InputStream inputStream = process.getInputStream()) {
+            output = new String(inputStream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        }
+        try {
+            boolean finished = process.waitFor(10, java.util.concurrent.TimeUnit.MINUTES);
+            if (!finished) {
+                process.destroyForcibly();
+                throw new IOException("视频抽帧超时");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("视频抽帧被中断", e);
+        }
+        if (process.exitValue() != 0) {
+            throw new IOException("视频抽帧失败: " + output);
+        }
+
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(projectDirPath, framePrefix + "_frame_*.jpg")) {
+            for (Path frame : stream) {
+                imagePaths.add(registerProjectImage(project, frame.toFile()));
+            }
+        }
+        Collections.sort(imagePaths);
+        log.info("视频抽帧完成: video={}, frames={}", originalName, imagePaths.size());
+        return imagePaths;
+    }
+
+    private String registerProjectImage(Project project, File imageFile) {
+        String relativePath = String.format("%d/%s", project.getId(), imageFile.getName());
+        return registerProjectImage(project, imageFile, relativePath, null);
+    }
+
+    private String registerProjectImage(Project project, File imageFile, String relativePath, Map<String, Object> metadata) {
+        ProjectImage projectImage = ProjectImage.builder()
+                .project(project)
+                .fileName(imageFile.getName())
+                .filePath(relativePath)
+                .fileSize(imageFile.length())
+                .metadataJson(metadata)
+                .status(ProjectImage.ImageStatus.COMPLETED)
+                .uploadedAt(LocalDateTime.now())
+                .build();
+        projectImageRepository.save(projectImage);
+        return relativePath;
+    }
+
+    private Map<String, Object> frameMetadata(
+            String sourceVideoId,
+            String sourceVideoName,
+            Map<String, Object> frame,
+            Map<String, Object> manifest) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("source_type", "video");
+        metadata.put("source_video_id", sourceVideoId);
+        metadata.put("source_video_name", sourceVideoName);
+        metadata.put("timestamp_sec", frame.get("timestamp_sec"));
+        metadata.put("frame_index", frame.get("frame_index"));
+        metadata.put("reason", frame.get("reason"));
+        metadata.put("hash", frame.get("hash"));
+        metadata.put("scene_score", frame.get("scene_score"));
+        metadata.put("motion_score", frame.get("motion_score"));
+        metadata.put("global_motion_score", frame.get("global_motion_score"));
+        metadata.put("compensated_residual", frame.get("compensated_residual"));
+        metadata.put("sampler", manifest.get("sampler"));
+        metadata.put("camera_mode", manifest.get("camera_mode"));
+        metadata.put("duration_sec", manifest.get("duration_sec"));
+        metadata.put("source_fps", manifest.get("fps"));
+        metadata.put("source_width", manifest.get("width"));
+        metadata.put("source_height", manifest.get("height"));
+        return metadata;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> objectMap(Object value) {
+        if (value instanceof Map<?, ?> raw) {
+            Map<String, Object> result = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : raw.entrySet()) {
+                result.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+            return result;
+        }
+        return Collections.emptyMap();
+    }
+
+    private List<Map<String, Object>> mapList(Object value) {
+        if (!(value instanceof List<?> list)) {
+            return Collections.emptyList();
+        }
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object item : list) {
+            Map<String, Object> map = objectMap(item);
+            if (!map.isEmpty()) {
+                result.add(map);
+            }
+        }
+        return result;
+    }
+
+    private Double doubleValue(Object value) {
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        try {
+            return value == null ? null : Double.parseDouble(String.valueOf(value));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private Integer intValue(Object value) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        try {
+            return value == null ? null : Integer.parseInt(String.valueOf(value));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private Long longValue(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        try {
+            return value == null ? null : Long.parseLong(String.valueOf(value));
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     @Override

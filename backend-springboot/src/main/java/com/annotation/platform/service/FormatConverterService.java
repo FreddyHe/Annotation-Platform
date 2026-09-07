@@ -3,11 +3,13 @@ package com.annotation.platform.service;
 import com.annotation.platform.entity.InferenceDataPoint;
 import com.annotation.platform.entity.IterationRound;
 import com.annotation.platform.entity.LsSubProject;
+import com.annotation.platform.entity.ModelTrainingRecord;
 import com.annotation.platform.entity.Project;
 import com.annotation.platform.entity.ProjectLabel;
 import com.annotation.platform.repository.InferenceDataPointRepository;
 import com.annotation.platform.repository.IterationRoundRepository;
 import com.annotation.platform.repository.LsSubProjectRepository;
+import com.annotation.platform.repository.ModelTrainingRecordRepository;
 import com.annotation.platform.repository.ProjectLabelRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -46,6 +48,9 @@ public class FormatConverterService {
 
     @Autowired
     private LsSubProjectRepository lsSubProjectRepository;
+
+    @Autowired
+    private ModelTrainingRecordRepository modelTrainingRecordRepository;
 
     @Value("${app.label-studio.url:http://localhost:5001}")
     private String labelStudioUrl;
@@ -229,7 +234,8 @@ public class FormatConverterService {
         IterationRound sourceRound = iterationRoundRepository.findById(sourceRoundId)
                 .orElseThrow(() -> new RuntimeException("Source round not found"));
 
-        String outputDir = trainingOutputBasePath + "/project_" + projectId + "/feedback_round_" + sourceRound.getRoundNumber();
+        String outputDir = trainingOutputBasePath + "/project_" + projectId
+                + "/feedback_round_" + sourceRound.getRoundNumber() + "_" + System.currentTimeMillis();
         Path outputPath = Paths.get(outputDir);
         Path imagesDir = outputPath.resolve("images");
         Path labelsDir = outputPath.resolve("labels");
@@ -253,6 +259,10 @@ public class FormatConverterService {
         DatasetConversionResult result = new DatasetConversionResult();
         result.setOutputPath(outputPath.toString());
         result.setLabelMap(labelMap);
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("datasetPolicy", "previous training dataset + edge feedback points; DISCARDED points are kept as background images with empty YOLO labels.");
+        metadata.put("sourceRoundId", sourceRoundId);
+        result.setMetadata(metadata);
 
         if (sourceRound.getRoundNumber() != null && sourceRound.getRoundNumber() == 1
                 && project.getLsProjectId() != null && lsToken != null && !lsToken.isBlank()) {
@@ -265,17 +275,36 @@ public class FormatConverterService {
             result.setTrainImages(lsResult.getTrainImages());
             result.setValImages(lsResult.getValImages());
             result.setTotalAnnotations(lsResult.getTotalAnnotations());
+            metadata.put("labelStudioTrainImages", lsResult.getTrainImages());
+            metadata.put("labelStudioValImages", lsResult.getValImages());
+            metadata.put("labelStudioAnnotations", lsResult.getTotalAnnotations());
         }
 
-        List<InferenceDataPoint> feedbackPoints = new ArrayList<>();
-        feedbackPoints.addAll(inferenceDataPointRepository.findByRoundIdAndPoolType(sourceRoundId, InferenceDataPoint.PoolType.HIGH));
-        feedbackPoints.addAll(inferenceDataPointRepository.findByRoundIdAndPoolType(sourceRoundId, InferenceDataPoint.PoolType.LOW_A));
-        feedbackPoints.addAll(inferenceDataPointRepository.findByRoundIdAndPoolTypeAndHumanReviewed(sourceRoundId, InferenceDataPoint.PoolType.LOW_B, true));
+        DatasetCounts baseCounts = copyBaseTrainingDataset(sourceRound, outputPath, imagesDir, labelsDir, metadata);
 
         int index = 0;
-        int trainImages = result.getTrainImages();
-        int valImages = result.getValImages();
-        int annotations = result.getTotalAnnotations();
+        int trainImages = result.getTrainImages() + baseCounts.trainImages();
+        int valImages = result.getValImages() + baseCounts.valImages();
+        int annotations = result.getTotalAnnotations() + baseCounts.annotations();
+
+        List<InferenceDataPoint> highPoints = inferenceDataPointRepository.findByRoundIdAndPoolType(sourceRoundId, InferenceDataPoint.PoolType.HIGH);
+        List<InferenceDataPoint> lowACandidatePoints = inferenceDataPointRepository.findByRoundIdAndPoolType(sourceRoundId, InferenceDataPoint.PoolType.LOW_A_CANDIDATE);
+        List<InferenceDataPoint> lowAPoints = inferenceDataPointRepository.findByRoundIdAndPoolType(sourceRoundId, InferenceDataPoint.PoolType.LOW_A);
+        List<InferenceDataPoint> lowBReviewedPoints = inferenceDataPointRepository.findByRoundIdAndPoolTypeAndHumanReviewed(sourceRoundId, InferenceDataPoint.PoolType.LOW_B, true);
+        List<InferenceDataPoint> discardedPoints = inferenceDataPointRepository.findByRoundIdAndPoolType(sourceRoundId, InferenceDataPoint.PoolType.DISCARDED);
+        List<InferenceDataPoint> feedbackPoints = new ArrayList<>();
+        feedbackPoints.addAll(highPoints);
+        feedbackPoints.addAll(lowACandidatePoints);
+        feedbackPoints.addAll(lowAPoints);
+        feedbackPoints.addAll(lowBReviewedPoints);
+        feedbackPoints.addAll(discardedPoints);
+
+        metadata.put("feedbackHigh", highPoints.size());
+        metadata.put("feedbackLowACandidate", lowACandidatePoints.size());
+        metadata.put("feedbackLowA", lowAPoints.size());
+        metadata.put("feedbackLowBReviewed", lowBReviewedPoints.size());
+        metadata.put("feedbackDiscardedBackground", discardedPoints.size());
+
         for (InferenceDataPoint point : feedbackPoints) {
             Path sourceImage = Paths.get(point.getImagePath());
             if (!Files.exists(sourceImage)) {
@@ -303,6 +332,12 @@ public class FormatConverterService {
         result.setTrainImages(trainImages);
         result.setValImages(valImages);
         result.setTotalAnnotations(annotations);
+        metadata.put("baseTrainImages", baseCounts.trainImages());
+        metadata.put("baseValImages", baseCounts.valImages());
+        metadata.put("baseAnnotations", baseCounts.annotations());
+        metadata.put("trainImages", trainImages);
+        metadata.put("valImages", valImages);
+        metadata.put("totalAnnotations", annotations);
         log.info("Feedback dataset built: project={}, sourceRound={}, train={}, val={}, annotations={}",
                 projectId, sourceRoundId, trainImages, valImages, annotations);
         return result;
@@ -722,6 +757,110 @@ public class FormatConverterService {
         return Math.max(0.0, Math.min(1.0, value));
     }
 
+    private DatasetCounts copyBaseTrainingDataset(IterationRound sourceRound,
+                                                  Path outputPath,
+                                                  Path imagesDir,
+                                                  Path labelsDir,
+                                                  Map<String, Object> metadata) throws IOException {
+        if (sourceRound == null || sourceRound.getTrainingRecordId() == null) {
+            metadata.put("baseDatasetStatus", "NO_DEPLOYED_TRAINING_RECORD");
+            return DatasetCounts.empty();
+        }
+        Optional<ModelTrainingRecord> recordOpt = modelTrainingRecordRepository.findById(sourceRound.getTrainingRecordId());
+        if (recordOpt.isEmpty()) {
+            metadata.put("baseDatasetStatus", "TRAINING_RECORD_NOT_FOUND");
+            return DatasetCounts.empty();
+        }
+
+        ModelTrainingRecord record = recordOpt.get();
+        Path baseOutputPath = resolveTrainingDatasetPath(record);
+        metadata.put("baseTrainingRecordId", record.getId());
+        metadata.put("baseDatasetPath", baseOutputPath != null ? baseOutputPath.toString() : "");
+        if (baseOutputPath == null || !Files.exists(baseOutputPath) || outputPath.equals(baseOutputPath)) {
+            metadata.put("baseDatasetStatus", "UNAVAILABLE");
+            return DatasetCounts.empty();
+        }
+
+        DatasetCounts train = copyDatasetSplit(
+                baseOutputPath.resolve("images/train"),
+                baseOutputPath.resolve("labels/train"),
+                imagesDir.resolve("train"),
+                labelsDir.resolve("train"),
+                "base_"
+        );
+        DatasetCounts val = copyDatasetSplit(
+                baseOutputPath.resolve("images/val"),
+                baseOutputPath.resolve("labels/val"),
+                imagesDir.resolve("val"),
+                labelsDir.resolve("val"),
+                "base_"
+        );
+        DatasetCounts total = new DatasetCounts(train.trainImages(), val.trainImages(), train.annotations() + val.annotations());
+        metadata.put("baseDatasetStatus", total.trainImages() + total.valImages() > 0 ? "COPIED" : "EMPTY");
+        return total;
+    }
+
+    private Path resolveTrainingDatasetPath(ModelTrainingRecord record) {
+        if (record.getOutputDir() != null && !record.getOutputDir().isBlank()) {
+            return Paths.get(record.getOutputDir());
+        }
+        if (record.getDatasetPath() != null && !record.getDatasetPath().isBlank()) {
+            Path dataset = Paths.get(record.getDatasetPath());
+            return dataset.getParent();
+        }
+        return null;
+    }
+
+    private DatasetCounts copyDatasetSplit(Path sourceImagesDir,
+                                           Path sourceLabelsDir,
+                                           Path targetImagesDir,
+                                           Path targetLabelsDir,
+                                           String filePrefix) throws IOException {
+        if (!Files.isDirectory(sourceImagesDir)) {
+            return DatasetCounts.empty();
+        }
+        int imageCount = 0;
+        int annotationCount = 0;
+        try (java.util.stream.Stream<Path> stream = Files.list(sourceImagesDir)) {
+            List<Path> images = stream
+                    .filter(Files::isRegularFile)
+                    .filter(this::isImagePath)
+                    .sorted()
+                    .toList();
+            for (Path sourceImage : images) {
+                String targetName = filePrefix + sourceImage.getFileName();
+                Path targetImage = targetImagesDir.resolve(targetName);
+                Files.copy(sourceImage, targetImage, StandardCopyOption.REPLACE_EXISTING);
+
+                Path sourceLabel = sourceLabelsDir.resolve(sourceImage.getFileName().toString().replaceFirst("\\.[^.]+$", ".txt"));
+                Path targetLabel = targetLabelsDir.resolve(targetName.replaceFirst("\\.[^.]+$", ".txt"));
+                if (Files.exists(sourceLabel)) {
+                    Files.copy(sourceLabel, targetLabel, StandardCopyOption.REPLACE_EXISTING);
+                    annotationCount += countYoloAnnotations(sourceLabel);
+                } else {
+                    Files.write(targetLabel, List.of());
+                }
+                imageCount++;
+            }
+        }
+        return new DatasetCounts(imageCount, 0, annotationCount);
+    }
+
+    private int countYoloAnnotations(Path labelFile) throws IOException {
+        if (!Files.exists(labelFile)) {
+            return 0;
+        }
+        try (java.util.stream.Stream<String> lines = Files.lines(labelFile, StandardCharsets.UTF_8)) {
+            return (int) lines.filter(line -> line != null && !line.isBlank()).count();
+        }
+    }
+
+    private boolean isImagePath(Path path) {
+        String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
+        return name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png")
+                || name.endsWith(".bmp") || name.endsWith(".webp");
+    }
+
     private void createDataYaml(Path outputPath, Map<String, Integer> labelMap, Path imagesDir, Path labelsDir) throws IOException {
         StringBuilder yamlContent = new StringBuilder();
         yamlContent.append("path: ").append(outputPath.toString()).append("\n");
@@ -752,6 +891,12 @@ public class FormatConverterService {
             for (Path item : paths) {
                 Files.deleteIfExists(item);
             }
+        }
+    }
+
+    private record DatasetCounts(int trainImages, int valImages, int annotations) {
+        static DatasetCounts empty() {
+            return new DatasetCounts(0, 0, 0);
         }
     }
 

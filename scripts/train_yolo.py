@@ -17,6 +17,17 @@ import time
 from pathlib import Path
 from datetime import datetime
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+ALGORITHM_SERVICE_DIR = PROJECT_ROOT / "algorithm-service"
+if str(ALGORITHM_SERVICE_DIR) not in sys.path:
+    sys.path.insert(0, str(ALGORITHM_SERVICE_DIR))
+
+from compute_device import (
+    configure_cuda_visible_devices,
+    is_gpu_device,
+    resolve_compute_device,
+)
+
 # 解析命令行参数
 parser = argparse.ArgumentParser(description='YOLO Training Script')
 parser.add_argument('--data', type=str, required=True, help='Path to data.yaml')
@@ -77,7 +88,11 @@ def main():
     print(f"   - 批次大小: {args.batch}")
     print(f"   - 图片尺寸: {args.imgsz}")
     print(f"   - 预训练模型: {args.model}")
-    print(f"   - GPU 设备: {args.device}")
+    selected_device = resolve_compute_device(args.device, context="standalone YOLO training")
+    train_device = selected_device if is_gpu_device(selected_device) else "cpu"
+
+    print(f"   - 请求设备: {args.device}")
+    print(f"   - 实际设备: {selected_device}")
     print(f"   - 输出目录: {args.project}")
     print("=" * 80)
     
@@ -87,8 +102,7 @@ def main():
         update_status(args.project, 'failed', {'error': f'Data file not found: {args.data}'})
         sys.exit(1)
     
-    # 设置环境变量
-    os.environ['CUDA_VISIBLE_DEVICES'] = args.device
+    configure_cuda_visible_devices(selected_device)
     
     try:
         import torch
@@ -124,8 +138,8 @@ def main():
             patience=args.patience,
             plots=True,
             save=True,
-            device=0,  # 使用第一个可见的 GPU
-            amp=True,  # 混合精度训练
+            device=train_device,
+            amp=is_gpu_device(selected_device),  # 混合精度训练
         )
         
         print("\n" + "=" * 80)
@@ -143,7 +157,7 @@ def main():
             print("\n🔍 在测试集上评估...")
             try:
                 best_model = YOLO(str(best_pt))
-                metrics = best_model.val(split='test', verbose=True, plots=False)
+                metrics = best_model.val(split='test', verbose=True, plots=False, device=train_device)
                 
                 print(f"\n📊 测试结果:")
                 print(f"   - mAP50: {metrics.box.map50:.4f}")

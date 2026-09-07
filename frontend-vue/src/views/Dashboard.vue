@@ -1,63 +1,33 @@
 <template>
   <div class="dashboard">
-    <div class="page-title">概览</div>
+    <PageHeading
+      eyebrow="OPERATIONS OVERVIEW"
+      title="运营概览"
+      description="集中查看项目规模、数据资产与智能标注任务的最新运行状态。"
+    >
+      <div class="live-summary" aria-label="闭环任务概览">
+        <span><i /> 闭环任务</span>
+        <strong>{{ stats.runningTasks }} / {{ stats.completedTasks }}</strong>
+        <small>运行中 / 已完成</small>
+      </div>
+    </PageHeading>
 
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="stat-icon" style="background: var(--brand-50); color: var(--brand-600);">
-          <el-icon><FolderOpened /></el-icon>
-        </div>
-        <div class="stat-body">
-          <div class="stat-value">{{ stats.totalProjects }}</div>
-          <div class="stat-label">总项目数</div>
-        </div>
-      </div>
-      
-      <div class="stat-card">
-        <div class="stat-icon" style="background: var(--success-bg); color: var(--success-text);">
-          <el-icon><Picture /></el-icon>
-        </div>
-        <div class="stat-body">
-          <div class="stat-value">{{ stats.totalImages }}</div>
-          <div class="stat-label">总图片数</div>
-        </div>
-      </div>
-      
-      <div class="stat-card">
-        <div class="stat-icon" style="background: var(--warning-bg); color: var(--warning-text);">
-          <el-icon><Timer /></el-icon>
-        </div>
-        <div class="stat-body">
-          <div class="stat-value">{{ stats.runningTasks }}</div>
-          <div class="stat-label">运行中任务</div>
-        </div>
-      </div>
-      
-      <div class="stat-card">
-        <div class="stat-icon" style="background: var(--danger-bg); color: var(--danger-text);">
-          <el-icon><CircleCheck /></el-icon>
-        </div>
-        <div class="stat-body">
-          <div class="stat-value">{{ stats.completedTasks }}</div>
-          <div class="stat-label">已完成任务</div>
-        </div>
-      </div>
-    </div>
+    <section class="status-cards" aria-label="组织数据指标">
+      <MetricCard label="总项目数" :value="stats.totalProjects" hint="当前组织项目" mark="Σ" />
+      <MetricCard label="总图片数" :value="stats.totalImages" hint="已接入数据资产" tone="running" mark="▧" />
+      <MetricCard label="运行中任务" :value="stats.runningTasks" hint="正在执行的任务" tone="warning" mark="▶" />
+      <MetricCard label="已完成任务" :value="stats.completedTasks" hint="已经完成的任务" tone="danger" mark="✓" />
+    </section>
     
-    <el-card class="table-card">
-      <template #header>
-        <div class="card-header">
-          <span>最近项目</span>
-          <el-button type="primary" link @click="goToProjects">查看全部</el-button>
-        </div>
-      </template>
+    <PanelCard title="最近项目" description="最近更新的项目与处理进度" :padded="false">
+      <template #actions><PlatformButton variant="secondary" @click="goToProjects">查看全部</PlatformButton></template>
       <el-table :data="recentProjects" style="width: 100%">
         <el-table-column prop="name" label="项目名称" />
         <el-table-column prop="status" label="状态">
           <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)" size="small">
+            <StatusPill :tone="getStatusTone(row.status)">
               {{ getStatusText(row.status) }}
-            </el-tag>
+            </StatusPill>
           </template>
         </el-table-column>
         <el-table-column prop="totalImages" label="图片数" />
@@ -75,7 +45,7 @@
           </template>
         </el-table-column>
       </el-table>
-    </el-card>
+    </PanelCard>
   </div>
 </template>
 
@@ -84,6 +54,11 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { projectAPI, userAPI } from '@/api'
 import { getProjectStatusText, getProjectStatusType } from '@/utils/projectStatus'
+import MetricCard from '@/components/platform-ui/MetricCard.vue'
+import PageHeading from '@/components/platform-ui/PageHeading.vue'
+import PanelCard from '@/components/platform-ui/PanelCard.vue'
+import PlatformButton from '@/components/platform-ui/PlatformButton.vue'
+import StatusPill from '@/components/platform-ui/StatusPill.vue'
 
 const router = useRouter()
 
@@ -99,6 +74,10 @@ const recentProjects = ref([])
 const getStatusType = (status) => {
   return getProjectStatusType(status)
 }
+
+const getStatusTone = (status) => ({
+  success: 'success', danger: 'danger', warning: 'warning', primary: 'active', info: 'neutral'
+}[getStatusType(status)] || 'neutral')
 
 const getStatusText = (status) => {
   return getProjectStatusText(status)
@@ -164,77 +143,34 @@ onMounted(() => {
 .dashboard {
 }
 
-.page-title {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--gray-900);
-  letter-spacing: -0.02em;
-  margin-bottom: 24px;
-}
-
-.stat-grid {
+.status-cards {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+  gap: 13px;
   margin-bottom: 24px;
 }
 
-.stat-card {
+.live-summary {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 3px 18px;
+  min-width: 190px;
+  padding: 14px 17px;
   background: #fff;
-  border: 0.5px solid var(--gray-200);
-  border-radius: var(--radius-lg);
-  padding: 20px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  transition: border-color 0.15s;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow-sm);
 }
 
-.stat-card:hover {
-  border-color: var(--gray-300);
+.live-summary span, .live-summary small { color: var(--ink-500); font-size: 9px; }
+.live-summary span i { display: inline-block; width: 6px; height: 6px; margin-right: 5px; background: var(--success); border-radius: 50%; box-shadow: 0 0 0 4px rgba(24,168,115,.1); }
+.live-summary strong { grid-row: 1 / 3; grid-column: 2; align-self: center; font: 800 24px "DIN Alternate", sans-serif; }
+
+@media (max-width: 1050px) {
+  .status-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-.stat-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: var(--radius-md);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 20px;
-  flex-shrink: 0;
-}
-
-.stat-body {
-  flex: 1;
-  min-width: 0;
-}
-
-.stat-value {
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--gray-900);
-  line-height: 1.2;
-  letter-spacing: -0.02em;
-}
-
-.stat-label {
-  font-size: 12px;
-  color: var(--gray-500);
-  margin-top: 2px;
-  font-weight: 500;
-}
-
-.table-card {
-  margin-bottom: 20px;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--gray-900);
+@media (max-width: 620px) {
+  .status-cards { grid-template-columns: 1fr; }
 }
 </style>

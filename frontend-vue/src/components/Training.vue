@@ -1,6 +1,6 @@
 <template>
   <div class="training">
-    <p class="section-desc">使用 Label Studio 中已审核的标注数据训练目标检测模型</p>
+    <p class="section-desc">使用星目智能标注中已审核的数据训练目标检测模型</p>
 
     <!-- 训练配置 -->
     <el-card v-if="!trainingStatus || trainingStatus.status === 'IDLE'" class="panel">
@@ -8,96 +8,79 @@
         <span class="card-title">训练配置</span>
       </template>
 
-      <el-form :model="trainingConfig" label-width="120px" @submit.prevent>
-        <el-form-item label="训练模式">
-          <el-radio-group v-model="trainingConfig.mode">
-            <el-radio-button label="manual">手动配置</el-radio-button>
-            <el-radio-button label="automl">AutoML 自动配置</el-radio-button>
-          </el-radio-group>
-          <span class="form-hint">AutoML 会按数据规模自动选择模型、轮数、batch 和图像尺寸</span>
-        </el-form-item>
-
+      <el-form :model="trainingConfig" label-width="96px" @submit.prevent>
         <el-form-item label="模型名称">
-          <el-input 
-            v-model="trainingConfig.modelName" 
+          <el-input
+            v-model="trainingConfig.modelName"
             placeholder="请输入模型名称"
-            style="width: 400px;" />
+            style="max-width: 420px;" />
         </el-form-item>
 
-        <el-alert
-          v-if="trainingConfig.mode === 'automl'"
-          type="info"
-          :closable="false"
-          show-icon
-          class="automl-alert">
-          <template #title>
-            AutoML 模式会参考数据量和类别数自动配置：小数据优先 yolov8n，中等数据 yolov8s，大数据 yolov8m；默认使用预训练权重、GPU 0、80/20 train/val 划分。
-          </template>
-        </el-alert>
-
-        <template v-if="trainingConfig.mode === 'manual'">
-        <el-form-item label="训练轮数">
-          <el-input-number 
-            v-model="trainingConfig.epochs" 
-            :min="10" 
-            :max="500" 
-            :step="10" />
-          <span class="form-hint">最少 10 轮，建议 50-200 轮</span>
-        </el-form-item>
-
-        <el-form-item label="批次大小">
-          <el-input-number 
-            v-model="trainingConfig.batchSize" 
-            :min="1" 
-            :max="64" 
-            :step="2" />
-          <span class="form-hint">根据 GPU 内存调整</span>
-        </el-form-item>
-
-        <el-form-item label="图像尺寸">
-          <el-input-number 
-            v-model="trainingConfig.imageSize" 
-            :min="320" 
-            :max="1280" 
-            :step="32" />
-          <span class="form-hint">必须是 32 的倍数</span>
-        </el-form-item>
-
-        <el-form-item label="训练设备">
-          <el-select v-model="trainingConfig.device" style="width: 180px;">
-            <el-option label="GPU 0" value="0" />
-            <el-option label="CPU" value="cpu" />
-          </el-select>
-          <span class="form-hint">默认使用 GPU 0；无 CUDA 时算法服务自动回退 CPU</span>
-        </el-form-item>
-        </template>
-
-        <el-form-item label="数据集划分">
-          <el-alert
-            type="info"
-            :closable="false"
-            show-icon
-            title="当前训练数据会随机划分为 80% 训练集、20% 验证集；不单独生成 test 集。"
-          />
-        </el-form-item>
-
-        <el-form-item label="复训策略">
+        <el-form-item label="复训">
           <el-checkbox v-model="trainingConfig.forceRetrain">
-            允许无新增数据时复训同一批数据
+            允许无新增数据时复训
           </el-checkbox>
-          <span class="form-hint">默认会阻止与上次完成训练完全相同的数据集，避免误重复训练。</span>
         </el-form-item>
 
         <el-form-item>
-          <el-button 
-            type="primary" 
-            size="large" 
-            @click="startTraining"
-            :loading="isStarting">
-            <el-icon><VideoPlay /></el-icon>
-            开始训练
-          </el-button>
+          <div class="training-actions">
+            <el-button
+              type="primary"
+              size="large"
+              @click="startTraining"
+              :loading="isStarting">
+              <el-icon><VideoPlay /></el-icon>
+              开始训练
+            </el-button>
+            <el-button text @click="showAdvancedConfig = !showAdvancedConfig">
+              {{ showAdvancedConfig ? '收起高级配置' : '高级配置' }}
+            </el-button>
+          </div>
         </el-form-item>
+
+        <el-collapse-transition>
+          <div v-show="showAdvancedConfig" class="advanced-training">
+            <el-form-item label="训练模式">
+              <el-radio-group v-model="trainingConfig.mode">
+                <el-radio-button value="automl">AutoML</el-radio-button>
+                <el-radio-button value="manual">手动</el-radio-button>
+              </el-radio-group>
+            </el-form-item>
+
+            <template v-if="trainingConfig.mode === 'manual'">
+              <el-form-item label="训练轮数">
+                <el-input-number
+                  v-model="trainingConfig.epochs"
+                  :min="10"
+                  :max="500"
+                  :step="10" />
+              </el-form-item>
+
+              <el-form-item label="批次大小">
+                <el-input-number
+                  v-model="trainingConfig.batchSize"
+                  :min="1"
+                  :max="64"
+                  :step="2" />
+              </el-form-item>
+
+              <el-form-item label="图像尺寸">
+                <el-input-number
+                  v-model="trainingConfig.imageSize"
+                  :min="320"
+                  :max="1280"
+                  :step="32" />
+              </el-form-item>
+
+              <el-form-item label="训练设备">
+                <el-select v-model="trainingConfig.device" style="width: 180px;">
+                  <el-option label="GPU 0" value="0" />
+                  <el-option label="CPU" value="cpu" />
+                </el-select>
+              </el-form-item>
+            </template>
+          </div>
+        </el-collapse-transition>
       </el-form>
     </el-card>
 
@@ -108,8 +91,8 @@
           <span class="card-title">训练进度</span>
           <div style="display: flex; align-items: center; gap: 8px;">
             <span v-if="elapsedDisplay" class="elapsed-timer">⏱ {{ elapsedDisplay }}</span>
-            <el-tag 
-              :type="getStatusType(trainingStatus.status)" 
+            <el-tag
+              :type="getStatusType(trainingStatus.status)"
               size="small">
               {{ getStatusText(trainingStatus.status) }}
             </el-tag>
@@ -137,9 +120,9 @@
           </div>
         </div>
 
-        <el-progress 
+        <el-progress
           v-if="trainingStatus.status === 'TRAINING'"
-          :percentage="trainingProgress" 
+          :percentage="trainingProgress"
           :stroke-width="16"
           :format="formatProgress"
           style="margin-bottom: 16px;" />
@@ -160,9 +143,9 @@
         </div>
 
         <div v-if="trainingStatus.status === 'COMPLETED'" class="metrics-display">
-          <el-alert 
-            title="训练完成！" 
-            type="success" 
+          <el-alert
+            title="训练完成！"
+            type="success"
             :closable="false"
             :description="`总耗时 ${elapsedDisplay || formatDuration(trainingStatus.trainingDuration)}`"
             style="margin-top: 16px; margin-bottom: 20px;" />
@@ -207,13 +190,13 @@
         </div>
 
         <div v-if="trainingStatus.status === 'FAILED'" class="error-display">
-          <el-alert 
-            title="训练失败" 
-            type="error" 
+          <el-alert
+            title="训练失败"
+            type="error"
             :closable="false"
             :description="trainingStatus.errorMessage || '未知错误'"
             style="margin-top: 16px;" />
-          
+
           <div style="margin-top: 20px; text-align: center;">
             <el-button type="primary" @click="resetTraining">
               <el-icon><RefreshLeft /></el-icon>
@@ -286,8 +269,8 @@
               </div>
               <div class="preview-actions">
                 <el-button size="small" @click.stop="clearTestImage">更换图片</el-button>
-                <el-button 
-                  type="primary" 
+                <el-button
+                  type="primary"
                   size="small"
                   @click.stop="runDetection"
                   :loading="isDetecting">
@@ -405,7 +388,7 @@ const props = defineProps({
 })
 
 const trainingConfig = ref({
-  mode: 'manual',
+  mode: 'automl',
   modelName: '',
   epochs: 100,
   batchSize: 16,
@@ -415,6 +398,7 @@ const trainingConfig = ref({
 })
 
 const isStarting = ref(false)
+const showAdvancedConfig = ref(false)
 const trainingStatus = ref(null)
 const showTestSection = ref(false)
 const testImage = ref(null)
@@ -539,22 +523,16 @@ const startTraining = async () => {
     }
     const skippedCount = preview.skippedIncrementals?.length || 0
     const reviewedCount = preview.reviewedIncrementals?.length || 0
-    const syncResult = preview.syncResult || {}
     const currentPool = preview.currentRoundPoolStats || {}
     const latestTraining = preview.latestTrainingData || {}
     const previewHtml = `
       <div style="line-height:1.8;text-align:left;">
-        <div>主项目任务数：<b>${preview.mainTaskCount || 0}</b>${preview.mainProjectAlive ? '' : '（Label Studio 主项目不可用）'}</div>
-        <div>已全审增量任务数：<b>${preview.reviewedIncrementalTasks || 0}</b>，批次数：<b>${reviewedCount}</b></div>
-        <div>将跳过未全审增量任务数：<b>${preview.pendingIncrementalTasks || 0}</b>，批次数：<b>${skippedCount}</b></div>
-        <div>当前采集轮次：<b>#${preview.currentRoundId || '-'}</b>，本轮新增回流 <b>${currentPool.total || 0}</b> 张（高置信 ${currentPool.HIGH || 0}，低-A ${currentPool.LOW_A || 0}，低-B ${currentPool.LOW_B || 0}，丢弃 ${currentPool.DISCARDED || 0}）</div>
-        <div>上次完成训练：${latestTraining.exists ? `<b>#${latestTraining.trainingRecordId}</b>，数据 ${latestTraining.totalImages || 0} 张 / ${latestTraining.totalAnnotations || 0} 框` : '<b>暂无</b>'}</div>
-        <div>可信池：总计 <b>${syncResult.trustedTotal || 0}</b> 张，已入主 LS <b>${syncResult.trustedSyncedTotal || 0}</b> 张，待补偿 <b>${syncResult.trustedPending || 0}</b> 张</div>
-        <div>本次新增同步：可信数据 <b>${syncResult.trustedSyncedThisTime || syncResult.trustedSynced || 0}</b> 张，LOW_B 入增量项目 <b>${syncResult.lowBSyncedThisTime || syncResult.lowBSynced || 0}</b> 张</div>
-        <div>LOW_B 未满批等待：<b>${syncResult.waitingLowB || 0}</b> / <b>${syncResult.lowBBatchSize || 100}</b></div>
-        <div>本次可用任务总数：<b>${preview.totalUsableTasks || 0}</b></div>
+        <div>可用训练任务：<b>${preview.totalUsableTasks || 0}</b> 个</div>
+        <div>已全审增量：<b>${preview.reviewedIncrementalTasks || 0}</b> 个任务 / <b>${reviewedCount}</b> 个批次</div>
+        <div>未全审将跳过：<b>${preview.pendingIncrementalTasks || 0}</b> 个任务 / <b>${skippedCount}</b> 个批次</div>
+        <div>本轮边端回流：<b>${currentPool.total || 0}</b> 张</div>
+        <div>上次完成训练：${latestTraining.exists ? `<b>#${latestTraining.trainingRecordId}</b>，${latestTraining.totalImages || 0} 张 / ${latestTraining.totalAnnotations || 0} 框` : '<b>暂无</b>'}</div>
         ${currentPool.total === 0 && latestTraining.exists ? '<div style="color:#E6A23C;">当前轮次还没有新的边端回流数据；如继续训练，可能与上次训练数据相同并被后端拦截。</div>' : ''}
-        <div style="color:#606266;">${preview.splitPolicy || '随机 80% 训练集 / 20% 验证集'}</div>
       </div>`
     await ElMessageBox.confirm(
       previewHtml,
@@ -577,16 +555,16 @@ const startTraining = async () => {
       autoML: trainingConfig.value.mode === 'automl'
     }
     const response = await projectAPI.startTraining(props.project.id, requestConfig)
-    
+
     if (response.data?.status === 'FAILED') {
       trainingStatus.value = response.data
       addLog('启动训练失败: ' + (response.data.errorMessage || response.data.message || '未知错误'), 'error', '❌')
       ElMessage.error('启动训练失败：' + (response.data.errorMessage || response.data.message))
       return
     }
-    
+
     trainingStatus.value = response.data
-    
+
     if (trainingConfig.value.mode === 'automl') {
       addLog('AutoML 参数配置已提交，后端将按数据规模自动选择训练参数', 'info', '📋')
       if (response.data?.autoMLConfig) {
@@ -597,7 +575,7 @@ const startTraining = async () => {
       addLog(`模型: ${trainingConfig.value.modelName} | 轮数: ${trainingConfig.value.epochs} | 批次: ${trainingConfig.value.batchSize}`, 'info', '📋')
     }
     addLog('训练任务已创建，开始准备数据...', 'success', '✅')
-    
+
     ElMessage.success('训练已启动')
     loadTrainingHistory()
     startPolling()
@@ -618,7 +596,7 @@ const loadTrainingStatus = async () => {
     const newStatus = response.data
     const oldStatusVal = trainingStatus.value?.status
     trainingStatus.value = newStatus
-    
+
     if (newStatus.status === 'IDLE') {
       stopPolling()
       stopElapsedTimer()
@@ -646,7 +624,7 @@ const loadTrainingStatus = async () => {
           break
       }
     }
-    
+
     if (shouldLogEpochStatus(newStatus)) {
       const epoch = Number(newStatus.currentEpoch || 0)
       lastLoggedEpoch = epoch
@@ -837,7 +815,7 @@ const runDetection = async () => {
     const response = await projectAPI.detectWithTrainedModel(props.project.id, formData)
     detectionResults.value = response.data.detections || []
     await drawDetectionPreview()
-    
+
     if (detectionResults.value.length === 0) {
       ElMessage.info('未检测到目标')
     } else {
@@ -951,14 +929,20 @@ onUnmounted(() => {
 .card-title { font-size: 14px; font-weight: 500; color: var(--gray-900); }
 .form-hint { margin-left: 12px; font-size: 12px; color: var(--gray-400); }
 .ratio-label { display: block; font-size: 12px; color: var(--gray-400); margin-top: 4px; }
+.training-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.advanced-training {
+  max-width: 680px;
+  padding: 12px 0 2px;
+  border-top: 0.5px solid var(--gray-200);
+}
 
 .progress-header { display: flex; justify-content: space-between; align-items: center; }
 .elapsed-timer { font-size: 13px; font-weight: 600; color: var(--brand-600); font-family: 'Cascadia Code', 'Consolas', monospace; }
 
 .training-progress { }
-.progress-stats { 
-  display: flex; 
-  gap: 32px; 
+.progress-stats {
+  display: flex;
+  gap: 32px;
   margin-bottom: 20px;
   padding: 16px;
   background: var(--gray-50);
@@ -1073,10 +1057,10 @@ onUnmounted(() => {
 }
 .test-result { margin-top: 20px; }
 .detection-results { margin-top: 20px; }
-.detection-results h4 { 
-  font-size: 14px; 
-  font-weight: 500; 
-  color: var(--gray-900); 
+.detection-results h4 {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--gray-900);
   margin-bottom: 12px;
 }
 .history-header {

@@ -12,7 +12,7 @@ const routes = [
     path: '/',
     name: 'Layout',
     component: () => import('@/layout/index.vue'),
-    redirect: '/dashboard',
+    redirect: '/projects/1313',
     meta: { requiresAuth: true },
     children: [
       {
@@ -32,6 +32,12 @@ const routes = [
         name: 'ProjectDetail',
         component: () => import('@/views/ProjectDetail.vue'),
         meta: { title: '项目详情', icon: 'Document' }
+      },
+      {
+        path: 'projects/:id/auto-label',
+        name: 'ProjectAutoLabel',
+        component: () => import('@/views/ProjectAutoLabel.vue'),
+        meta: { title: '智能自动标注', icon: 'Aim' }
       },
       {
         path: 'model-training',
@@ -85,7 +91,7 @@ const router = createRouter({
 })
 
 router.beforeEach((to, from, next) => {
-  document.title = to.meta.title ? `${to.meta.title} - Annotation Platform` : 'Annotation Platform'
+  document.title = to.meta.title ? `${to.meta.title} - 多智能体标注平台` : '多智能体标注平台'
   
   const userStore = useUserStore()
   const token = localStorage.getItem('token')
@@ -93,7 +99,7 @@ router.beforeEach((to, from, next) => {
   if (to.meta.requiresAuth !== false && !token) {
     next('/login')
   } else if (to.path === '/login' && token) {
-    next('/dashboard')
+    next('/projects/1313')
   } else {
     next()
   }

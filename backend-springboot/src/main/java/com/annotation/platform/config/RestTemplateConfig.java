@@ -20,11 +20,13 @@ import java.util.Arrays;
 @Configuration
 public class RestTemplateConfig {
 
+    private static final int ALGORITHM_SERVICE_READ_TIMEOUT_MINUTES = 240;
+
     @Bean
     public RestTemplate restTemplate() {
         // 使用 Apache HttpClient 5 以支持 PATCH 方法
         RequestConfig requestConfig = RequestConfig.custom()
-                .setResponseTimeout(Timeout.ofMinutes(10))
+                .setResponseTimeout(Timeout.ofMinutes(ALGORITHM_SERVICE_READ_TIMEOUT_MINUTES))
                 .setConnectTimeout(Timeout.ofSeconds(30))
                 .build();
         CloseableHttpClient httpClient = HttpClients.custom()

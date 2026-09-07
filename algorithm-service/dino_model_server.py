@@ -1,11 +1,13 @@
 import os
 import argparse
+import threading
 from functools import lru_cache
 
 import numpy as np
 import torch
 from PIL import Image, ImageDraw, ImageFont
 from flask import Flask, request, jsonify
+from compute_device import resolve_compute_device
 
 # 导入 GroundingDINO 的相关模块
 import groundingdino.datasets.transforms as T
@@ -14,8 +16,8 @@ from groundingdino.util.slconfig import SLConfig
 from groundingdino.util.utils import clean_state_dict, get_phrases_from_posmap
 
 # --- 核心设置 ---
-CONFIG_PATH = "/root/autodl-fs/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py"
-CHECKPOINT_PATH = "/root/autodl-fs/GroundingDINO/weights/groundingdino_swint_ogc.pth"
+CONFIG_PATH = os.getenv("DINO_CONFIG_PATH", "/root/autodl-fs/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py")
+CHECKPOINT_PATH = os.getenv("DINO_MODEL_PATH", "/root/autodl-fs/GroundingDINO/weights/groundingdino_swint_ogc.pth")
 
 
 def prepare_runtime():
@@ -27,13 +29,15 @@ def prepare_runtime():
 
 
 prepare_runtime()
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE = resolve_compute_device("0", for_torch=True, context="GroundingDINO server startup")
 print(f"--- GroundingDINO device selected: {DEVICE} ---")
 
 @lru_cache(maxsize=None)
 def load_model(model_config_path, model_checkpoint_path):
     print("--- Loading GroundingDINO model... This will happen only once. ---")
     args = SLConfig.fromfile(model_config_path)
+    if os.getenv("DINO_BERT_PATH"):
+        args.text_encoder_type = os.environ["DINO_BERT_PATH"]
     args.device = DEVICE
     model = build_model(args)
     checkpoint = torch.load(model_checkpoint_path, map_location=DEVICE, weights_only=True)
@@ -94,6 +98,9 @@ def get_grounding_output(model, image, caption, box_threshold=0.4, text_threshol
 # --- Flask App 初始化 ---
 app = Flask(__name__)
 grounding_dino_model = load_model(CONFIG_PATH, CHECKPOINT_PATH)
+# GroundingDINO 的 tokenizer/model forward 在同一进程内并发调用时会共享可变中间状态，
+# 不同尺寸图片并发推理可能产生 token/feature 长度错配。GPU 推理由此处统一串行化。
+inference_lock = threading.Lock()
 
 # --- API 端点定义 ---
 @app.route('/predict', methods=['POST'])
@@ -111,13 +118,14 @@ def predict():
         image_pil = Image.open(image_file.stream).convert("RGB")
 
         # 【已修改】这里接收的是 max_scores (最高分列表)
-        boxes, max_scores, labels = get_grounding_output(
-            model=grounding_dino_model,
-            image=image_pil,
-            caption=text_prompt,
-            box_threshold=box_threshold,
-            text_threshold=text_threshold
-        )
+        with inference_lock:
+            boxes, max_scores, labels = get_grounding_output(
+                model=grounding_dino_model,
+                image=image_pil,
+                caption=text_prompt,
+                box_threshold=box_threshold,
+                text_threshold=text_threshold
+            )
         
         detections = []
         # 【已修改】在循环中加入 score (最高分)

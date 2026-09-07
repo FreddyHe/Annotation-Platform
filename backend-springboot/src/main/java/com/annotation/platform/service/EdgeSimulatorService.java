@@ -20,6 +20,10 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.annotation.PreDestroy;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -28,6 +32,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -169,7 +174,7 @@ public class EdgeSimulatorService {
             if (pureTempDir != null) {
                 deleteRecursively(pureTempDir);
             }
-            throw new BusinessException("请上传图片或包含图片的 zip 压缩包");
+            throw new BusinessException("请上传图片、视频，或包含图片/视频的 zip 压缩包");
         }
 
         List<Map<String, Object>> inferenceResults;
@@ -276,7 +281,7 @@ public class EdgeSimulatorService {
             if (pureTempDir != null) {
                 deleteRecursively(pureTempDir);
             }
-            throw new BusinessException("请上传图片或包含图片的 zip 压缩包");
+            throw new BusinessException("请上传图片、视频，或包含图片/视频的 zip 压缩包");
         }
 
         String jobId = UUID.randomUUID().toString();
@@ -492,6 +497,17 @@ public class EdgeSimulatorService {
                     paths.addAll(extractZipImages(dir, file));
                     continue;
                 }
+                if (isVideo(original)) {
+                    String suffix = original.contains(".") ? original.substring(original.lastIndexOf(".")) : ".mp4";
+                    Path videoTarget = dir.resolve(UUID.randomUUID() + suffix).normalize();
+                    if (!videoTarget.startsWith(dir)) {
+                        throw new BusinessException("视频文件路径非法");
+                    }
+                    file.transferTo(videoTarget.toFile());
+                    paths.addAll(extractVideoFrames(dir, videoTarget, original));
+                    Files.deleteIfExists(videoTarget);
+                    continue;
+                }
                 if (!isImage(original)) {
                     continue;
                 }
@@ -533,17 +549,28 @@ public class EdgeSimulatorService {
         try (ZipInputStream zip = new ZipInputStream(archive.getInputStream())) {
             ZipEntry entry;
             while ((entry = zip.getNextEntry()) != null) {
-                if (entry.isDirectory() || !isImage(entry.getName())) {
+                if (entry.isDirectory()) {
                     continue;
                 }
                 String fileName = Paths.get(entry.getName()).getFileName().toString();
-                String suffix = fileName.contains(".") ? fileName.substring(fileName.lastIndexOf(".")) : ".jpg";
-                Path target = extractDir.resolve(UUID.randomUUID() + suffix).normalize();
-                if (!target.startsWith(extractDir)) {
-                    throw new BusinessException("zip 文件包含非法路径");
+                if (isImage(fileName)) {
+                    String suffix = fileName.contains(".") ? fileName.substring(fileName.lastIndexOf(".")) : ".jpg";
+                    Path target = extractDir.resolve(UUID.randomUUID() + suffix).normalize();
+                    if (!target.startsWith(extractDir)) {
+                        throw new BusinessException("zip 文件包含非法路径");
+                    }
+                    Files.copy(zip, target);
+                    paths.add(target.toString());
+                } else if (isVideo(fileName)) {
+                    String suffix = fileName.contains(".") ? fileName.substring(fileName.lastIndexOf(".")) : ".mp4";
+                    Path videoTarget = extractDir.resolve(UUID.randomUUID() + suffix).normalize();
+                    if (!videoTarget.startsWith(extractDir)) {
+                        throw new BusinessException("zip 文件包含非法路径");
+                    }
+                    Files.copy(zip, videoTarget);
+                    paths.addAll(extractVideoFrames(extractDir, videoTarget, fileName));
+                    Files.deleteIfExists(videoTarget);
                 }
-                Files.copy(zip, target);
-                paths.add(target.toString());
             }
         }
         return paths;
@@ -560,6 +587,86 @@ public class EdgeSimulatorService {
         String lower = name.toLowerCase(Locale.ROOT);
         return lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png")
                 || lower.endsWith(".bmp") || lower.endsWith(".webp");
+    }
+
+    private boolean isVideo(String name) {
+        if (name == null) {
+            return false;
+        }
+        String lower = name.toLowerCase(Locale.ROOT);
+        return lower.endsWith(".mp4")
+                || lower.endsWith(".mov")
+                || lower.endsWith(".m4v")
+                || lower.endsWith(".avi")
+                || lower.endsWith(".mkv")
+                || lower.endsWith(".webm");
+    }
+
+    private List<String> extractVideoFrames(Path dir, Path videoPath, String originalName) throws IOException {
+        List<String> paths = new ArrayList<>();
+        if (!Files.exists(videoPath) || !Files.isRegularFile(videoPath)) {
+            return paths;
+        }
+
+        String baseName = originalName == null || originalName.isBlank() ? "video" : Paths.get(originalName).getFileName().toString();
+        int dotIndex = baseName.lastIndexOf('.');
+        if (dotIndex > 0) {
+            baseName = baseName.substring(0, dotIndex);
+        }
+        baseName = baseName.replaceAll("[^A-Za-z0-9._-]", "_");
+        String framePrefix = baseName + "_" + UUID.randomUUID();
+        Path outputPattern = dir.resolve(framePrefix + "_frame_%04d.jpg").normalize();
+        if (!outputPattern.startsWith(dir)) {
+            throw new BusinessException("视频抽帧输出路径非法");
+        }
+
+        List<String> command = List.of(
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel", "error",
+                "-nostdin",
+                "-y",
+                "-i", videoPath.toAbsolutePath().toString(),
+                "-vf", "fps=1/10",
+                "-frames:v", "40",
+                outputPattern.toString()
+        );
+        Process process = new ProcessBuilder(command)
+                .redirectErrorStream(true)
+                .start();
+        boolean finished;
+        try {
+            finished = process.waitFor(5, TimeUnit.MINUTES);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            process.destroyForcibly();
+            throw new IOException("视频抽帧被中断", e);
+        }
+        if (!finished) {
+            process.destroyForcibly();
+            throw new IOException("视频抽帧超时");
+        }
+
+        String output;
+        try (InputStream inputStream = process.getInputStream()) {
+            output = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        if (process.exitValue() != 0) {
+            throw new IOException("视频抽帧失败: " + output);
+        }
+
+        List<Path> frames = new ArrayList<>();
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, framePrefix + "_frame_*.jpg")) {
+            for (Path frame : stream) {
+                frames.add(frame);
+            }
+        }
+        frames.sort(Comparator.comparing(Path::toString));
+        for (Path frame : frames) {
+            paths.add(frame.toString());
+        }
+        log.info("边端视频抽帧完成: video={}, frames={}", originalName, paths.size());
+        return paths;
     }
 
     @SuppressWarnings("unchecked")

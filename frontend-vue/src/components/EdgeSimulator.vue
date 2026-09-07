@@ -1,12 +1,5 @@
 <template>
   <div class="edge-simulator">
-    <el-alert
-      type="info"
-      :closable="false"
-      show-icon
-      title="当前使用批量图片模拟边端视频流：每张图片视为一帧，部署模型会逐帧推理并按回流策略进入高置信、低-A、低-B 或丢弃池。"
-    />
-
     <div class="toolbar">
       <el-select v-model="selectedModelId" placeholder="选择已完成模型" filterable style="width: 360px;">
         <el-option
@@ -22,6 +15,7 @@
       </el-button>
       <el-button @click="refreshAll">
         <el-icon><Refresh /></el-icon>
+        刷新
       </el-button>
     </div>
 
@@ -67,7 +61,7 @@
       <div class="el-upload__text">拖拽图片压缩包到此处或 <em>点击导入 zip</em></div>
       <template #tip>
         <div class="el-upload__tip">
-          <span v-if="selectedArchive">已选择压缩包：{{ selectedArchive.name }}，后端会自动解析其中所有图片。</span>
+          <span v-if="selectedArchive">已选择压缩包：{{ selectedArchive.name }}，后端会自动解析其中的图片或视频。</span>
           <span v-else>已选择 {{ selectedFiles.length }} 帧。点击推理后会使用当前部署模型逐帧检测，并写入当前轮次的数据池。</span>
         </div>
       </template>
@@ -148,25 +142,33 @@
     </div>
 
     <div class="actions">
-      <el-radio-group v-model="inferenceMode">
-        <el-radio-button label="COLLECT_AND_UPLOAD">回流采集</el-radio-button>
-        <el-radio-button label="PURE_INFERENCE">纯推理</el-radio-button>
-      </el-radio-group>
       <el-button
         type="primary"
         :disabled="!activeDeployment || (!selectedArchive && selectedFiles.length === 0)"
         :loading="inferencing"
         @click="runInference">
         <el-icon><Search /></el-icon>
-        {{ inferenceMode === 'PURE_INFERENCE' ? '执行纯推理' : '模拟视频流推理' }}
+        模拟视频流推理
       </el-button>
-      <el-button :disabled="!currentRound?.id" :loading="judging" @click="runVlmJudge">
-        <el-icon><Operation /></el-icon>
-        重新判定低-A 候选
+      <el-button
+        type="success"
+        :disabled="!activeDeployment || !hasReturnData"
+        :loading="retraining"
+        @click="retrainFromFeedback">
+        <el-icon><Refresh /></el-icon>
+        回流再训练
       </el-button>
     </div>
 
-    <el-table :data="pagedDataPoints" v-loading="loadingPoints" stripe :empty-text="inferenceMode === 'PURE_INFERENCE' ? '暂无纯推理结果' : '暂无回流数据'">
+    <el-alert
+      v-if="retrainStatus.visible"
+      :type="retrainStatus.type"
+      :closable="false"
+      show-icon
+      class="status-alert"
+      :title="retrainStatus.message" />
+
+    <el-table :data="pagedDataPoints" v-loading="loadingPoints" stripe empty-text="暂无回流数据">
       <el-table-column prop="id" label="ID" width="80" />
       <el-table-column prop="fileName" label="图片" min-width="180" show-overflow-tooltip />
       <el-table-column label="池子" width="140">
@@ -180,23 +182,12 @@
       <el-table-column label="检测框数" width="100">
         <template #default="{ row }">{{ row.detections?.length || 0 }}</template>
       </el-table-column>
-      <el-table-column label="VLM 判定" width="120">
-        <template #default="{ row }">{{ row.vlmDecision || '-' }}</template>
-      </el-table-column>
-      <el-table-column label="Label Studio" width="130">
+      <el-table-column label="标注项目" width="130">
         <template #default="{ row }">
           <el-tag v-if="row.lsTaskId" type="success" size="small">任务 #{{ row.lsTaskId }}</el-tag>
           <el-tag v-else-if="row.pureInference" type="info" size="small">未回传</el-tag>
           <el-tag v-else-if="row.poolType === 'LOW_B'" type="warning" size="small">待同步</el-tag>
           <span v-else style="color: var(--gray-400);">-</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="人工审核" width="120">
-        <template #default="{ row }">
-            <el-switch
-              v-model="row.humanReviewed"
-              :disabled="row.pureInference || row.poolType !== 'LOW_B'"
-              @change="value => reviewPoint(row, value)" />
         </template>
       </el-table-column>
       <el-table-column prop="createdAt" label="创建时间" min-width="170">
@@ -210,16 +201,6 @@
         :page-sizes="[10, 20, 50, 100]"
         :total="displayedDataPoints.length"
         layout="total, sizes, prev, pager, next, jumper" />
-    </div>
-
-    <el-divider />
-
-    <div class="embedded-review">
-      <div class="embedded-review-header">
-        <span class="card-title">增量审核</span>
-        <span class="review-hint">低-B 批次进入 Label Studio 后在这里跟踪审核进度；全审完成后才会进入训练数据集。</span>
-      </div>
-      <IncrementalReviewCenter :project="project" />
     </div>
 
     <el-divider />
@@ -251,9 +232,8 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Operation, Refresh, Search, Upload, UploadFilled } from '@element-plus/icons-vue'
+import { Refresh, Search, Upload, UploadFilled } from '@element-plus/icons-vue'
 import { edgeSimulatorAPI, inferenceDataPointAPI, roundAPI, trainingAPI } from '@/api'
-import IncrementalReviewCenter from '@/components/IncrementalReviewCenter.vue'
 
 const props = defineProps({
   project: { type: Object, required: true }
@@ -282,7 +262,7 @@ const uploadSummary = ref({
 const inferenceMode = ref('COLLECT_AND_UPLOAD')
 const deploying = ref(false)
 const inferencing = ref(false)
-const judging = ref(false)
+const retraining = ref(false)
 const loadingDeployments = ref(false)
 const loadingPoints = ref(false)
 const dataPointPage = ref(1)
@@ -305,9 +285,21 @@ const inferenceProgress = ref({
   resultSummary: null,
   error: ''
 })
+const retrainStatus = ref({
+  visible: false,
+  type: 'info',
+  message: ''
+})
 let progressTimer = null
 
 const activeDeployment = computed(() => deployments.value.find(item => item.status === 'ACTIVE'))
+const hasReturnData = computed(() => {
+  const statsTotal = Number(poolStats.value.highCount || 0)
+    + Number(poolStats.value.lowACount || 0)
+    + Number(poolStats.value.lowBCount || 0)
+    + Number(poolStats.value.discardedCount || 0)
+  return dataPoints.value.length > 0 || statsTotal > 0
+})
 const displayedDataPoints = computed(() => {
   if (inferenceMode.value === 'PURE_INFERENCE' && pureResults.value.length > 0) {
     return pureResults.value
@@ -439,7 +431,7 @@ const applySelectedUploadFiles = async (fileList) => {
       ignoredEntries: zipInfo.ignoredEntries,
       analysisStatus: zipInfo.imageCount > 0
         ? `已识别 ${zipInfo.imageCount} 张图片，后端会按这些图片逐帧推理。`
-        : '未能在 zip 中识别图片，请确认压缩包内包含 jpg/png/bmp/webp。'
+        : '前端未识别到图片帧，后端仍会尝试解析压缩包内的视频或图片。'
     }
   } catch (error) {
     if (token !== uploadAnalysisToken.value) return
@@ -461,7 +453,7 @@ const runInference = async () => {
   }
   const deploymentId = activeDeployment.value.id
   const frameCount = uploadSummary.value.imageCount || selectedFiles.value.length || 0
-  if (frameCount <= 0) {
+  if (!selectedArchive.value && frameCount <= 0) {
     ElMessage.warning('请先选择图片或包含图片的 zip 压缩包')
     return
   }
@@ -498,6 +490,81 @@ const runInference = async () => {
   } finally {
     inferencing.value = false
     stopProgressTimer()
+  }
+}
+
+const retrainFromFeedback = async () => {
+  if (!activeDeployment.value?.roundId) {
+    ElMessage.warning('请先部署模型')
+    return
+  }
+  if (!hasReturnData.value) {
+    ElMessage.warning('请先完成一次视频流推理')
+    return
+  }
+  retraining.value = true
+  retrainStatus.value = {
+    visible: true,
+    type: 'info',
+    message: '正在把测试推理数据回流到训练集'
+  }
+  try {
+    const response = await roundAPI.triggerRetrain(props.project.id, activeDeployment.value.roundId, {
+      epochs: 1,
+      batchSize: 2,
+      imageSize: 640,
+      modelType: 'yolov8n.pt',
+      device: '0'
+    })
+    const recordId = response.data?.trainingRecordId
+    if (!recordId) {
+      throw new Error('后端未返回训练记录 ID')
+    }
+    const totalImages = response.data?.totalImages || 0
+    const totalAnnotations = response.data?.totalAnnotations || 0
+    retrainStatus.value.message = `训练已启动：${totalImages} 张图，${totalAnnotations} 个标注框`
+    const record = await waitForTrainingRecord(recordId)
+    selectedModelId.value = record.id
+    retrainStatus.value = {
+      visible: true,
+      type: 'success',
+      message: `回流再训练完成，模型记录 #${record.id} 已可部署`
+    }
+    ElMessage.success('回流再训练完成')
+    await refreshAll()
+    selectedModelId.value = record.id
+  } catch (error) {
+    retrainStatus.value = {
+      visible: true,
+      type: 'error',
+      message: extractErrorMessage(error) || '回流再训练失败'
+    }
+    ElMessage.error(retrainStatus.value.message)
+  } finally {
+    retraining.value = false
+  }
+}
+
+const waitForTrainingRecord = async (recordId) => {
+  const startedAt = Date.now()
+  while (true) {
+    const response = await trainingAPI.getTrainingRecord(recordId)
+    const record = response.data || {}
+    if (record.status === 'COMPLETED') {
+      if (!record.bestModelPath && record.taskId) {
+        const resultResponse = await trainingAPI.getTrainingResults(record.taskId)
+        return resultResponse.data || record
+      }
+      return record
+    }
+    if (record.status === 'FAILED' || record.status === 'CANCELLED') {
+      throw new Error(record.errorMessage || `训练${record.status === 'FAILED' ? '失败' : '已取消'}`)
+    }
+    retrainStatus.value.message = `回流再训练中：模型记录 #${recordId} · ${record.status || 'RUNNING'}`
+    if (Date.now() - startedAt > 30 * 60 * 1000) {
+      throw new Error('回流再训练超过 30 分钟未完成')
+    }
+    await new Promise(resolve => window.setTimeout(resolve, 5000))
   }
 }
 
@@ -757,22 +824,6 @@ const toPureResultRow = (item, index) => ({
   createdAt: new Date().toISOString()
 })
 
-const runVlmJudge = async () => {
-  judging.value = true
-  try {
-    await inferenceDataPointAPI.judge(props.project.id, currentRound.value.id)
-    ElMessage.success('判定完成')
-    await Promise.all([loadDataPoints(), loadStats()])
-  } finally {
-    judging.value = false
-  }
-}
-
-const reviewPoint = async (row, reviewed) => {
-  await inferenceDataPointAPI.review(row.id, reviewed)
-  ElMessage.success('审核状态已更新')
-}
-
 const poolText = (poolType) => {
   const map = {
     HIGH: '高置信',
@@ -849,7 +900,7 @@ onMounted(refreshAll)
   display: block;
   font-size: 24px;
   font-weight: 700;
-  color: var(--primary-color);
+  color: var(--brand-600);
 }
 
 .stat-label {
@@ -940,28 +991,6 @@ onMounted(refreshAll)
   display: flex;
   justify-content: flex-end;
   margin-top: 12px;
-}
-
-.embedded-review {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.embedded-review-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.card-title {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.review-hint {
-  color: var(--gray-500);
-  font-size: 12px;
 }
 
 @media (max-width: 768px) {

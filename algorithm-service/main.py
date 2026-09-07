@@ -7,6 +7,7 @@ import sys
 
 from config import settings, BASE_DIR, LOG_DIR
 from routers import dino, vlm, yolo, health, train, test, auto_annotation, single_class_detection, feasibility, training, edge_inference, reinference
+from routers import requirement, dataset_profile, model_registry, model_route, auto_label, fusion, label_studio_format, training_orchestration, adapters, annotated_video, video_sampling
 
 
 @asynccontextmanager
@@ -62,6 +63,17 @@ app.include_router(feasibility.router, prefix=settings.API_PREFIX, tags=["Feasib
 app.include_router(edge_inference.router, prefix=settings.API_PREFIX, tags=["EdgeInference"])
 app.include_router(reinference.router, prefix=settings.API_PREFIX, tags=["ReInference"])
 app.include_router(training.router, tags=["CustomTraining"])
+app.include_router(requirement.router, tags=["InternalRequirement"])
+app.include_router(dataset_profile.router, tags=["InternalDatasetProfile"])
+app.include_router(model_registry.router, tags=["InternalModelRegistry"])
+app.include_router(model_route.router, tags=["InternalModelRoute"])
+app.include_router(auto_label.router, tags=["InternalAutoLabel"])
+app.include_router(fusion.router, tags=["InternalFusion"])
+app.include_router(label_studio_format.router, tags=["InternalLabelStudioFormat"])
+app.include_router(training_orchestration.router, tags=["InternalTrainingOrchestration"])
+app.include_router(adapters.router, tags=["InternalAdapters"])
+app.include_router(annotated_video.router, tags=["InternalAnnotatedVideo"])
+app.include_router(video_sampling.router, tags=["InternalVideoSampling"])
 
 
 @app.exception_handler(Exception)
